@@ -1,0 +1,104 @@
+@startuml
+' CoderzClub - Backend Class Diagram
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+hide methods
+
+package "com.coderzclub" {
+  class CoderzClubApplication
+}
+
+package "com.coderzclub.config" {
+  class CorsConfig
+  class DataSeeder
+  class JwtFilter
+  class JwtUtil
+  class ProblemDataInitializer
+  class RequestLoggingFilter
+  class SecurityConfig
+}
+
+package "com.coderzclub.controller" {
+  class AdminController
+  class AuthController
+  class ProblemBundleController
+  class ProblemController
+  class SubmissionController
+  class UserController
+}
+
+package "com.coderzclub.dto" {
+  class JwtResponse
+  class LoginRequest
+  class RegisterRequest
+}
+
+package "com.coderzclub.model" {
+  class Parameter
+  class Problem
+  class ProblemBundle
+  class Submission
+  class Subscription
+  class TestCase
+  class User
+}
+
+package "com.coderzclub.repository" {
+  class ProblemBundleRepository
+  class ProblemRepository
+  class SubmissionRepository
+  class UserRepository
+}
+
+package "com.coderzclub.service" {
+  class ProblemBundleService
+  class UserService
+}
+
+' High-level dependencies among layers
+' Controllers depend on Services/Repositories
+AuthController --> UserService
+ProblemController --> ProblemRepository
+ProblemBundleController --> ProblemBundleService
+SubmissionController --> SubmissionRepository
+SubmissionController --> UserRepository
+SubmissionController --> ProblemRepository
+UserController --> UserService
+AdminController --> UserService
+AdminController --> ProblemBundleService
+
+' Services depend on Repositories
+UserService --> UserRepository
+UserService --> SubmissionRepository
+ProblemBundleService --> ProblemBundleRepository
+ProblemBundleService --> ProblemRepository
+
+' Config relations
+SecurityConfig --> JwtFilter
+JwtFilter --> JwtUtil
+DataSeeder --> UserRepository
+DataSeeder --> ProblemRepository
+DataSeeder --> ProblemBundleRepository
+DataSeeder --> SubmissionRepository
+ProblemDataInitializer --> ProblemRepository
+RequestLoggingFilter ..> SecurityConfig : registered in
+CorsConfig ..> SecurityConfig : registered in
+
+' DTO usage
+AuthController ..> LoginRequest
+AuthController ..> RegisterRequest
+AuthController ..> JwtResponse
+
+' Domain model relations
+ProblemBundle "1" o-- "*" Problem
+Problem "1" o-- "*" TestCase
+Problem "1" o-- "*" Parameter
+User "1" o-- "*" Submission
+Submission "*" --> "1" Problem
+User "1" o-- "1" Subscription
+
+' Application bootstraps the Spring context
+CoderzClubApplication ..> SecurityConfig
+CoderzClubApplication ..> DataSeeder
+
+@enduml 

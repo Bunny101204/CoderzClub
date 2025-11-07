@@ -1,8 +1,48 @@
-import React from "react";
+import React, { useRef } from "react";
 import { EditorContextAPI } from "./EditorContextAPI";
 import { useContext } from "react";
+
 function UtilBar() {
-  let c=useContext(EditorContextAPI)
+  let c = useContext(EditorContextAPI);
+  const fileInputRef = useRef();
+
+  // Supported extensions and their language IDs
+  const extensionToLangId = {
+    c: 50,
+    cpp: 54,
+    java: 62,
+    py: 71,
+    js: 63,
+    ts: 74,
+    go: 60,
+    php: 68,
+    rb: 72,
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current.click();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const langId = extensionToLangId[ext];
+    if (!langId) {
+      alert("Unsupported file type. Please select a supported code file.");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      // console.log(event)
+      c.setSourceCode(event.target.result);
+      c.setLanguageId(langId);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   return (
     <div className="mb-3">
       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -24,11 +64,18 @@ function UtilBar() {
           <option value={68}>PHP</option>
           <option value={72}>Ruby</option>
         </select>
-        <button className="bg-green-500 rounded-lg"> Import</button>
+        <button className="bg-green-500 rounded-lg" onClick={handleImportClick}> Import</button>
         <button className="bg-green-500 rounded-lg" onClick={()=>c.downloadCode(c.sourceCode,c.languageId)}>
           Download
         </button>
-
+        {/* Hidden file input for import */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: "none" }}
+          accept=".c,.cpp,.java,.py,.js,.ts,.go,.php,.rb"
+          onChange={handleFileChange}
+        />
       </div>
     </div>
   );
