@@ -1,38 +1,95 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 
-const AdminDashboard = ({ problems }) => {
+const AdminDashboard = ({ problems: propsProblems }) => {
   const [currentPage, setCurrentPage] = useState(1);
-  const [problemList, setProblemList] = useState(problems);
+  const [problemList, setProblemList] = useState([]);
   const [bundles, setBundles] = useState([]);
   const [activeTab, setActiveTab] = useState("problems");
   const [bundlePage, setBundlePage] = useState(1);
+  const [loading, setLoading] = useState(true);
   const problemsPerPage = 10;
   const bundlesPerPage = 10;
-  const totalPages = Math.ceil(problemList.length / problemsPerPage);
-  const totalBundlePages = Math.ceil(bundles.length / bundlesPerPage);
-  const paginatedProblems = problemList.slice(
+  
+  // Ensure problemList and bundles are always arrays
+  const safeProblemList = Array.isArray(problemList) ? problemList : [];
+  const safeBundles = Array.isArray(bundles) ? bundles : [];
+  
+  const totalPages = Math.ceil(safeProblemList.length / problemsPerPage);
+  const totalBundlePages = Math.ceil(safeBundles.length / bundlesPerPage);
+  const paginatedProblems = safeProblemList.slice(
     (currentPage - 1) * problemsPerPage,
     currentPage * problemsPerPage
   );
-  const paginatedBundles = bundles.slice(
+  const paginatedBundles = safeBundles.slice(
     (bundlePage - 1) * bundlesPerPage,
     bundlePage * bundlesPerPage
   );
 
   useEffect(() => {
+    fetchProblems();
     fetchBundles();
+    
+    // Refresh data periodically (every 30 seconds)
+    const interval = setInterval(() => {
+      fetchProblems();
+      fetchBundles();
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    // Update problem list when props change - ensure it's an array
+    if (propsProblems && Array.isArray(propsProblems)) {
+      if (propsProblems.length > 0) {
+        setProblemList(propsProblems);
+        setLoading(false);
+      }
+    }
+  }, [propsProblems]);
+
+  const fetchProblems = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch("/api/problems");
+      if (response.ok) {
+        const data = await response.json();
+        // Handle both paginated and non-paginated responses
+        let problemsArray = [];
+        if (Array.isArray(data)) {
+          problemsArray = data;
+        } else if (data.problems && Array.isArray(data.problems)) {
+          problemsArray = data.problems;
+        }
+        setProblemList(problemsArray);
+      } else {
+        console.error("Failed to fetch problems:", response.status);
+        setProblemList([]);
+      }
+    } catch (error) {
+      console.error("Error fetching problems:", error);
+      setProblemList([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("http://localhost:8080/api/bundles");
+      const response = await fetch("/api/bundles");
       if (response.ok) {
         const data = await response.json();
-        setBundles(data);
+        // Ensure data is an array
+        const bundlesArray = Array.isArray(data) ? data : [];
+        setBundles(bundlesArray);
+      } else {
+        console.error("Failed to fetch bundles:", response.status);
+        setBundles([]);
       }
     } catch (error) {
       console.error("Error fetching bundles:", error);
+      setBundles([]);
     }
   };
 
@@ -42,9 +99,51 @@ const AdminDashboard = ({ problems }) => {
     try {
       const res = await fetch(`/api/problems/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete problem");
-      setProblemList(problemList.filter((p) => p.id !== id));
+      // Refresh the list after deletion
+      fetchProblems();
     } catch (err) {
       alert("Error deleting problem.");
+    }
+  };
+
+  // Toggle bundle status handler
+  const handleToggleBundleStatus = async (id, currentStatus) => {
+    try {
+      const token = localStorage.getItem('jwtToken');
+      const headers = {
+        "Content-Type": "application/json"
+      };
+      
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      // Fetch current bundle data
+      const bundleResponse = await fetch(`/api/bundles/${id}`);
+      if (!bundleResponse.ok) {
+        alert("Failed to fetch bundle data");
+        return;
+      }
+      
+      const bundle = await bundleResponse.json();
+      
+      // Toggle status
+      const updatedBundle = {
+        ...bundle,
+        isActive: !currentStatus
+      };
+
+      const res = await fetch(`/api/bundles/${id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(updatedBundle)
+      });
+      
+      if (!res.ok) throw new Error("Failed to update bundle status");
+      // Refresh the list after update
+      fetchBundles();
+    } catch (err) {
+      alert("Error updating bundle status.");
     }
   };
 
@@ -61,22 +160,33 @@ const AdminDashboard = ({ problems }) => {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const res = await fetch(`http://localhost:8080/api/bundles/${id}`, { 
+      const res = await fetch(`/api/bundles/${id}`, { 
         method: "DELETE",
         headers
       });
       if (!res.ok) throw new Error("Failed to delete bundle");
-      setBundles(bundles.filter((b) => b.id !== id));
+      // Refresh the list after deletion
+      fetchBundles();
     } catch (err) {
       alert("Error deleting bundle.");
     }
   };
 
+  console.log("[AdminDashboard] Rendering with:", { loading, problemList: safeProblemList.length, bundles: safeBundles.length });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-xl">Loading admin dashboard...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">🛠️ Admin Dashboard</h1>
+          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
           <div className="flex gap-4">
             {activeTab === "problems" && (
               <Link
@@ -107,7 +217,7 @@ const AdminDashboard = ({ problems }) => {
                 : "text-gray-400 hover:text-white"
             }`}
           >
-            Problems ({problemList.length})
+            Problems ({safeProblemList.length})
           </button>
           <button
             onClick={() => setActiveTab("bundles")}
@@ -117,7 +227,7 @@ const AdminDashboard = ({ problems }) => {
                 : "text-gray-400 hover:text-white"
             }`}
           >
-            Bundles ({bundles.length})
+            Bundles ({safeBundles.length})
           </button>
         </div>
 
@@ -240,11 +350,17 @@ const AdminDashboard = ({ problems }) => {
                           )}
                         </td>
                         <td className="py-2 px-3">
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            bundle.isActive ? 'bg-green-500' : 'bg-red-500'
-                          }`}>
-                            {bundle.isActive ? 'Active' : 'Inactive'}
-                          </span>
+                          <button
+                            onClick={() => handleToggleBundleStatus(bundle.id, bundle.isActive !== false)}
+                            className={`px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                              bundle.isActive !== false 
+                                ? 'bg-green-500 hover:bg-green-600 text-white' 
+                                : 'bg-red-500 hover:bg-red-600 text-white'
+                            }`}
+                            title={bundle.isActive !== false ? 'Click to deactivate' : 'Click to activate'}
+                          >
+                            {bundle.isActive !== false ? 'Active' : 'Inactive'}
+                          </button>
                         </td>
                         <td className="py-2 px-3">
                           <Link
@@ -252,6 +368,12 @@ const AdminDashboard = ({ problems }) => {
                             className="text-blue-400 hover:underline mr-4"
                           >
                             Edit
+                          </Link>
+                          <Link
+                            to={`/admin/manage-bundle/${bundle.id}`}
+                            className="text-purple-400 hover:underline mr-4"
+                          >
+                            Manage
                           </Link>
                           <button
                             className="text-red-400 hover:underline"

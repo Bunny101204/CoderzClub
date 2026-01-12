@@ -28,6 +28,7 @@ import SubscriptionPlans from "./Components/SubscriptionPlans";
 import Leaderboard from "./Components/Leaderboard";
 import UserStats from "./Components/UserStats";
 import Profile from "./Components/Profile";
+import LandingPage from "./Components/LandingPage";
 
 function AdminPage({ problems, setProblems, onLogout }) {
   return (
@@ -37,6 +38,32 @@ function AdminPage({ problems, setProblems, onLogout }) {
       <button onClick={onLogout}>Logout</button>
     </div>
   );
+}
+
+// Admin Route Wrapper Component
+function AdminRoute({ user, problems }) {
+  const isAdmin = user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin");
+  
+  console.log("[AdminRoute] Checking access:", { 
+    user: user?.username, 
+    role: user?.role, 
+    isAdmin 
+  });
+  
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Access Denied</h2>
+          <p className="text-gray-400 mb-4">You need admin privileges to access this page.</p>
+          <p className="text-sm text-gray-500 mb-4">Your role: {user?.role || "Not set"}</p>
+          <Navigate to="/home" replace />
+        </div>
+      </div>
+    );
+  }
+  
+  return <AdminDashboard problems={problems} />;
 }
 
 function AppContent() {
@@ -77,10 +104,6 @@ function AppContent() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <AuthPage />;
-  }
-
   if (problemsLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -101,17 +124,44 @@ function AppContent() {
       {isAuthenticated && <Header />}
       <Routes>
         <Route
-          path="/home"
-          element={<HomePage problems={problems} />}
+          path="/about"
+          element={<LandingPage />}
         />
         <Route
-          path="/"
-          element={<Navigate to="/home" replace />}
+          path="/landing"
+          element={<LandingPage />}
         />
-        <Route
-          path="/auth"
-          element={<Navigate to="/home" replace />}
-        />
+        {!isAuthenticated ? (
+          <>
+            <Route
+              path="/"
+              element={<LandingPage />}
+            />
+            <Route
+              path="/home"
+              element={<Navigate to="/" replace />}
+            />
+            <Route
+              path="/auth"
+              element={<AuthPage />}
+            />
+          </>
+        ) : (
+          <>
+            <Route
+              path="/home"
+              element={<HomePage problems={problems} />}
+            />
+            <Route
+              path="/"
+              element={<Navigate to="/home" replace />}
+            />
+            <Route
+              path="/auth"
+              element={<Navigate to="/home" replace />}
+            />
+          </>
+        )}
         <Route
           path="/editor"
           element={<Judge0CodeEditor />}
@@ -150,30 +200,60 @@ function AppContent() {
         />
         <Route
           path="/admin"
-          element={user?.role === "ADMIN" ? <AdminDashboard problems={problems} /> : <Navigate to="/home" replace />}
+          element={<AdminRoute user={user} problems={problems} />}
         />
         <Route
           path="/admin/add-problem"
-          element={user?.role === "ADMIN" ? <AddProblemNew /> : <Navigate to="/home" replace />}
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <AddProblemNew />
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/add-problem-old"
-          element={user?.role === "ADMIN" ? <AddProblem /> : <Navigate to="/home" replace />}
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <AddProblem />
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/add-bundle"
-          element={user?.role === "ADMIN" ? <AddBundle /> : <Navigate to="/home" replace />}
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <AddBundle />
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/edit-bundle/:id"
-          element={user?.role === "ADMIN" ? <AddBundle /> : <Navigate to="/home" replace />}
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <AddBundle />
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/manage-bundle/:id"
-          element={user?.role === "ADMIN" ? <ManageBundleProblems /> : <Navigate to="/home" replace />}
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <ManageBundleProblems />
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         {/* Catch-all for unknown routes */}
-        <Route path="*" element={<Navigate to="/home" replace />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? "/home" : "/"} replace />} />
       </Routes>
     </div>
   );

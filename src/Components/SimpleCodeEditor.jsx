@@ -300,7 +300,7 @@ const SimpleCodeEditor = ({
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
             title="Download Code"
           >
-            ⬇️ Download
+            Download
           </button>
         </div>
 
@@ -310,7 +310,7 @@ const SimpleCodeEditor = ({
             disabled={isLoading || testCases.length === 0}
             className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 rounded-lg font-semibold transition-colors"
           >
-            {isLoading ? "⏳ Running..." : "▶️ Run"}
+            {isLoading ? "Running..." : "Run"}
           </button>
           
           <button
@@ -318,7 +318,7 @@ const SimpleCodeEditor = ({
             disabled={isLoading}
             className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded-lg font-semibold transition-colors"
           >
-            {isLoading ? "⏳ Submitting..." : "🚀 Submit"}
+            {isLoading ? "Submitting..." : "Submit"}
           </button>
         </div>
       </div>

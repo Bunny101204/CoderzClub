@@ -18,15 +18,27 @@ const BundleProblems = () => {
 
   const fetchBundleData = async () => {
     try {
-      const response = await fetch(`http://localhost:8080/api/bundles/${id}`);
+      console.log("[BundleProblems] Fetching bundle data for ID:", id);
+      const response = await fetch(`/api/bundles/${id}`);
       if (response.ok) {
         const data = await response.json();
+        console.log("[BundleProblems] Bundle data received:", data);
         setBundle(data);
         
         // Fetch all problems in the bundle
-        if (data.problemIds && data.problemIds.length > 0) {
+        // Check if problemIds exists and is a non-empty array
+        if (data.problemIds && Array.isArray(data.problemIds) && data.problemIds.length > 0) {
+          console.log("[BundleProblems] Bundle has", data.problemIds.length, "problem IDs");
           await fetchBundleProblems(data.problemIds);
+        } else {
+          console.warn("[BundleProblems] Bundle has no problemIds or empty array");
+          console.log("[BundleProblems] problemIds value:", data.problemIds);
+          setProblems([]);
         }
+      } else {
+        console.error("Failed to fetch bundle:", response.status);
+        const errorText = await response.text();
+        console.error("Error response:", errorText);
       }
     } catch (error) {
       console.error("Error fetching bundle:", error);
@@ -37,22 +49,92 @@ const BundleProblems = () => {
 
   const fetchBundleProblems = async (problemIds) => {
     try {
-      const response = await fetch("http://localhost:8080/api/problems");
+      console.log("[BundleProblems] Fetching problems for bundle, problemIds:", problemIds);
+      
+      // Ensure problemIds is an array
+      const idsArray = Array.isArray(problemIds) ? problemIds : [];
+      if (idsArray.length === 0) {
+        console.warn("[BundleProblems] No problem IDs provided");
+        setProblems([]);
+        return;
+      }
+      
+      const response = await fetch("/api/problems");
       if (response.ok) {
-        const allProblems = await response.json();
+        const data = await response.json();
+        console.log("[BundleProblems] Fetched problems data:", data);
+        
+        // Handle both paginated and non-paginated responses
+        let allProblems = [];
+        if (Array.isArray(data)) {
+          allProblems = data;
+        } else if (data.problems && Array.isArray(data.problems)) {
+          allProblems = data.problems;
+        } else {
+          console.warn("[BundleProblems] Unexpected API response format:", data);
+          allProblems = [];
+        }
+        
+        console.log("[BundleProblems] All problems count:", allProblems.length);
+        
         // Filter and order problems based on bundle's problemIds order
-        const orderedProblems = problemIds
-          .map(id => allProblems.find(p => p.id === id))
+        // Convert IDs to strings for comparison to handle type mismatches
+        let orderedProblems = idsArray
+          .map(id => {
+            const problem = allProblems.find(p => 
+              String(p.id) === String(id) || p.id === id
+            );
+            if (!problem) {
+              console.warn(`[BundleProblems] Problem with ID ${id} not found in bulk fetch`);
+            }
+            return problem;
+          })
           .filter(Boolean);
+        
+        // If some problems are missing, try fetching them individually
+        const missingIds = idsArray.filter(id => 
+          !orderedProblems.some(p => String(p.id) === String(id) || p.id === id)
+        );
+        
+        if (missingIds.length > 0) {
+          console.log(`[BundleProblems] Fetching ${missingIds.length} missing problems individually`);
+          const individualProblems = await Promise.all(
+            missingIds.map(async (problemId) => {
+              try {
+                const response = await fetch(`/api/problems/${problemId}`);
+                if (response.ok) {
+                  return await response.json();
+                }
+              } catch (err) {
+                console.error(`[BundleProblems] Failed to fetch problem ${problemId}:`, err);
+              }
+              return null;
+            })
+          );
+          
+          const foundProblems = individualProblems.filter(Boolean);
+          orderedProblems = [...orderedProblems, ...foundProblems];
+          
+          // Re-order to match original problemIds order
+          orderedProblems = idsArray
+            .map(id => orderedProblems.find(p => String(p.id) === String(id) || p.id === id))
+            .filter(Boolean);
+        }
+        
+        console.log("[BundleProblems] Final ordered problems count:", orderedProblems.length);
         setProblems(orderedProblems);
         
         // Fetch user progress if authenticated
         if (user) {
-          await fetchUserProgress(problemIds);
+          await fetchUserProgress(idsArray);
         }
+      } else {
+        console.error("Failed to fetch problems:", response.status);
+        setProblems([]);
       }
     } catch (error) {
       console.error("Error fetching problems:", error);
+      setProblems([]);
     }
   };
 
@@ -64,20 +146,29 @@ const BundleProblems = () => {
       // Fetch submissions for each problem
       const progress = {};
       for (const problemId of problemIds) {
-        const response = await fetch(`http://localhost:8080/api/submissions/problem/${problemId}`, {
-          headers: {
-            "Authorization": `Bearer ${token}`
+        try {
+          const response = await fetch(`/api/submissions/problem/${problemId}`, {
+            headers: {
+              "Authorization": `Bearer ${token}`
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            // Handle both paginated and non-paginated responses
+            const submissions = Array.isArray(data) ? data : (data.submissions || []);
+            const hasAccepted = submissions.some(s => 
+              s.result === "ACCEPTED" || s.status === "ACCEPTED" || s.verdict === "ACCEPTED"
+            );
+            progress[problemId] = {
+              attempted: submissions.length > 0,
+              solved: hasAccepted,
+              submissions: submissions.length
+            };
           }
-        });
-        
-        if (response.ok) {
-          const submissions = await response.json();
-          const hasAccepted = submissions.some(s => s.status === "ACCEPTED");
-          progress[problemId] = {
-            attempted: submissions.length > 0,
-            solved: hasAccepted,
-            submissions: submissions.length
-          };
+        } catch (err) {
+          console.error(`Error fetching progress for problem ${problemId}:`, err);
+          // Continue with other problems even if one fails
         }
       }
       setUserProgress(progress);
@@ -212,13 +303,26 @@ const BundleProblems = () => {
 
       {/* Problems List */}
       <div className="max-w-6xl mx-auto px-8 py-12">
-        <h2 className="text-2xl font-bold mb-6">Problems</h2>
+        <h2 className="text-2xl font-bold mb-6">
+          Problems {problems.length > 0 && `(${problems.length})`}
+        </h2>
         
         {problems.length === 0 ? (
           <div className="text-center py-12">
-            <div className="text-6xl mb-4">📝</div>
             <h3 className="text-xl font-semibold mb-2">No problems in this bundle yet</h3>
-            <p className="text-gray-400">Check back later for new content</p>
+            <p className="text-gray-400 mb-4">
+              {bundle?.problemIds?.length > 0 
+                ? `Bundle has ${bundle.problemIds.length} problem ID(s) but problems couldn't be loaded. Check console for details.`
+                : "This bundle doesn't have any problems assigned yet."}
+            </p>
+            {user?.role === 'ADMIN' && (
+              <Link
+                to={`/admin/manage-bundle/${id}`}
+                className="text-blue-400 hover:text-blue-300 underline"
+              >
+                Add problems to this bundle
+              </Link>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
@@ -315,6 +419,8 @@ const BundleProblems = () => {
 };
 
 export default BundleProblems;
+
+
 
 
 

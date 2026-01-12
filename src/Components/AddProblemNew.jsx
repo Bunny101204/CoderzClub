@@ -50,7 +50,7 @@ const AddProblemNew = () => {
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("http://localhost:8080/api/bundles");
+      const response = await fetch("/api/bundles");
       if (response.ok) {
         const data = await response.json();
         setBundles(data);
@@ -199,7 +199,7 @@ const AddProblemNew = () => {
         estimatedTime,
       };
 
-      const response = await fetch("http://localhost:8080/api/problems", {
+      const response = await fetch("/api/problems", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -209,7 +209,39 @@ const AddProblemNew = () => {
       });
 
       if (response.ok) {
+        const createdProblem = await response.json();
         setSuccess("Problem created successfully!");
+        
+        // If problem was added to a bundle, update the bundle's problemIds
+        if (problemType === "bundle" && selectedBundle && createdProblem.id) {
+          try {
+            const bundleResponse = await fetch(`/api/bundles/${selectedBundle}`);
+            if (bundleResponse.ok) {
+              const bundle = await bundleResponse.json();
+              const updatedProblemIds = [...(bundle.problemIds || []), createdProblem.id];
+              
+              const updateBundleResponse = await fetch(`/api/bundles/${selectedBundle}`, {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  ...bundle,
+                  problemIds: updatedProblemIds,
+                  totalProblems: updatedProblemIds.length
+                })
+              });
+              
+              if (!updateBundleResponse.ok) {
+                console.warn("Failed to update bundle with new problem ID");
+              }
+            }
+          } catch (err) {
+            console.error("Error updating bundle:", err);
+          }
+        }
+        
         setTimeout(() => {
           navigate("/admin");
         }, 1500);

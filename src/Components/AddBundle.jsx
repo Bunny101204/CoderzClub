@@ -34,7 +34,7 @@ const AddBundle = () => {
 
   const fetchBundle = async () => {
     try {
-      const response = await fetch(`http://localhost:8080/api/bundles/${bundleId}`);
+      const response = await fetch(`/api/bundles/${bundleId}`);
       if (response.ok) {
         const bundle = await response.json();
         setFormData({
@@ -94,7 +94,7 @@ const AddBundle = () => {
         problemIds: []
       };
 
-      const url = bundleId ? `http://localhost:8080/api/bundles/${bundleId}` : "http://localhost:8080/api/bundles";
+      const url = bundleId ? `/api/bundles/${bundleId}` : "/api/bundles";
       const method = bundleId ? "PUT" : "POST";
 
       // Get JWT token for authentication

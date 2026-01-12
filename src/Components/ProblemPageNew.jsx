@@ -23,7 +23,7 @@ const ProblemPageNew = ({ problems }) => {
 
   const fetchProblem = async () => {
     try {
-      const response = await fetch(`http://localhost:8080/api/problems/${id}`);
+      const response = await fetch(`/api/problems/${id}`);
       if (response.ok) {
         const data = await response.json();
         setProblem(data);
@@ -268,20 +268,23 @@ const ProblemPageNew = ({ problems }) => {
 
         {/* Right Panel - Code Editor */}
         <div 
-          className="bg-gray-900 overflow-hidden"
+          className="bg-gray-900 overflow-auto"
           style={{ width: `${100 - leftWidth}%` }}
         >
-          <Judge0CodeEditor
+          <div className="p-4">
+            <Judge0CodeEditor
             initialCode={problem.template || ""}
-            testCases={problem.testCases || []}
+            testCases={isStdinMode ? (problem.publicTestCases || []) : (problem.testCases || [])}
             hiddenTestCases={problem.hiddenTestCases || []}
             functionName={problem.functionName}
             parameters={problem.parameters || []}
             problemId={problem.id}
+            executionMode={problem.executionMode || "STDIN_STDOUT"}
             onSubmissionSuccess={() => {
               console.log("Problem solved!");
             }}
           />
+          </div>
         </div>
       </div>
     </div>

@@ -17,25 +17,38 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     if (!asPage && !isOpen) return;
     const token = localStorage.getItem('jwtToken') || localStorage.getItem('token');
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+    
     const fetchAll = async () => {
       try {
         setLoadingStats(true);
         setStatsError(null);
         const [statsRes, subsRes, probsRes] = await Promise.all([
-          axios.get('/api/users/stats', { headers }),
-          axios.get('/api/submissions/my-submissions', { headers }),
-          axios.get('/api/problems')
+          axios.get('/api/users/stats', { headers }).catch(() => ({ data: null })),
+          axios.get('/api/submissions/my-submissions', { headers }).catch(() => ({ data: [] })),
+          axios.get('/api/problems').catch(() => ({ data: [] }))
         ]);
         setStats(statsRes.data);
-        setSubmissions(subsRes.data || []);
-        setProblems(probsRes.data || []);
+        setSubmissions(Array.isArray(subsRes.data) ? subsRes.data : []);
+        setProblems(Array.isArray(probsRes.data) ? probsRes.data : []);
       } catch (e) {
+        console.error('Error fetching profile data:', e);
         setStatsError('Failed to load stats');
+        setStats(null);
+        setSubmissions([]);
+        setProblems([]);
       } finally {
         setLoadingStats(false);
       }
     };
+    
     fetchAll();
+    
+    // Refresh data every 30 seconds for dynamic updates
+    const interval = setInterval(() => {
+      fetchAll();
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, [isOpen, asPage]);
 
   const handleLogout = async () => {
@@ -57,8 +70,10 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
 
   const difficultyCounts = useMemo(() => {
     const counts = { BASIC: 0, INTERMEDIATE: 0, ADVANCED: 0, SDE: 0, EXPERT: 0, UNKNOWN: 0 };
-    const accepted = (submissions || []).filter((s) => s.result === 'ACCEPTED');
+    if (!submissions || !Array.isArray(submissions)) return counts;
+    const accepted = submissions.filter((s) => s && (s.result === 'ACCEPTED' || s.status === 'ACCEPTED' || s.verdict === 'ACCEPTED'));
     accepted.forEach((s) => {
+      if (!s || !s.problemId) return;
       const p = problemMap.get(String(s.problemId));
       const diff = (p?.difficulty || 'UNKNOWN');
       counts[diff] = (counts[diff] || 0) + 1;
@@ -68,10 +83,17 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
 
   const activityByDay = useMemo(() => {
     const counts = new Map();
-    (submissions || []).forEach((s) => {
-      const d = new Date(s.createdAt);
-      const key = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0, 10);
-      counts.set(key, (counts.get(key) || 0) + 1);
+    if (!submissions || !Array.isArray(submissions)) return counts;
+    submissions.forEach((s) => {
+      if (!s || !s.createdAt) return;
+      try {
+        const d = new Date(s.createdAt);
+        if (isNaN(d.getTime())) return;
+        const key = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0, 10);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      } catch (e) {
+        console.warn('Invalid date in submission:', s.createdAt);
+      }
     });
     return counts;
   }, [submissions]);
@@ -123,17 +145,12 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                 </div>
                 <div>
                   <h3 className="text-white font-semibold">{user?.username}</h3>
-                  <p className="text-gray-300 text-sm capitalize">{user?.role}</p>
                 </div>
               </div>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between py-2 border-b border-gray-700">
                   <span className="text-gray-300">Username</span>
                   <span className="text-white font-medium">{user?.username}</span>
-                </div>
-                <div className="flex justify-between py-2 border-b border-gray-700">
-                  <span className="text-gray-300">Role</span>
-                  <span className="text-white font-medium capitalize">{user?.role}</span>
                 </div>
               </div>
               <div className="pt-4">
@@ -214,19 +231,33 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                 <h3 className="text-white font-semibold">Active Days (Last 6 months)</h3>
                 <div className="text-sm text-gray-400">A day is active if it has ≥1 submission</div>
               </div>
-              <div className="grid grid-cols-30 gap-1" style={{ gridTemplateColumns: 'repeat(30, minmax(0, 1fr))' }}>
-                {lastDays.map((d, idx) => (
-                  <div key={idx} className={`w-4 h-4 ${heatColor(d.count)} rounded`}
-                    title={`${d.key}: ${d.count} submission(s)`} />
-                ))}
+              <div className="relative">
+                {/* Month labels */}
+                <div className="flex mb-2 text-xs text-gray-400">
+                  {lastDays.monthLabels.map((ml, idx) => (
+                    <div key={idx} className="absolute" style={{ left: `${(ml.index / 180) * 100}%` }}>
+                      {ml.label}
+                    </div>
+                  ))}
+                </div>
+                {/* Days grid */}
+                <div className="grid grid-cols-30 gap-1" style={{ gridTemplateColumns: 'repeat(30, minmax(0, 1fr))' }}>
+                  {lastDays.days.map((d, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`w-4 h-4 ${heatColor(d.count)} rounded border border-gray-700`}
+                      title={`${d.key}: ${d.count} submission(s)`} 
+                    />
+                  ))}
+                </div>
               </div>
               <div className="flex items-center gap-2 mt-3 text-xs text-gray-400">
                 <span>Less</span>
-                <span className="w-4 h-4 bg-gray-800 rounded inline-block"></span>
-                <span className="w-4 h-4 bg-green-900 rounded inline-block"></span>
-                <span className="w-4 h-4 bg-green-700 rounded inline-block"></span>
-                <span className="w-4 h-4 bg-green-500 rounded inline-block"></span>
-                <span className="w-4 h-4 bg-green-300 rounded inline-block"></span>
+                <span className="w-4 h-4 bg-gray-800 rounded border border-gray-700 inline-block"></span>
+                <span className="w-4 h-4 bg-green-900 rounded border border-gray-700 inline-block"></span>
+                <span className="w-4 h-4 bg-green-700 rounded border border-gray-700 inline-block"></span>
+                <span className="w-4 h-4 bg-green-500 rounded border border-gray-700 inline-block"></span>
+                <span className="w-4 h-4 bg-green-300 rounded border border-gray-700 inline-block"></span>
                 <span>More</span>
               </div>
             </div>

@@ -19,21 +19,25 @@ const ManageBundleProblems = () => {
 
   const fetchBundleData = async () => {
     try {
-      const response = await fetch(`http://localhost:8080/api/bundles/${id}`);
+      const response = await fetch(`/api/bundles/${id}`);
       if (response.ok) {
         const data = await response.json();
         setBundle(data);
         
         // Fetch full problem details for problems in bundle
-        if (data.problemIds && data.problemIds.length > 0) {
+        if (data.problemIds && Array.isArray(data.problemIds) && data.problemIds.length > 0) {
           await fetchBundleProblems(data.problemIds);
         } else {
           setBundleProblems([]);
         }
+      } else {
+        setError("Failed to load bundle data");
+        setBundleProblems([]);
       }
     } catch (error) {
       console.error("Error fetching bundle:", error);
       setError("Failed to load bundle data");
+      setBundleProblems([]);
     } finally {
       setLoading(false);
     }
@@ -41,26 +45,60 @@ const ManageBundleProblems = () => {
 
   const fetchBundleProblems = async (problemIds) => {
     try {
-      const response = await fetch("http://localhost:8080/api/problems");
+      const response = await fetch("/api/problems");
       if (response.ok) {
         const allProblems = await response.json();
-        const filtered = allProblems.filter(p => problemIds.includes(p.id));
+        const problemsArray = Array.isArray(allProblems) ? allProblems : [];
+        const filtered = problemsArray.filter(p => problemIds.includes(p.id));
         setBundleProblems(filtered);
+      } else {
+        setBundleProblems([]);
       }
     } catch (error) {
       console.error("Error fetching bundle problems:", error);
+      setBundleProblems([]);
     }
   };
 
   const fetchAllProblems = async () => {
     try {
-      const response = await fetch("http://localhost:8080/api/problems");
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableProblems(data);
+      // Fetch all problems with pagination support
+      let allProblems = [];
+      let page = 0;
+      const size = 100; // Fetch in batches
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await fetch(`/api/problems?page=${page}&size=${size}`);
+        if (response.ok) {
+          const data = await response.json();
+          let problemsArray = [];
+          
+          // Handle both paginated and non-paginated responses
+          if (data.problems && Array.isArray(data.problems)) {
+            problemsArray = data.problems;
+            hasMore = problemsArray.length === size && page < (data.totalPages || 0);
+          } else if (Array.isArray(data)) {
+            problemsArray = data;
+            hasMore = false; // Non-paginated, get all at once
+          }
+          
+          allProblems = [...allProblems, ...problemsArray];
+          
+          if (!hasMore || problemsArray.length < size) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } else {
+          hasMore = false;
+        }
       }
+      
+      setAvailableProblems(allProblems);
     } catch (error) {
       console.error("Error fetching problems:", error);
+      setAvailableProblems([]);
     }
   };
 
@@ -80,7 +118,7 @@ const ManageBundleProblems = () => {
       const token = localStorage.getItem('jwtToken');
       const updatedProblemIds = [...(bundle.problemIds || []), selectedProblem];
       
-      const response = await fetch(`http://localhost:8080/api/bundles/${id}`, {
+      const response = await fetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -116,7 +154,7 @@ const ManageBundleProblems = () => {
       const token = localStorage.getItem('jwtToken');
       const updatedProblemIds = bundle.problemIds.filter(id => id !== problemId);
       
-      const response = await fetch(`http://localhost:8080/api/bundles/${id}`, {
+      const response = await fetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -157,7 +195,7 @@ const ManageBundleProblems = () => {
 
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/bundles/${id}`, {
+      const response = await fetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -316,7 +354,6 @@ const ManageBundleProblems = () => {
           
           {bundleProblems.length === 0 ? (
             <div className="text-center py-12">
-              <div className="text-6xl mb-4">📝</div>
               <p className="text-gray-400 text-lg">No problems in this bundle yet</p>
               <p className="text-gray-500 text-sm mt-2">Add problems using the form above</p>
             </div>
@@ -390,6 +427,8 @@ const ManageBundleProblems = () => {
 };
 
 export default ManageBundleProblems;
+
+
 
 
 

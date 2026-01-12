@@ -64,9 +64,13 @@ function UtilBar() {
           <option value={68}>PHP</option>
           <option value={72}>Ruby</option>
         </select>
-        <button className="bg-green-500 rounded-lg" onClick={handleImportClick}> Import</button>
-        <button className="bg-green-500 rounded-lg" onClick={()=>c.downloadCode(c.sourceCode,c.languageId)}>
-          Download
+        <button className="bg-green-500 rounded-lg px-3 py-1" onClick={handleImportClick}> Import</button>
+        <button 
+          className="bg-blue-500 rounded-lg px-3 py-1 text-white" 
+          onClick={() => c.downloadCode && c.downloadCode(c.sourceCode, c.languageId)}
+          title="Save code as file"
+        >
+          Save
         </button>
         {/* Hidden file input for import */}
         <input

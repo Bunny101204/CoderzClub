@@ -24,22 +24,32 @@ const BundleDashboard = () => {
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("http://localhost:8080/api/bundles");
+      const response = await fetch("/api/bundles");
       if (response.ok) {
         const data = await response.json();
-        setBundles(data);
+        // Ensure data is an array
+        const bundlesArray = Array.isArray(data) ? data : [];
+        setBundles(bundlesArray);
+      } else {
+        console.error("Failed to fetch bundles:", response.status);
+        setBundles([]);
       }
     } catch (error) {
       console.error("Error fetching bundles:", error);
+      setBundles([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredBundles = bundles.filter(bundle => {
+  // Ensure bundles is always an array
+  const safeBundles = Array.isArray(bundles) ? bundles : [];
+  const filteredBundles = safeBundles.filter(bundle => {
     const difficultyMatch = selectedDifficulty === "ALL" || bundle.difficulty === selectedDifficulty;
     const categoryMatch = selectedCategory === "ALL" || bundle.category === selectedCategory;
-    return difficultyMatch && categoryMatch;
+    // For non-admin users, only show active bundles
+    const activeMatch = showAdminControls ? true : (bundle.isActive !== false);
+    return difficultyMatch && categoryMatch && activeMatch;
   });
 
   const getDifficultyColor = (difficulty) => {
@@ -53,15 +63,48 @@ const BundleDashboard = () => {
     return colors[difficulty] || "bg-gray-500";
   };
 
-  const getDifficultyIcon = (difficulty) => {
-    const icons = {
-      BASIC: "🌱",
-      INTERMEDIATE: "🚀",
-      ADVANCED: "⚡",
-      SDE: "🎯",
-      EXPERT: "👑"
-    };
-    return icons[difficulty] || "📚";
+
+  const handleToggleBundleStatus = async (bundleId, currentStatus) => {
+    try {
+      const token = localStorage.getItem('jwtToken');
+      const headers = {
+        "Content-Type": "application/json"
+      };
+      
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      // Fetch current bundle data
+      const bundleResponse = await fetch(`/api/bundles/${bundleId}`);
+      if (!bundleResponse.ok) {
+        alert("Failed to fetch bundle data");
+        return;
+      }
+      
+      const bundle = await bundleResponse.json();
+      
+      // Toggle status
+      const updatedBundle = {
+        ...bundle,
+        isActive: !currentStatus
+      };
+
+      const response = await fetch(`/api/bundles/${bundleId}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(updatedBundle)
+      });
+      
+      if (response.ok) {
+        setBundles(safeBundles.map(b => b.id === bundleId ? { ...b, isActive: !currentStatus } : b));
+      } else {
+        alert("Failed to update bundle status");
+      }
+    } catch (error) {
+      console.error("Error toggling bundle status:", error);
+      alert("Error updating bundle status");
+    }
   };
 
   const handleDeleteBundle = async (bundleId) => {
@@ -76,12 +119,12 @@ const BundleDashboard = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const response = await fetch(`http://localhost:8080/api/bundles/${bundleId}`, {
+      const response = await fetch(`/api/bundles/${bundleId}`, {
         method: "DELETE",
         headers
       });
       if (response.ok) {
-        setBundles(bundles.filter(bundle => bundle.id !== bundleId));
+        setBundles(safeBundles.filter(bundle => bundle.id !== bundleId));
       } else {
         alert("Failed to delete bundle");
       }
@@ -104,7 +147,7 @@ const BundleDashboard = () => {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4">🚀 Problem Bundles</h1>
+          <h1 className="text-4xl font-bold mb-4">Problem Bundles</h1>
           <p className="text-gray-400 text-lg">
             Master coding with our curated problem collections
           </p>
@@ -160,12 +203,15 @@ const BundleDashboard = () => {
           {filteredBundles.map((bundle) => (
             <div
               key={bundle.id}
-              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-700 transition-all duration-300 border border-gray-700 hover:border-blue-500"
+              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-700 transition-all duration-300 border border-gray-700 hover:border-blue-500 cursor-pointer"
+              onClick={() => {
+                // Both admin and user can click to view bundle problems
+                window.location.href = `/bundle/${bundle.id}`;
+              }}
             >
               {/* Bundle Header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-3">
-                  <span className="text-2xl">{getDifficultyIcon(bundle.difficulty)}</span>
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getDifficultyColor(bundle.difficulty)}`}>
                     {bundle.difficulty}
                   </span>
@@ -210,47 +256,30 @@ const BundleDashboard = () => {
               </div>
 
               {/* Bundle Actions */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center space-x-2">
-                  {bundle.isPremium && !user?.isPremium ? (
+                  {showAdminControls ? (
+                    <Link
+                      to={`/admin/manage-bundle/${bundle.id}`}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center w-10 h-10"
+                      title="Add Problems"
+                    >
+                      <span className="text-xl">+</span>
+                    </Link>
+                  ) : bundle.isPremium && !user?.isPremium ? (
                     <div className="flex items-center space-x-2">
                       <span className="text-yellow-400 font-semibold">${bundle.price}</span>
-                      <button className="px-4 py-2 bg-yellow-500 text-black rounded-lg font-semibold hover:bg-yellow-400 transition-colors">
+                      <button 
+                        className="px-4 py-2 bg-yellow-500 text-black rounded-lg font-semibold hover:bg-yellow-400 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Handle upgrade logic
+                        }}
+                      >
                         Upgrade
                       </button>
                     </div>
-                  ) : (
-                    <Link
-                      to={`/bundle/${bundle.id}`}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-                    >
-                      Start Bundle
-                    </Link>
-                  )}
-                  
-                  {showAdminControls && (
-                    <div className="flex space-x-2 ml-4">
-                      <Link
-                        to={`/admin/manage-bundle/${bundle.id}`}
-                        className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded transition-colors"
-                        title="Manage Problems"
-                      >
-                        Problems
-                      </Link>
-                      <Link
-                        to={`/admin/edit-bundle/${bundle.id}`}
-                        className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded transition-colors"
-                      >
-                        Edit
-                      </Link>
-                      <button
-                        onClick={() => handleDeleteBundle(bundle.id)}
-                        className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-sm rounded transition-colors"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
+                  ) : null}
                 </div>
                 
                 <div className="text-right">
@@ -258,6 +287,41 @@ const BundleDashboard = () => {
                   <div className="text-sm font-semibold">{bundle.category?.replace('_', ' ')}</div>
                 </div>
               </div>
+              
+              {/* Admin Actions Row */}
+              {showAdminControls && (
+                <div className="flex items-center justify-end space-x-2 mt-4 pt-4 border-t border-gray-700" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleBundleStatus(bundle.id, bundle.isActive !== false);
+                    }}
+                    className={`px-3 py-1 text-white text-sm rounded transition-colors ${
+                      bundle.isActive !== false 
+                        ? 'bg-green-600 hover:bg-green-500' 
+                        : 'bg-gray-600 hover:bg-gray-500'
+                    }`}
+                    title={bundle.isActive !== false ? 'Deactivate Bundle' : 'Activate Bundle'}
+                  >
+                    {bundle.isActive !== false ? 'Active' : 'Inactive'}
+                  </button>
+                  <Link
+                    to={`/admin/edit-bundle/${bundle.id}`}
+                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded transition-colors"
+                  >
+                    Edit
+                  </Link>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteBundle(bundle.id);
+                    }}
+                    className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-sm rounded transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -265,7 +329,6 @@ const BundleDashboard = () => {
         {/* Empty State */}
         {filteredBundles.length === 0 && (
           <div className="text-center py-12">
-            <div className="text-6xl mb-4">📚</div>
             <h3 className="text-xl font-semibold mb-2">No bundles found</h3>
             <p className="text-gray-400">Try adjusting your filters or check back later for new content.</p>
           </div>

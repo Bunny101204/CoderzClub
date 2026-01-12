@@ -18,7 +18,7 @@ const UserStats = () => {
 
   const fetchUserStats = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem('jwtToken');
       const response = await axios.get('/api/users/stats', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -27,18 +27,23 @@ const UserStats = () => {
     } catch (err) {
       setError('Failed to fetch user statistics');
       console.error('Error fetching stats:', err);
+      setStats(null);
     }
   };
 
   const fetchUserSubmissions = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem('jwtToken');
       const response = await axios.get('/api/submissions/my-submissions', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      setSubmissions(response.data);
+      // Handle both paginated and non-paginated responses
+      const data = response.data;
+      const submissionsArray = Array.isArray(data) ? data : (data.submissions || []);
+      setSubmissions(submissionsArray);
     } catch (err) {
       console.error('Error fetching submissions:', err);
+      setSubmissions([]);
     } finally {
       setLoading(false);
     }
@@ -164,7 +169,7 @@ const UserStats = () => {
             </div>
 
             <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold mb-4">🎯 Progress</h3>
+              <h3 className="text-xl font-semibold mb-4">Progress</h3>
               <div className="space-y-3">
                 <div>
                   <div className="flex justify-between text-sm mb-1">
@@ -197,7 +202,7 @@ const UserStats = () => {
 
         {/* Recent Submissions */}
         <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 className="text-xl font-semibold mb-4">📝 Recent Submissions</h3>
+          <h3 className="text-xl font-semibold mb-4">Recent Submissions</h3>
           
           {submissions.length > 0 ? (
             <div className="overflow-x-auto">
@@ -208,10 +213,12 @@ const UserStats = () => {
                     <th className="text-left py-3 px-4">Problem</th>
                     <th className="text-left py-3 px-4">Language</th>
                     <th className="text-left py-3 px-4">Result</th>
+                    <th className="text-left py-3 px-4">Runtime</th>
+                    <th className="text-left py-3 px-4">Memory</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {submissions.slice(0, 10).map((submission) => (
+                  {(Array.isArray(submissions) ? submissions : []).slice(0, 10).map((submission) => (
                     <tr key={submission.id} className="border-b border-gray-700/50">
                       <td className="py-3 px-4 text-gray-400 text-sm">
                         {new Date(submission.createdAt).toLocaleDateString()}
@@ -223,6 +230,12 @@ const UserStats = () => {
                           {submission.result}
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-gray-400 text-sm">
+                        {submission.runtime ? `${submission.runtime} ms` : 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-400 text-sm">
+                        {submission.memory ? `${(submission.memory / 1024).toFixed(2)} KB` : 'N/A'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -230,7 +243,6 @@ const UserStats = () => {
             </div>
           ) : (
             <div className="text-center py-8">
-              <div className="text-4xl mb-2">📝</div>
               <p className="text-gray-400">No submissions yet. Start solving problems!</p>
             </div>
           )}
