@@ -16,7 +16,7 @@ const AddBundle = () => {
     price: 0,
     currency: "USD",
     sharedTemplate: "",
-    isActive: true
+    isActive: true,
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -24,7 +24,13 @@ const AddBundle = () => {
   const navigate = useNavigate();
 
   const difficulties = ["BASIC", "INTERMEDIATE", "ADVANCED", "SDE", "EXPERT"];
-  const categories = ["ALGORITHMS", "DATA_STRUCTURES", "SYSTEM_DESIGN", "DATABASE", "WEB_DEVELOPMENT"];
+  const categories = [
+    "ALGORITHMS",
+    "DATA_STRUCTURES",
+    "SYSTEM_DESIGN",
+    "DATABASE",
+    "WEB_DEVELOPMENT",
+  ];
 
   useEffect(() => {
     if (bundleId) {
@@ -47,7 +53,7 @@ const AddBundle = () => {
           price: bundle.price || 0,
           currency: bundle.currency || "USD",
           sharedTemplate: bundle.sharedTemplate || "",
-          isActive: bundle.isActive !== undefined ? bundle.isActive : true
+          isActive: bundle.isActive !== undefined ? bundle.isActive : true,
         });
       }
     } catch (error) {
@@ -58,9 +64,9 @@ const AddBundle = () => {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === "checkbox" ? checked : value,
     }));
   };
 
@@ -70,7 +76,12 @@ const AddBundle = () => {
     setSuccess("");
     setLoading(true);
 
-    if (!formData.name || !formData.description || !formData.difficulty || !formData.category) {
+    if (
+      !formData.name ||
+      !formData.description ||
+      !formData.difficulty ||
+      !formData.category
+    ) {
       setError("Please fill in all required fields.");
       setLoading(false);
       return;
@@ -82,7 +93,10 @@ const AddBundle = () => {
         description: formData.description,
         difficulty: formData.difficulty,
         category: formData.category,
-        tags: formData.tags.split(",").map(tag => tag.trim()).filter(Boolean),
+        tags: formData.tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
         isPremium: !!formData.isPremium,
         price: Number(formData.price || 0),
         currency: formData.currency,
@@ -91,19 +105,19 @@ const AddBundle = () => {
         totalProblems: 0,
         totalPoints: 0,
         estimatedTotalTime: 0,
-        problemIds: []
+        problemIds: [],
       };
 
       const url = bundleId ? `/api/bundles/${bundleId}` : "/api/bundles";
       const method = bundleId ? "PUT" : "POST";
 
       // Get JWT token for authentication
-      const token = localStorage.getItem('jwtToken');
-      const headers = { 
-        "Content-Type": "application/json", 
-        "Accept": "application/json" 
+      const token = localStorage.getItem("jwtToken");
+      const headers = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
       };
-      
+
       // Add Authorization header if token exists
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
@@ -116,39 +130,50 @@ const AddBundle = () => {
       });
 
       if (!response.ok) {
-        let serverMsg = '';
+        let serverMsg = "";
         try {
           serverMsg = await response.text();
         } catch {}
-        
-        console.error(`[AddBundle] ${method} ${url} failed`, response.status, serverMsg);
-        
+
+        console.error(
+          `[AddBundle] ${method} ${url} failed`,
+          response.status,
+          serverMsg
+        );
+
         // Provide specific error messages based on status code
-        let errorMessage = '';
+        let errorMessage = "";
         switch (response.status) {
           case 401:
-            errorMessage = 'Authentication required. Please log in as an admin.';
+            errorMessage =
+              "Authentication required. Please log in as an admin.";
             break;
           case 403:
-            errorMessage = 'Access denied. Admin privileges required.';
+            errorMessage = "Access denied. Admin privileges required.";
             break;
           case 400:
-            errorMessage = serverMsg || 'Invalid data provided. Please check all fields.';
+            errorMessage =
+              serverMsg || "Invalid data provided. Please check all fields.";
             break;
           case 500:
-            errorMessage = 'Server error. Please try again later.';
+            errorMessage = "Server error. Please try again later.";
             break;
           default:
-            errorMessage = serverMsg || `Failed to ${bundleId ? 'update' : 'create'} bundle`;
+            errorMessage =
+              serverMsg || `Failed to ${bundleId ? "update" : "create"} bundle`;
         }
-        
+
         throw new Error(errorMessage);
       }
 
-      setSuccess(`Bundle ${bundleId ? 'updated' : 'created'} successfully!`);
+      setSuccess(`Bundle ${bundleId ? "updated" : "created"} successfully!`);
       setTimeout(() => navigate("/admin"), 1500);
     } catch (err) {
-      setError((err && err.message) ? err.message : `Failed to ${bundleId ? 'update' : 'create'} bundle.`);
+      setError(
+        err && err.message
+          ? err.message
+          : `Failed to ${bundleId ? "update" : "create"} bundle.`
+      );
     } finally {
       setLoading(false);
     }
@@ -186,8 +211,10 @@ const AddBundle = () => {
               className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
             >
               <option value="">Select difficulty</option>
-              {difficulties.map(diff => (
-                <option key={diff} value={diff}>{diff}</option>
+              {difficulties.map((diff) => (
+                <option key={diff} value={diff}>
+                  {diff}
+                </option>
               ))}
             </select>
           </div>
@@ -214,14 +241,18 @@ const AddBundle = () => {
               className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
             >
               <option value="">Select category</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat.replace('_', ' ')}</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat.replace("_", " ")}
+                </option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-white mb-2">Tags (comma separated)</label>
+            <label className="block text-white mb-2">
+              Tags (comma separated)
+            </label>
             <input
               type="text"
               name="tags"
@@ -278,7 +309,9 @@ const AddBundle = () => {
         <div className="mt-4">
           <label className="block text-white mb-2">Shared Template Code</label>
           <div className="text-gray-400 text-xs mb-2">
-            This template will be used for all problems in this bundle. Use placeholders like {"{functionName}"} and {"{parameters}"} for dynamic content.
+            This template will be used for all problems in this bundle. Use
+            placeholders like {"{functionName}"} and {"{parameters}"} for
+            dynamic content.
           </div>
           <textarea
             name="sharedTemplate"
@@ -301,7 +334,9 @@ const AddBundle = () => {
         </div>
 
         {error && <div className="text-red-400 mt-4 text-center">{error}</div>}
-        {success && <div className="text-green-400 mt-4 text-center">{success}</div>}
+        {success && (
+          <div className="text-green-400 mt-4 text-center">{success}</div>
+        )}
 
         <div className="flex gap-4 mt-6">
           <button
@@ -309,7 +344,11 @@ const AddBundle = () => {
             className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded transition-colors"
             disabled={loading}
           >
-            {loading ? "Saving..." : (bundleId ? "Update Bundle" : "Create Bundle")}
+            {loading
+              ? "Saving..."
+              : bundleId
+              ? "Update Bundle"
+              : "Create Bundle"}
           </button>
           <button
             type="button"
