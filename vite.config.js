@@ -7,22 +7,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        // Determine target based on Codespaces environment variables
-        target: (() => {
-          const codespaceNameEnv = process.env.CODESPACE_NAME;
-          const portForwardingDomain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
-          
-          if (codespaceNameEnv && portForwardingDomain) {
-            const backendUrl = `https://${codespaceNameEnv}-8080.${portForwardingDomain}`;
-            console.log(`[Vite Proxy] Codespaces detected: Using ${backendUrl}`);
-            return backendUrl;
-          }
-          
-          console.log('[Vite Proxy] Local environment detected: Using http://localhost:8080');
-          return 'http://localhost:8080';
-        })(),
+        // Always proxy to localhost:8080 within Codespaces
+        // Since Vite and backend are in the same container, this avoids GitHub tunnel auth issues
+        target: 'http://localhost:8080',
         changeOrigin: true,
-        secure: false, // Accept self-signed certs in dev
+        secure: false,
+        ws: true, // Support WebSockets if needed
       },
     },
   },
