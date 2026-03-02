@@ -3,13 +3,13 @@
 const AuthContext = createContext();
 
 // Helper to determine backend base URL
+// Always use relative URLs so Vite's proxy handles the routing
+// This avoids GitHub Codespaces tunnel authentication issues
 const getBaseUrl = () => {
-  const host = window.location.host;
-  if (host.endsWith(".app.github.dev")) {
-    const backendHost = host.replace("-5173", "-8080").replace(":5173", "-8080");
-    return `https://${backendHost}`;
-  }
-  return ""; // empty string = relative to current origin (localhost)
+  // Return empty string for relative URLs - Vite proxy will handle routing
+  // For localhost: requests go directly to http://localhost:8080
+  // For Codespaces: requests go through Vite's proxy which forwards to backend
+  return "";
 };
 
 export function AuthProvider({ children }) {
