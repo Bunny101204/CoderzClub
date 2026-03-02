@@ -2,6 +2,16 @@
 
 const AuthContext = createContext();
 
+// Helper to determine backend base URL
+const getBaseUrl = () => {
+  const host = window.location.host;
+  if (host.endsWith(".app.github.dev")) {
+    const backendHost = host.replace("-5173", "-8080").replace(":5173", "-8080");
+    return `https://${backendHost}`;
+  }
+  return ""; // empty string = relative to current origin (localhost)
+};
+
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null); // { username, role }
@@ -22,7 +32,8 @@ export function AuthProvider({ children }) {
   // Secure token validation function
   const validateToken = async (token) => {
     try {
-      const response = await fetch("/api/validate-token", {
+      const baseUrl = getBaseUrl();
+      const response = await fetch(`${baseUrl}/api/validate-token`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -80,7 +91,8 @@ export function AuthProvider({ children }) {
   const login = async (username, password) => {
     try {
       console.log("[AuthContext] Attempting login", username);
-      const response = await fetch("/api/login", {
+      const baseUrl = getBaseUrl();
+      const response = await fetch(`${baseUrl}/api/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -133,7 +145,8 @@ export function AuthProvider({ children }) {
       const body = { username, email, password };
       if (role) body.role = role;
 
-      const response = await fetch("/api/register", {
+      const baseUrl = getBaseUrl();
+      const response = await fetch(`${baseUrl}/api/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -21,7 +21,7 @@ public class SecurityConfig {
         System.out.println("Configuring Security Filter Chain...");
         
         http
-            .cors(cors -> {})
+            .cors(cors -> cors.and())  // Enable CORS with the CorsConfigurationSource bean
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -29,6 +29,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/register").permitAll()
                 .requestMatchers("/api/login").permitAll()
                 .requestMatchers("/api/test-password").permitAll()
+                .requestMatchers("/api/validate-token").permitAll()
                 .requestMatchers("/api/problems").permitAll()
                 .requestMatchers("/api/problems/**").permitAll()
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering

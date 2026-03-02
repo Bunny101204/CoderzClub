@@ -17,9 +17,15 @@ public class DataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        // Only seed if no bundles exist
-        if (problemBundleRepository.count() == 0) {
-            seedProblemBundles();
+        try {
+            // Only seed if no bundles exist
+            if (problemBundleRepository.count() == 0) {
+                seedProblemBundles();
+            }
+        } catch (Exception e) {
+            // Log the error and continue; this prevents the app from crashing
+            // when Mongo authentication fails (e.g. wrong credentials).
+            System.out.println("DataSeeder: unable to access database, skipping seeding - " + e.getMessage());
         }
     }
 

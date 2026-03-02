@@ -6,7 +6,24 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8080',
+      '/api': {
+        // Determine target based on Codespaces environment variables
+        target: (() => {
+          const codespaceNameEnv = process.env.CODESPACE_NAME;
+          const portForwardingDomain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
+          
+          if (codespaceNameEnv && portForwardingDomain) {
+            const backendUrl = `https://${codespaceNameEnv}-8080.${portForwardingDomain}`;
+            console.log(`[Vite Proxy] Codespaces detected: Using ${backendUrl}`);
+            return backendUrl;
+          }
+          
+          console.log('[Vite Proxy] Local environment detected: Using http://localhost:8080');
+          return 'http://localhost:8080';
+        })(),
+        changeOrigin: true,
+        secure: false, // Accept self-signed certs in dev
+      },
     },
   },
 })
