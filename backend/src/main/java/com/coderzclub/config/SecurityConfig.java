@@ -47,6 +47,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/bundles/{id}").permitAll() // GET requests for individual bundles
                 .requestMatchers("/api/bundles").permitAll() // GET requests for viewing all bundles
                 .requestMatchers("/api/users/leaderboard").permitAll()
+                .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/submissions/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
