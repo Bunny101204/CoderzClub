@@ -1,6 +1,7 @@
 package com.coderzclub.model;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import java.util.Date;
 import java.util.List;
@@ -10,7 +11,11 @@ import java.util.Map;
 public class User {
     @Id
     private String id;
+
+    @Indexed(unique = true)
     private String username;
+
+    @Indexed(unique = true)
     private String email;
     private String passwordHash;
     private String role; // "admin" or "user"
@@ -35,6 +40,10 @@ public class User {
     private String website; // User website
     private List<String> socialLinks; // Social media links
     private boolean emailVerified; // Whether email is verified
+    private String emailVerificationToken;
+    private Date emailVerificationTokenExpiry;
+    private String passwordResetToken;
+    private Date passwordResetTokenExpiry;
     private boolean profileComplete; // Whether profile is complete
     
     // Default constructor
@@ -48,6 +57,7 @@ public class User {
         this.passwordHash = passwordHash;
         this.role = role;
         this.createdAt = createdAt;
+        this.emailVerified = false;
     }
     
     // Getters
@@ -77,6 +87,10 @@ public class User {
     public String getWebsite() { return website; }
     public List<String> getSocialLinks() { return socialLinks; }
     public boolean isEmailVerified() { return emailVerified; }
+    public String getEmailVerificationToken() { return emailVerificationToken; }
+    public Date getEmailVerificationTokenExpiry() { return emailVerificationTokenExpiry; }
+    public String getPasswordResetToken() { return passwordResetToken; }
+    public Date getPasswordResetTokenExpiry() { return passwordResetTokenExpiry; }
     public boolean isProfileComplete() { return profileComplete; }
     
     // Setters
@@ -86,6 +100,11 @@ public class User {
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public void setRole(String role) { this.role = role; }
     public void setCreatedAt(Date createdAt) { this.createdAt = createdAt; }
+    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
+    public void setEmailVerificationToken(String emailVerificationToken) { this.emailVerificationToken = emailVerificationToken; }
+    public void setEmailVerificationTokenExpiry(Date emailVerificationTokenExpiry) { this.emailVerificationTokenExpiry = emailVerificationTokenExpiry; }
+    public void setPasswordResetToken(String passwordResetToken) { this.passwordResetToken = passwordResetToken; }
+    public void setPasswordResetTokenExpiry(Date passwordResetTokenExpiry) { this.passwordResetTokenExpiry = passwordResetTokenExpiry; }
     
     // New setters for subscription and progress
     public void setSubscriptionId(String subscriptionId) { this.subscriptionId = subscriptionId; }
@@ -105,6 +124,5 @@ public class User {
     public void setLocation(String location) { this.location = location; }
     public void setWebsite(String website) { this.website = website; }
     public void setSocialLinks(List<String> socialLinks) { this.socialLinks = socialLinks; }
-    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
     public void setProfileComplete(boolean profileComplete) { this.profileComplete = profileComplete; }
 } 

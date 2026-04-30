@@ -14,4 +14,7 @@ public interface UserRepository extends MongoRepository<User, String> {
 
     @Query("{ 'email': { $regex: '^?0$', $options: 'i' } }")
     Optional<User> findByEmail(String email);
+
+    Optional<User> findByEmailVerificationToken(String token);
+    Optional<User> findByPasswordResetToken(String token);
 } 

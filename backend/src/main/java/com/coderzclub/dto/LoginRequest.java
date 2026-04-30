@@ -1,7 +1,12 @@
 package com.coderzclub.dto;
 
+import jakarta.validation.constraints.NotBlank;
+
 public class LoginRequest {
+    @NotBlank(message = "Username or email is required")
     private String username;
+
+    @NotBlank(message = "Password is required")
     private String password;
 
     public LoginRequest() {
