@@ -11,6 +11,7 @@ const HomePage = ({ problems: propsProblems }) => {
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [problemStatus, setProblemStatus] = useState({});
   const problemsPerPage = 10;
 
   // Debounce search input
@@ -30,6 +31,72 @@ const HomePage = ({ problems: propsProblems }) => {
   useEffect(() => {
     fetchProblems();
   }, [currentPage, difficulty]);
+
+  useEffect(() => {
+    const loadPageStatus = async () => {
+      if (!user || problems.length === 0) {
+        setProblemStatus({});
+        return;
+      }
+
+      const statusMap = {};
+      await Promise.all(
+        problems.map(async (problem) => {
+          try {
+            const token = localStorage.getItem('jwtToken');
+            if (!token) return;
+
+            const response = await fetch(`/api/submissions/my-submissions?problemId=${problem.id}&size=1`, {
+              headers: {
+                Authorization: `Bearer ${token}`
+              }
+            });
+            if (!response.ok) return;
+
+            const data = await response.json();
+            const submissions = Array.isArray(data.submissions) ? data.submissions : [];
+            const solved = submissions.some(s =>
+              s.result === 'ACCEPTED' || s.verdict === 'ACCEPTED'
+            );
+            statusMap[problem.id] = solved
+              ? 'SOLVED'
+              : submissions.length > 0
+              ? 'ATTEMPTED'
+              : 'NOT_STARTED';
+          } catch (err) {
+            console.error('Error fetching problem status:', err);
+          }
+        })
+      );
+      setProblemStatus(statusMap);
+    };
+
+    loadPageStatus();
+  }, [user, problems]);
+
+  const getDifficultyBadge = (difficulty) => {
+    const styles = {
+      EASY: 'bg-green-500 text-white',
+      BASIC: 'bg-green-500 text-white',
+      MEDIUM: 'bg-yellow-500 text-black',
+      INTERMEDIATE: 'bg-yellow-500 text-black',
+      HARD: 'bg-red-500 text-white',
+      ADVANCED: 'bg-red-500 text-white',
+      SDE: 'bg-purple-600 text-white',
+      EXPERT: 'bg-purple-600 text-white'
+    };
+    return styles[difficulty] || 'bg-gray-600 text-white';
+  };
+
+  const getStatusIcon = (status) => {
+    if (status === 'SOLVED') {
+      return <span className="text-green-400 text-lg">✓</span>;
+    }
+    if (status === 'ATTEMPTED') {
+      return <span className="text-yellow-400 text-lg">●</span>;
+    }
+    return null;
+  };
 
   const fetchProblems = async () => {
     setLoading(true);
@@ -233,41 +300,44 @@ const HomePage = ({ problems: propsProblems }) => {
           />
         </div>
         <table className="w-full text-left bg-gray-800 rounded-lg shadow">
-          <thead>
-            <tr>
-              <th className="py-2 px-3">#</th>
-              <th className="py-2 px-3">Title</th>
-              <th className="py-2 px-3">Difficulty</th>
-              <th className="py-2 px-3">Tags</th>
-              <th className="py-2 px-3">Action</th>
-            </tr>
-          </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-gray-400 text-center py-4">Loading...</td>
+                <td colSpan={6} className="text-gray-400 text-center py-4">Loading...</td>
               </tr>
             ) : problems.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-gray-400 text-center py-4">No problems found.</td>
+                <td colSpan={6} className="text-gray-400 text-center py-4">No problems found.</td>
               </tr>
             ) : (
-              problems.map((problem, idx) => (
-                <tr key={problem.id} className="border-t border-gray-700">
-                  <td className="py-2 px-3 font-mono">{currentPage * problemsPerPage + idx + 1}</td>
-                  <td className="py-2 px-3">{problem.title}</td>
-                  <td className="py-2 px-3">{problem.difficulty || "N/A"}</td>
-                  <td className="py-2 px-3">{(problem.tags || []).join(", ")}</td>
-                  <td className="py-2 px-3">
-                    <Link
-                      to={`/problem/${problem.id}`}
-                      className="text-blue-400 hover:underline"
-                    >
-                      Solve
-                    </Link>
-                  </td>
-                </tr>
-              ))
+              problems.map((problem, idx) => {
+                const status = problemStatus[problem.id] || 'NOT_STARTED';
+                return (
+                  <tr key={problem.id} className="border-t border-gray-700">
+                    <td className="py-2 px-3 align-top">
+                      {getStatusIcon(status)}
+                    </td>
+                    <td className="py-2 px-3 font-mono">{currentPage * problemsPerPage + idx + 1}</td>
+                    <td className="py-2 px-3">
+                      <div className="font-semibold text-white">{problem.title}</div>
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${getDifficultyBadge(problem.difficulty)}`}>
+                        {problem.difficulty || 'N/A'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-gray-300">{(problem.tags || []).join(', ')}</td>
+                    <td className="py-2 px-3">
+                      <Link
+                        to={`/problem/${problem.id}`}
+                        className="text-blue-400 hover:underline"
+                      >
+                        Solve
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

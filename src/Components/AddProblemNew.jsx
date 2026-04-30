@@ -15,10 +15,6 @@ const AddProblemNew = () => {
   const [inputFormat, setInputFormat] = useState("");
   const [outputFormat, setOutputFormat] = useState("");
   const [constraints, setConstraints] = useState("");
-  // Example
-  const [examples, setExamples] = useState([
-    { input: "", output: "", explanation: "" }
-  ]);
   
   // Test cases
   const [publicTestCases, setPublicTestCases] = useState([
@@ -94,23 +90,6 @@ const AddProblemNew = () => {
     setHiddenTestCases(updated);
   };
 
-  // Example handlers
-  const addExample = () => {
-    setExamples([...examples, { input: "", output: "", explanation: "" }]);
-  };
-
-  const removeExample = (index) => {
-    if (examples.length > 1) {
-      setExamples(examples.filter((_, i) => i !== index));
-    }
-  };
-
-  const updateExample = (index, field, value) => {
-    const updated = [...examples];
-    updated[index][field] = value;
-    setExamples(updated);
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -128,15 +107,6 @@ const AddProblemNew = () => {
       setError("Please fill in all required fields (Input Format, Output Format, Constraints).");
       setLoading(false);
       return;
-    }
-
-    // Validate examples
-    for (let i = 0; i < examples.length; i++) {
-      if (!examples[i].input || !examples[i].output || !examples[i].explanation) {
-        setError(`Example ${i + 1} must have input, output, and explanation.`);
-        setLoading(false);
-        return;
-      }
     }
 
     if (problemType === "bundle" && !selectedBundle) {
@@ -186,11 +156,6 @@ const AddProblemNew = () => {
         inputFormat,
         outputFormat,
         constraints,
-        examples: examples.map(ex => ({
-          input: ex.input,
-          output: ex.output,
-          explanation: ex.explanation
-        })),
         
         // Bundle and premium
         bundleId: problemType === "bundle" ? selectedBundle : null,
@@ -375,74 +340,6 @@ const AddProblemNew = () => {
                   required
                 />
               </div>
-            </div>
-          </div>
-
-          {/* Examples */}
-          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Examples (for display)</h2>
-              <button
-                type="button"
-                onClick={addExample}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-semibold transition-colors"
-              >
-                + Add Example
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {examples.map((example, index) => (
-                <div key={index} className="bg-gray-700 rounded-lg p-4 border border-gray-600">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">Example #{index + 1}</h3>
-                    {examples.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeExample(index)}
-                        className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold mb-2">Input *</label>
-                      <textarea
-                        value={example.input}
-                        onChange={(e) => updateExample(index, "input", e.target.value)}
-                        className="w-full p-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 min-h-[100px] font-mono text-sm"
-                        placeholder="4&#10;2 7 11 15&#10;9"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold mb-2">Output *</label>
-                      <textarea
-                        value={example.output}
-                        onChange={(e) => updateExample(index, "output", e.target.value)}
-                        className="w-full p-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 min-h-[100px] font-mono text-sm"
-                        placeholder="0 1"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-3">
-                    <label className="block text-sm font-semibold mb-2">Explanation *</label>
-                    <textarea
-                      value={example.explanation}
-                      onChange={(e) => updateExample(index, "explanation", e.target.value)}
-                      className="w-full p-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 min-h-[80px]"
-                      placeholder="Explain why this output is correct for the given input..."
-                      required
-                    />
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
 

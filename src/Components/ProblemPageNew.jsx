@@ -194,6 +194,44 @@ const ProblemPageNew = ({ problems }) => {
               </div>
             )}
 
+            {/* Public Test Cases */}
+            {isStdinMode && problem.publicTestCases && problem.publicTestCases.length > 0 && (
+              <div className="mb-6">
+                <h2 className="text-xl font-bold mb-3">Test Cases</h2>
+                <div className="space-y-4">
+                  {problem.publicTestCases.map((testCase, index) => (
+                    <div key={index} className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                      <div className="mb-3">
+                        <div className="text-sm text-gray-400 mb-1 font-semibold">Test Case #{index + 1}</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="text-sm text-gray-400 mb-1">Input:</div>
+                          <pre className="text-green-400 font-mono text-sm bg-gray-800 p-3 rounded border border-gray-700">
+                            {testCase.input}
+                          </pre>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-400 mb-1">Output:</div>
+                          <pre className="text-green-400 font-mono text-sm bg-gray-800 p-3 rounded border border-gray-700">
+                            {testCase.output}
+                          </pre>
+                        </div>
+                      </div>
+                      {testCase.explanation && (
+                        <div className="mt-3">
+                          <div className="text-sm text-gray-400 mb-1">Explanation:</div>
+                          <div className="text-gray-300 text-sm">
+                            {testCase.explanation}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Constraints */}
             {problem.constraints && (
               <div className="mb-6">

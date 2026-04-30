@@ -9,9 +9,9 @@ import java.util.Optional;
 
 @Repository
 public interface UserRepository extends MongoRepository<User, String> {
-    @Query("{ 'username': { $regex: ?0, $options: 'i' } }")
+    @Query("{ 'username': { $regex: '^?0$', $options: 'i' } }")
     Optional<User> findByUsername(String username);
 
-    @Query("{ 'email': { $regex: ?0, $options: 'i' } }")
+    @Query("{ 'email': { $regex: '^?0$', $options: 'i' } }")
     Optional<User> findByEmail(String email);
 } 

@@ -124,9 +124,9 @@ public class DataSeeder implements CommandLineRunner {
         expertBundle.setDescription("Ultra-hard problems for competitive programming and interviews");
         expertBundle.setDifficulty("EXPERT");
         expertBundle.setCategory("ALGORITHMS");
-        expertBundle.setProblemIds(Arrays.asList("24", "25", "26", "27", "28"));
-        expertBundle.setTotalProblems(5);
-        expertBundle.setTotalPoints(250);
+        expertBundle.setProblemIds(Arrays.asList("24", "25", "26", "27", "28", "29", "30"));
+        expertBundle.setTotalProblems(7);
+        expertBundle.setTotalPoints(310);
         expertBundle.setEstimatedTotalTime(500);
         expertBundle.setPremium(true);
         expertBundle.setPrice(29.99);
