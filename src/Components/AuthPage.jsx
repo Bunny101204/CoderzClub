@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const AuthPage = () => {
@@ -11,11 +11,49 @@ const AuthPage = () => {
     confirmPassword: ''
   });
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [registerAsAdmin, setRegisterAsAdmin] = useState(false);
   
-  const { login, register } = useAuth();
+  const { login, register, resendVerification } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    const verified = searchParams.get('verified');
+    const errorParam = searchParams.get('error');
+    const verificationToken = searchParams.get('verifyEmailToken');
+
+    if (verificationToken) {
+      setLoading(true);
+      fetch('/api/confirm-email?token=' + encodeURIComponent(verificationToken))
+        .then(async (response) => {
+          if (!response.ok) {
+            const json = await response.json().catch(() => null);
+            const message = json?.error || json?.message || 'Email verification failed';
+            setError(message);
+          } else {
+            setInfo('Email verified successfully. Please login.');
+          }
+        })
+        .catch((err) => {
+          setError('Email verification failed. Please try again.');
+          console.error('Email verification error:', err);
+        })
+        .finally(() => {
+          setLoading(false);
+          searchParams.delete('verifyEmailToken');
+          setSearchParams(searchParams, { replace: true });
+        });
+      return;
+    }
+
+    if (verified === 'true') {
+      setInfo('Email verified successfully. Please login.');
+    } else if (errorParam) {
+      setError(decodeURIComponent(errorParam));
+    }
+  }, [searchParams, setSearchParams]);
 
   const handleInputChange = (e) => {
     setFormData({
@@ -27,6 +65,7 @@ const AuthPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setLoading(true);
 
     // Validation
@@ -63,7 +102,11 @@ const AuthPage = () => {
       }
       console.log('API result:', result); // DEBUG
       if (result.success) {
-        navigate('/');
+        if (result.token) {
+          navigate('/');
+        } else {
+          setInfo(result.message || 'Registration completed. Please verify your email before logging in.');
+        }
       } else {
         setError(result.error || 'Unknown error');
       }
@@ -178,6 +221,40 @@ const AuthPage = () => {
           {error && (
             <div className="bg-red-500/20 border border-red-500/50 text-red-300 px-4 py-3 rounded-lg text-sm">
               {error}
+            </div>
+          )}
+          {info && (
+            <div className="bg-emerald-500/20 border border-emerald-500/50 text-emerald-200 px-4 py-3 rounded-lg text-sm">
+              {info}
+            </div>
+          )}
+          {isLogin && error && error.toLowerCase().includes('email is not verified') && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={async () => {
+                  setError('');
+                  setInfo('');
+                  setLoading(true);
+                  try {
+                    const resendResult = await resendVerification(formData.username);
+                    if (resendResult.success) {
+                      setInfo(resendResult.message || 'Verification email resent. Please check your inbox.');
+                    } else {
+                      setError(resendResult.error || 'Unable to resend verification email.');
+                    }
+                  } catch (resendError) {
+                    setError('Unable to resend verification email. Please try again.');
+                    console.error('Resend verification error:', resendError);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg border border-blue-400 text-blue-200 hover:bg-blue-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Resend verification email
+              </button>
             </div>
           )}
 

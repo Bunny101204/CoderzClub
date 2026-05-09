@@ -6,12 +6,14 @@ import com.coderzclub.dto.LoginRequest;
 import com.coderzclub.dto.PasswordResetConfirmRequest;
 import com.coderzclub.dto.PasswordResetRequest;
 import com.coderzclub.dto.RegisterRequest;
+import com.coderzclub.dto.ResendVerificationRequest;
 import com.coderzclub.model.User;
 import com.coderzclub.service.EmailService;
 import com.coderzclub.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,6 +32,17 @@ public class AuthController {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Value("${app.frontend.url:${app.backend.url:http://localhost:8080}}")
+    private String frontendUrl;
+
+    private String buildFrontendRedirect(String query) {
+        String base = frontendUrl != null ? frontendUrl : "";
+        if (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base + query;
+    }
+
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req) {
         try {
@@ -37,8 +50,21 @@ public class AuthController {
             String role = req.getRole() != null ? req.getRole() : "user";
             User user = userService.registerUser(req.getUsername(), req.getEmail(), req.getPassword(), role);
             System.out.println("User registered successfully: " + user.getUsername() + ", email verified: " + user.isEmailVerified());
-            emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken());
-            return ResponseEntity.ok(Map.of("message", "Registration successful. A verification email has been sent."));
+
+            try {
+                emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken());
+                return ResponseEntity.ok(Map.of(
+                    "message", "Registration successful. A verification email has been sent.",
+                    "emailSent", true
+                ));
+            } catch (Exception emailEx) {
+                System.out.println("Email send failed after registration: " + emailEx.getMessage());
+                return ResponseEntity.ok(Map.of(
+                    "message", "Registration successful, but the verification email could not be sent. Please contact support or try again later.",
+                    "emailSent", false,
+                    "warning", emailEx.getMessage()
+                ));
+            }
         } catch (Exception e) {
             System.out.println("Registration failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -46,11 +72,44 @@ public class AuthController {
     }
 
     @GetMapping("/confirm-email")
-    public ResponseEntity<?> confirmEmail(@RequestParam String token) {
+    public ResponseEntity<?> confirmEmail(@RequestParam String token, HttpServletRequest request) {
         try {
             userService.verifyEmailToken(token);
-            return ResponseEntity.ok(Map.of("message", "Email verified successfully."));
+            // Redirect to frontend auth page with success message
+            String redirectUrl = buildFrontendRedirect("/auth?verified=true");
+            return ResponseEntity.status(302).header("Location", redirectUrl).build();
         } catch (Exception e) {
+            try {
+                String encodedError = java.net.URLEncoder.encode(e.getMessage(), "UTF-8");
+                String redirectUrl = buildFrontendRedirect("/auth?error=" + encodedError);
+                return ResponseEntity.status(302).header("Location", redirectUrl).build();
+            } catch (Exception encodeEx) {
+                String redirectUrl = buildFrontendRedirect("/auth?error=Verification failed");
+                return ResponseEntity.status(302).header("Location", redirectUrl).build();
+            }
+        }
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<?> resendVerification(@Valid @RequestBody ResendVerificationRequest req) {
+        try {
+            User user = userService.resendVerificationEmail(req.getUsernameOrEmail());
+            try {
+                emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken());
+                return ResponseEntity.ok(Map.of(
+                    "message", "Verification email resent. Please check your inbox.",
+                    "emailSent", true
+                ));
+            } catch (Exception emailEx) {
+                System.out.println("Resend verification email failed: " + emailEx.getMessage());
+                return ResponseEntity.ok(Map.of(
+                    "message", "User found, but the verification email could not be sent. Please contact support or try again later.",
+                    "emailSent", false,
+                    "warning", emailEx.getMessage()
+                ));
+            }
+        } catch (Exception e) {
+            System.out.println("Resend verification failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }

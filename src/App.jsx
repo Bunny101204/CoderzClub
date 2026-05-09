@@ -13,7 +13,6 @@ import Judge0CodeEditor from "./Components/Judge0CodeEditor";
 import HomePage from "./Components/HomePage";
 import ProblemPage from "./Components/ProblemPage";
 import ProblemPageNew from "./Components/ProblemPageNew";
-import LoginPage from "./Components/LoginPage";
 import { useAuth, AuthProvider } from "./context/AuthContext";
 import Header from "./Components/Header";
 import AuthPage from "./Components/AuthPage";
@@ -28,28 +27,11 @@ import SubscriptionPlans from "./Components/SubscriptionPlans";
 import Leaderboard from "./Components/Leaderboard";
 import UserStats from "./Components/UserStats";
 import Profile from "./Components/Profile";
-import LandingPage from "./Components/LandingPage";
+import { api } from "./apiClient";
 
-function AdminPage({ problems, setProblems, onLogout }) {
-  return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <h2 className="text-2xl font-bold mb-4">Admin Dashboard</h2>
-      <p>Welcome, admin! (Problem management UI coming next.)</p>
-      <button onClick={onLogout}>Logout</button>
-    </div>
-  );
-}
-
-// Admin Route Wrapper Component
 function AdminRoute({ user, problems }) {
   const isAdmin = user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin");
-  
-  console.log("[AdminRoute] Checking access:", { 
-    user: user?.username, 
-    role: user?.role, 
-    isAdmin 
-  });
-  
+
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -62,7 +44,7 @@ function AdminRoute({ user, problems }) {
       </div>
     );
   }
-  
+
   return <AdminDashboard problems={problems} />;
 }
 
@@ -77,12 +59,10 @@ function AppContent() {
       setProblemsLoading(true);
       setProblemsError(null);
       try {
-        const res = await fetch("/api/problems");
-        if (!res.ok) throw new Error("Failed to fetch problems");
-        const data = await res.json();
-        setProblems(data);
+        const response = await api.problems.getAll();
+        setProblems(response.data);
       } catch (err) {
-        setProblemsError(err.message);
+        setProblemsError(err.message || "Failed to fetch problems");
       } finally {
         setProblemsLoading(false);
       }
@@ -138,10 +118,6 @@ function AppContent() {
               element={<LandingPage />}
             />
             <Route
-              path="/home"
-              element={<Navigate to="/" replace />}
-            />
-            <Route
               path="/auth"
               element={<AuthPage />}
             />
@@ -149,12 +125,12 @@ function AppContent() {
         ) : (
           <>
             <Route
-              path="/home"
-              element={<HomePage problems={problems} />}
-            />
-            <Route
               path="/"
               element={<Navigate to="/home" replace />}
+            />
+            <Route
+              path="/home"
+              element={<HomePage problems={problems} />}
             />
             <Route
               path="/auth"
@@ -260,29 +236,10 @@ function AppContent() {
 }
 
 function App() {
-  const [isAdmin, setIsAdmin] = useState(() => {
-    // Read from localStorage on first load
-    return localStorage.getItem("isAdmin") === "true";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("isAdmin", isAdmin ? "true" : "false");
-  }, [isAdmin]);
-
-  const handleLogin = () => setIsAdmin(true);
-  const handleLogout = () => setIsAdmin(false);
-
   return (
     <AuthProvider>
       <Router>
-        <Routes>
-          {/* Catch-all route for all app content */}
-          <Route path="*" element={<AppContent />} />
-          {/* Admin login route changed to /al */}
-          <Route path="/al" element={<LoginPage onLogin={handleLogin} />} />
-          {/* User login/registration route changed to /login */}
-          <Route path="/login" element={<AuthPage />} />
-        </Routes>
+        <AppContent />
       </Router>
     </AuthProvider>
   );

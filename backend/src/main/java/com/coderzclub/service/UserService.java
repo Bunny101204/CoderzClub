@@ -133,6 +133,24 @@ public class UserService implements UserDetailsService {
         System.out.println("Password matches: " + matches);
         return matches;
     }
+
+    public User resendVerificationEmail(String usernameOrEmail) {
+        User user = findByUsernameOrEmail(usernameOrEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (user.isEmailVerified()) {
+            throw new RuntimeException("Email is already verified");
+        }
+
+        if (user.getEmailVerificationToken() == null || user.getEmailVerificationTokenExpiry() == null ||
+                user.getEmailVerificationTokenExpiry().before(new Date())) {
+            user.setEmailVerificationToken(generateToken());
+            user.setEmailVerificationTokenExpiry(new Date(System.currentTimeMillis() + verificationTokenExpirationMs));
+            user = userRepository.save(user);
+        }
+
+        return user;
+    }
     
     public PasswordEncoder getPasswordEncoder() {
         return passwordEncoder;

@@ -4,9 +4,7 @@ import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
 import { getTemplate } from "./LanguageTemplates";
-// Syntax highlighting - will be added as overlay if needed
-// import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-// import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { auth } from "./AuthHelper";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -360,13 +358,11 @@ const Judge0CodeEditor = ({
     while (attempt <= maxRetries) {
       try {
         return await axios.post(
-          "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true",
+          "/api/judge0/execute",
           payload,
           {
             headers: {
               "content-type": "application/json",
-              "X-RapidAPI-Key": import.meta.env.VITE_JUDGE0_API_KEY,
-              "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
             },
           }
         );
@@ -600,97 +596,47 @@ const Judge0CodeEditor = ({
   };
 
   // Helper to run a single test case (for submit)
-  const runTestCase = async (codeToRun, input, expected) => {
-    // Input is already a string for STDIN_STDOUT mode
-    const stdinInput = typeof input === 'string' ? input : (buildStdinForParams(input) ?? "");
-    
-    const response = await postToJudge0({
-      language_id: languageId,
-      source_code: codeToRun,
-      stdin: stdinInput + "\n",
-    });
-    const res = response.data;
-    
-    // Parse error first
-    const error = parseError(res);
-    
-    // Determine actual output - prioritize stdout
-    let actual = "";
-    if (res.stdout && res.stdout.trim()) {
-      actual = res.stdout.trim();
-    } else if (res.stderr && res.stderr.trim()) {
-      actual = res.stderr.trim();
-    } else if (res.compile_output && res.compile_output.trim()) {
-      actual = res.compile_output.trim();
-    } else {
-      actual = "No Output";
-    }
-    
-    const expectedStr = String(expected || "").trim();
-    // Only pass if no error AND output matches
-    const passed = !error && actual === expectedStr;
-    
-    return { 
-      passed, 
-      actual, 
-      runtime: res.time ? Math.round(parseFloat(res.time) * 1000) : null, // Convert to ms
-      memory: res.memory ? res.memory * 1024 : null, // Convert to bytes
-      statusId: res.status?.id,
-      statusDescription: res.status?.description || '',
-      stderr: res.stderr || res.compile_output || '',
-      errorMessage: res.message || '',
-      error: error, // Include parsed error object
-      fullResponse: res
-    };
-  };
-
-  // Submit handler
   const handleSubmitSolution = async (publicCases, hiddenCases) => {
     // Check submission limits before submitting
     try {
-      const token = localStorage.getItem("token");
-      if (token) {
-        const limitsResponse = await axios.get(`/api/submissions/limits?problemId=${problemId}`, {
-          headers: { Authorization: `Bearer ${token}` }
+      const limitsResponse = await axios.get(`/api/submissions/limits?problemId=${problemId}`, auth.getAuthConfig());
+      const limits = limitsResponse.data;
+
+      if (!limits.canSubmitNow) {
+        const cooldown = limits.cooldownSeconds || 0;
+        setOutput(`⏳ Please wait ${cooldown} seconds before submitting again.`);
+        setErrorDetails({
+          type: 'Rate Limit',
+          message: `You must wait ${cooldown} seconds between submissions.`,
+          details: 'This helps prevent abuse and ensures fair usage.'
         });
-        const limits = limitsResponse.data;
-        
-        if (!limits.canSubmitNow) {
-          const cooldown = limits.cooldownSeconds || 0;
-          setOutput(`⏳ Please wait ${cooldown} seconds before submitting again.`);
-          setErrorDetails({
-            type: 'Rate Limit',
-            message: `You must wait ${cooldown} seconds between submissions.`,
-            details: 'This helps prevent abuse and ensures fair usage.'
-          });
-          return;
-        }
-        
-        if (limits.hasExceededDailyLimit) {
-          setOutput(`❌ Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
-          setErrorDetails({
-            type: 'Daily Limit Exceeded',
-            message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
-            details: `Remaining submissions: ${limits.remainingDaily}`
-          });
-          return;
-        }
-        
-        if (limits.hasExceededProblemLimit) {
-          setOutput(`❌ Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
-          setErrorDetails({
-            type: 'Problem Limit Exceeded',
-            message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
-            details: `Remaining submissions: ${limits.remainingProblem}`
-          });
-          return;
-        }
+        return;
+      }
+
+      if (limits.hasExceededDailyLimit) {
+        setOutput(`❌ Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
+        setErrorDetails({
+          type: 'Daily Limit Exceeded',
+          message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
+          details: `Remaining submissions: ${limits.remainingDaily}`
+        });
+        return;
+      }
+
+      if (limits.hasExceededProblemLimit) {
+        setOutput(`❌ Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
+        setErrorDetails({
+          type: 'Problem Limit Exceeded',
+          message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
+          details: `Remaining submissions: ${limits.remainingProblem}`
+        });
+        return;
       }
     } catch (error) {
       console.warn("Could not check submission limits:", error);
       // Continue with submission if limit check fails (don't block user)
     }
-    
+
     setIsLoading(true);
     setSubmitResult(null);
     setShowAccepted(false);
@@ -699,186 +645,125 @@ const Judge0CodeEditor = ({
     setExecutionTime(null);
     setExecutionMemory(null);
     setErrorDetails(null);
-    
-    // For STDIN_STDOUT mode, use source code directly (no main method required)
-    let codeToRun = sourceCode;
-    
-    // Only wrap Java code if we have function-based problem (old mode)
-    if (languageId === 62 && functionName && parameters && parameters.length > 0 && executionMode !== "STDIN_STDOUT") {
-      codeToRun = generateJavaCode(sourceCode, functionName, "", parameters);
+
+    try {
+      // Create async submission job
+      const jobRequest = {
+        problemId: problemId,
+        code: sourceCode,
+        language: languageNames[languageId] || "Unknown",
+        languageId: languageId,
+        publicTestCases: publicCases,
+        hiddenTestCases: hiddenCases
+      };
+
+      const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
+      const { jobId } = jobResponse.data;
+
+      // Poll for job completion
+      await pollJobStatus(jobId);
+
+    } catch (error) {
+      console.error("Submission failed:", error);
+      setOutput("Error during submission: " + (error.response?.data?.error || error.message || "Unknown error"));
+      setIsLoading(false);
     }
-    let passedCount = 0;
-    let totalCount = (publicCases?.length || 0) + (hiddenCases?.length || 0);
-    let allTestResults = [];
-    let maxRuntime = 0;
-    let maxMemory = 0;
-    let lastStatusId = null;
-    let lastStderr = '';
-    let lastErrorMessage = '';
-    let lastFullResponse = null;
-    
-    // 1. Check public test cases
-    for (let i = 0; i < publicCases.length; i++) {
-      const tc = publicCases[i];
-      const stdinInput = typeof tc.input === 'string' ? tc.input : (buildStdinForParams(tc.input) ?? "");
-      const result = await runTestCase(
-        codeToRun,
-        stdinInput,
-        tc.output
-      );
-      allTestResults.push(result);
-      
-      if (result.runtime) maxRuntime = Math.max(maxRuntime, result.runtime);
-      if (result.memory) maxMemory = Math.max(maxMemory, result.memory);
-      lastStatusId = result.statusId;
-      if (result.stderr) lastStderr = result.stderr;
-      if (result.errorMessage) lastErrorMessage = result.errorMessage;
-      lastFullResponse = result.fullResponse;
-      
-      if (!result.passed) {
-        setIsLoading(false);
-        // Determine failure reason
-        let failureReason = "WRONG_ANSWER";
-        let failureMessage = `Failed on public test case ${i + 1}: expected ${tc.output}, got ${result.actual}`;
-        
-        if (result.error) {
-          if (result.error.type === "Compilation Error") {
-            failureReason = "COMPILATION_ERROR";
-            failureMessage = `Compilation error on public test case ${i + 1}: ${result.error.message}`;
-          } else if (result.error.type === "Runtime Error") {
-            failureReason = "RUNTIME_ERROR";
-            failureMessage = `Runtime error on public test case ${i + 1}: ${result.error.message}`;
-          } else if (result.error.type === "Time Limit Exceeded") {
-            failureReason = "TIME_LIMIT_EXCEEDED";
-            failureMessage = `Time limit exceeded on public test case ${i + 1}`;
-          }
+  };
+
+  // Poll for job completion status
+  const pollJobStatus = async (jobId) => {
+    const maxPolls = 60; // Max 60 polls (about 30 seconds with 500ms intervals)
+    const pollInterval = 500; // 500ms between polls
+
+    for (let poll = 0; poll < maxPolls; poll++) {
+      try {
+        const response = await axios.get(`/api/submission-jobs/${jobId}`, auth.getAuthConfig());
+        const job = response.data;
+
+        // Update progress
+        if (job.progress) {
+          setOutput(`Processing... ${job.progress.completed}/${job.progress.total} test cases completed`);
         }
-        
-        const failedResult = {
-          status: "failed",
-          failedCase: { ...tc, actual: result.actual, type: "public", index: i, error: result.error },
-          passedCount,
-          totalCount,
-          failureReason,
-        };
-        setSubmitResult(failedResult);
-        setErrorDetails(result.error); // Show error details
-        console.log("Submit failed:", failedResult);
-        // Save failed submission with details
-        await saveSubmission(
-          failureReason,
-          failureMessage,
-          result.runtime,
-          result.memory,
-          result.statusId,
-          result.stderr,
-          result.errorMessage,
-          passedCount,
-          totalCount,
-          result.fullResponse
-        );
+
+        if (job.status === 'COMPLETED') {
+          // Job completed successfully
+          setIsLoading(false);
+
+          if (job.result === 'ACCEPTED') {
+            setSubmitResult({ status: "accepted", passedCount: job.testResults?.length || 0, totalCount: job.testResults?.length || 0 });
+            setShowAccepted(true);
+            setTimeout(() => setShowAccepted(false), 3000);
+            setIsTimerRunning(false);
+
+            if (onSubmissionSuccess) {
+              onSubmissionSuccess();
+            }
+          } else {
+            // Find first failed test
+            const failedTest = job.testResults?.find(r => !r.passed);
+            if (failedTest) {
+              const error = failedTest.errorType ? {
+                type: failedTest.errorType,
+                message: failedTest.errorMessage || 'Test case failed',
+                details: `Expected: ${failedTest.expectedOutput}, Got: ${failedTest.actualOutput}`
+              } : null;
+
+              setSubmitResult({
+                status: "failed",
+                failedCase: {
+                  input: failedTest.input,
+                  expected: failedTest.expectedOutput,
+                  actual: failedTest.actualOutput,
+                  type: "test",
+                  error: error
+                },
+                passedCount: job.testResults.filter(r => r.passed).length,
+                totalCount: job.testResults.length,
+                failureReason: job.result
+              });
+
+              if (error) {
+                setErrorDetails(error);
+              }
+            }
+          }
+
+          // Update execution metrics
+          if (job.runtime) setExecutionTime(job.runtime);
+          if (job.memory) setExecutionMemory(job.memory);
+
+          return;
+        } else if (job.status === 'FAILED') {
+          // Job failed
+          setIsLoading(false);
+          setOutput("Submission failed: " + (job.error || "Unknown error"));
+          setErrorDetails({
+            type: 'Submission Error',
+            message: job.error || 'Submission processing failed',
+            details: 'Please try again'
+          });
+          return;
+        }
+
+        // Still running, wait and poll again
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      } catch (error) {
+        console.error("Error polling job status:", error);
+        setIsLoading(false);
+        setOutput("Error checking submission status: " + (error.response?.data?.error || error.message));
         return;
       }
-      passedCount++;
-      await sleep(600);
     }
-    // 2. Check hidden test cases
-    for (let i = 0; i < (hiddenCases?.length || 0); i++) {
-      const tc = hiddenCases[i];
-      const stdinInput = typeof tc.input === 'string' ? tc.input : (buildStdinForParams(tc.input) ?? "");
-      const result = await runTestCase(
-        codeToRun,
-        stdinInput,
-        tc.output
-      );
-      allTestResults.push(result);
-      
-      if (result.runtime) maxRuntime = Math.max(maxRuntime, result.runtime);
-      if (result.memory) maxMemory = Math.max(maxMemory, result.memory);
-      lastStatusId = result.statusId;
-      if (result.stderr) lastStderr = result.stderr;
-      if (result.errorMessage) lastErrorMessage = result.errorMessage;
-      lastFullResponse = result.fullResponse;
-      
-      if (!result.passed) {
-        setIsLoading(false);
-        // Determine failure reason
-        let failureReason = "WRONG_ANSWER";
-        let failureMessage = `Failed on hidden test case ${i + 1}: expected ${tc.output}, got ${result.actual}`;
-        
-        if (result.error) {
-          if (result.error.type === "Compilation Error") {
-            failureReason = "COMPILATION_ERROR";
-            failureMessage = `Compilation error on hidden test case ${i + 1}: ${result.error.message}`;
-          } else if (result.error.type === "Runtime Error") {
-            failureReason = "RUNTIME_ERROR";
-            failureMessage = `Runtime error on hidden test case ${i + 1}: ${result.error.message}`;
-          } else if (result.error.type === "Time Limit Exceeded") {
-            failureReason = "TIME_LIMIT_EXCEEDED";
-            failureMessage = `Time limit exceeded on hidden test case ${i + 1}`;
-          }
-        }
-        
-        setSubmitResult({
-          status: "failed",
-          failedCase: { ...tc, actual: result.actual, type: "hidden", index: i, error: result.error },
-          passedCount,
-          totalCount,
-          failureReason,
-        });
-        setErrorDetails(result.error); // Show error details
-        // Save failed submission with details
-        await saveSubmission(
-          failureReason,
-          failureMessage,
-          result.runtime,
-          result.memory,
-          result.statusId,
-          result.stderr,
-          result.errorMessage,
-          passedCount,
-          totalCount,
-          result.fullResponse
-        );
-        return;
-      }
-      passedCount++;
-      await sleep(600);
-    }
-    // All passed
+
+    // Timeout
     setIsLoading(false);
-    
-    // Update execution metrics for display
-    if (maxRuntime > 0) setExecutionTime(maxRuntime);
-    if (maxMemory > 0) setExecutionMemory(maxMemory);
-    
-    const acceptedResult = { status: "accepted", passedCount, totalCount };
-    setSubmitResult(acceptedResult);
-    console.log("Submit accepted:", acceptedResult);
-    setShowAccepted(true);
-    setTimeout(() => setShowAccepted(false), 2000);
-
-    // Stop timer when problem is solved
-    setIsTimerRunning(false);
-
-    // Save successful submission with details
-    await saveSubmission(
-      "ACCEPTED", 
-      "All test cases passed",
-      maxRuntime,
-      maxMemory,
-      lastStatusId || 3, // 3 = Accepted in Judge0
-      lastStderr,
-      lastErrorMessage,
-      passedCount,
-      totalCount,
-      lastFullResponse
-    );
-
-    // Call success callback
-    if (onSubmissionSuccess) {
-      onSubmissionSuccess();
-    }
+    setOutput("Submission timed out. Please try again.");
+    setErrorDetails({
+      type: 'Timeout',
+      message: 'Submission processing took too long',
+      details: 'Please try again'
+    });
   };
 
   // Reset function
@@ -911,7 +796,7 @@ const Judge0CodeEditor = ({
     executionDetails = null
   ) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = auth.getToken();
       if (!token) {
         console.log("No token found, skipping submission save");
         return;
@@ -949,12 +834,7 @@ const Judge0CodeEditor = ({
         executionDetails: executionDetails
       };
 
-      const response = await axios.post("/api/submissions", submissionData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
+      const response = await axios.post("/api/submissions", submissionData, auth.getAuthConfig());
 
       console.log("Submission saved with details:", response.data);
       setSubmissionStatus("saved");

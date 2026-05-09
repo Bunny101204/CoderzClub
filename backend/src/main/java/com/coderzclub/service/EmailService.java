@@ -19,9 +19,12 @@ public class EmailService {
     @Value("${app.backend.url:http://localhost:8080}")
     private String backendUrl;
 
+    @Value("${app.frontend.url:${app.backend.url:http://localhost:8080}}")
+    private String frontendUrl;
+
     public void sendVerificationEmail(String recipientEmail, String token) {
         String subject = "Verify your CoderzClub account";
-        String verificationLink = String.format("%s/api/confirm-email?token=%s", backendUrl, token);
+        String verificationLink = String.format("%s/auth?verifyEmailToken=%s", normalizeUrl(frontendUrl), token);
         String text = "Welcome to CoderzClub!\n\n" +
                 "Please verify your email address by clicking the link below:\n" +
                 verificationLink + "\n\n" +
@@ -31,12 +34,19 @@ public class EmailService {
 
     public void sendPasswordResetEmail(String recipientEmail, String token) {
         String subject = "Reset your CoderzClub password";
-        String resetLink = String.format("%s/api/password-reset-confirm?token=%s", backendUrl, token);
+        String resetLink = String.format("%s/api/password-reset-confirm?token=%s", normalizeUrl(backendUrl), token);
         String text = "A request to reset your password was received.\n\n" +
                 "Use the link below to reset your password:\n" +
                 resetLink + "\n\n" +
                 "If you did not request a password reset, ignore this email.";
         sendEmail(recipientEmail, subject, text);
+    }
+
+    private String normalizeUrl(String url) {
+        if (url == null) {
+            return "";
+        }
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     private void sendEmail(String to, String subject, String text) {

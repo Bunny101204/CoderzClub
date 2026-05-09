@@ -30,7 +30,7 @@ public class JwtFilter extends OncePerRequestFilter {
         System.out.println("JWT Filter processing: " + requestURI);
         
         // Skip JWT processing for authentication endpoints
-        if (requestURI.equals("/api/login") || requestURI.equals("/api/register") || requestURI.equals("/api/test-password") || requestURI.equals("/api/test")) {
+        if (requestURI.equals("/api/login") || requestURI.equals("/api/register") || requestURI.equals("/api/resend-verification") || requestURI.equals("/api/test-password") || requestURI.equals("/api/test")) {
             System.out.println("Skipping JWT processing for: " + requestURI);
             filterChain.doFilter(request, response);
             return;

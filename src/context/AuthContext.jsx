@@ -1,16 +1,7 @@
 ﻿import React, { createContext, useContext, useState, useEffect } from "react";
+import { api, logger } from "../apiClient";
 
 const AuthContext = createContext();
-
-// Helper to determine backend base URL
-// Always use relative URLs so Vite's proxy handles the routing
-// This avoids GitHub Codespaces tunnel authentication issues
-const getBaseUrl = () => {
-  // Return empty string for relative URLs - Vite proxy will handle routing
-  // For localhost: requests go directly to http://localhost:8080
-  // For Codespaces: requests go through Vite's proxy which forwards to backend
-  return "";
-};
 
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -32,41 +23,23 @@ export function AuthProvider({ children }) {
   // Secure token validation function
   const validateToken = async (token) => {
     try {
-      const baseUrl = getBaseUrl();
-      const response = await fetch(`${baseUrl}/api/validate-token`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+      const response = await api.auth.validateToken();
+      const userData = response.data;
+      setIsAuthenticated(true);
+      setUser({
+        username: userData.username,
+        role: userData.role.toString().toUpperCase(),
       });
-
-      if (response.ok) {
-        const userData = await response.json();
-        setIsAuthenticated(true);
-        setUser({
-          username: userData.username,
-          role: userData.role.toString().toUpperCase(),
-        });
-        return true;
-      } else {
-        // Only clear token for explicit auth failures
-        if (response.status === 401 || response.status === 403) {
-          localStorage.removeItem("jwtToken");
-          setIsAuthenticated(false);
-          setUser(null);
-          return false;
-        }
-        // For other errors, try local decode fallback
-        const decoded = decodeJwt(token);
-        if (decoded) {
-          setIsAuthenticated(true);
-          setUser(decoded);
-          return true;
-        }
+      return true;
+    } catch (error) {
+      // Only clear token for explicit auth failures
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        localStorage.removeItem("jwtToken");
+        setIsAuthenticated(false);
+        setUser(null);
         return false;
       }
-    } catch (error) {
-      // Network/server unavailable → fallback to local decode, do NOT clear token
+      // For other errors, try local decode fallback
       const decoded = decodeJwt(token);
       if (decoded) {
         setIsAuthenticated(true);
@@ -90,33 +63,10 @@ export function AuthProvider({ children }) {
   // Real login function
   const login = async (username, password) => {
     try {
-      console.log("[AuthContext] Attempting login", username);
-      const baseUrl = getBaseUrl();
-      const response = await fetch(`${baseUrl}/api/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
+      logger.info("Attempting login", username);
+      const response = await api.auth.login({ username, password });
 
-      if (!response.ok) {
-        localStorage.removeItem("jwtToken");
-        setIsAuthenticated(false);
-        setUser(null);
-        let errorText = await response.text();
-        if (errorText.startsWith("<!DOCTYPE")) errorText = "Server error or forbidden (HTML received)";
-        return { success: false, error: errorText };
-      }
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (e) {
-        localStorage.removeItem("jwtToken");
-        setIsAuthenticated(false);
-        setUser(null);
-        return { success: false, error: "Invalid JSON response from server" };
-      }
-
+      let data = response.data;
       if (data.token) {
         localStorage.setItem("jwtToken", data.token);
         setIsAuthenticated(true);
@@ -134,43 +84,21 @@ export function AuthProvider({ children }) {
       localStorage.removeItem("jwtToken");
       setIsAuthenticated(false);
       setUser(null);
-      return { success: false, error: err.message };
+      const errorText = err.response?.data?.error || err.response?.data?.message || err.message || "Login failed";
+      return { success: false, error: errorText };
     }
   };
 
   // Real register function
   const register = async (username, email, password, role) => {
     try {
-      console.log("[AuthContext] Attempting register", username, email);
+      logger.info("Attempting register", username, email);
       const body = { username, email, password };
       if (role) body.role = role;
 
-      const baseUrl = getBaseUrl();
-      const response = await fetch(`${baseUrl}/api/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const response = await api.auth.register(body);
 
-      if (!response.ok) {
-        localStorage.removeItem("jwtToken");
-        setIsAuthenticated(false);
-        setUser(null);
-        let errorText = await response.text();
-        if (errorText.startsWith("<!DOCTYPE")) errorText = "Server error or forbidden (HTML received)";
-        return { success: false, error: errorText };
-      }
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (e) {
-        localStorage.removeItem("jwtToken");
-        setIsAuthenticated(false);
-        setUser(null);
-        return { success: false, error: "Invalid JSON response from server" };
-      }
-
+      let data = response.data;
       if (data.token) {
         localStorage.setItem("jwtToken", data.token);
         setIsAuthenticated(true);
@@ -178,6 +106,8 @@ export function AuthProvider({ children }) {
         const userObj = { username, role: normalizedRole };
         setUser(userObj);
         return { success: true, token: data.token, role: normalizedRole };
+      } else if (data.message) {
+        return { success: true, message: data.message, emailSent: data.emailSent ?? true };
       } else {
         localStorage.removeItem("jwtToken");
         setIsAuthenticated(false);
@@ -188,7 +118,21 @@ export function AuthProvider({ children }) {
       localStorage.removeItem("jwtToken");
       setIsAuthenticated(false);
       setUser(null);
-      return { success: false, error: err.message };
+      const errorText = err.response?.data?.error || err.response?.data?.message || err.message || "Registration failed";
+      return { success: false, error: errorText };
+    }
+  };
+
+  const resendVerification = async (usernameOrEmail) => {
+    try {
+      logger.info("Attempting resend verification", usernameOrEmail);
+      const response = await api.auth.resendVerification({ usernameOrEmail });
+
+      let data = response.data;
+      return { success: true, message: data.message || "Verification email resent.", emailSent: data.emailSent ?? true };
+    } catch (err) {
+      const errorText = err.response?.data?.error || err.response?.data?.message || err.message || "Resend verification failed";
+      return { success: false, error: errorText };
     }
   };
 
@@ -199,7 +143,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, register, resendVerification, logout }}>
       {children}
     </AuthContext.Provider>
   );
