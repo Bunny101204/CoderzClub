@@ -39,6 +39,15 @@ const apiClient = axios.create({
   },
 });
 
+// Separate instance for auth operations with shorter timeout
+const authClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 15000, // Auth ops should be fast
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
 // Request interceptor - add auth headers
 apiClient.interceptors.request.use(
   (config) => {
@@ -54,42 +63,94 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Response interceptor - handle auth errors and retries
+// Auth client request interceptor
+authClient.interceptors.request.use(
+  (config) => {
+    const token = getAuthToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    logger.error('Auth request interceptor error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor for auth operations - minimal error handling
+authClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // For auth operations, just log and reject - no redirects or complex retry
+    if (error.response?.status === 401) {
+      localStorage.removeItem('jwtToken');
+      localStorage.removeItem('token');
+    }
+    logger.error('Auth request failed:', {
+      url: error.config?.url,
+      method: error.config?.method,
+      status: error.response?.status,
+      message: error.message
+    });
+    return Promise.reject(error);
+  }
+);
+
+
 apiClient.interceptors.response.use(
   (response) => {
     return response;
   },
   async (error) => {
     const originalRequest = error.config;
+    const isAuthEndpoint = originalRequest.url?.includes('/api/login') ||
+                          originalRequest.url?.includes('/api/register') ||
+                          originalRequest.url?.includes('/api/validate-token') ||
+                          originalRequest.url?.includes('/api/confirm-email') ||
+                          originalRequest.url?.includes('/api/resend-verification');
 
-    // Don't retry auth requests to avoid loops
-    if (originalRequest.url?.includes('/api/login') ||
-        originalRequest.url?.includes('/api/register') ||
-        originalRequest.url?.includes('/api/validate-token')) {
+    // For auth endpoints: retry on network errors ONCE, then fail
+    if (isAuthEndpoint && !originalRequest._retry &&
+        (error.code === 'ECONNABORTED' || 
+         error.code === 'ERR_NETWORK' ||
+         error.message === 'Network Error')) {
+      
+      originalRequest._retry = true;
+      logger.warn(`Retrying auth request to ${originalRequest.url}`);
+      
+      // Short delay for auth retry
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return apiClient(originalRequest);
+    }
+
+    // Handle 401 - token expired (but NOT on auth page or during active auth attempt)
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
+      const currentPath = window.location.pathname;
+      
+      // Only redirect if user is NOT already on auth page or trying to auth
+      if (currentPath !== '/auth' && currentPath !== '/login') {
+        logger.warn('Token expired, clearing auth state and redirecting');
+        localStorage.removeItem('jwtToken');
+        localStorage.removeItem('token');
+        window.location.href = '/auth?reason=session_expired';
+      }
       return Promise.reject(error);
     }
 
-    // Handle 401 - token expired
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      logger.warn('Token expired, clearing auth state');
-      localStorage.removeItem('jwtToken');
-      localStorage.removeItem('token');
-      // Redirect to auth page
-      window.location.href = '/auth';
-      return Promise.reject(error);
-    }
-
-    // Retry logic for network errors and 5xx
-    if (!originalRequest._retry &&
-        (error.code === 'NETWORK_ERROR' ||
-         error.code === 'ECONNABORTED' ||
+    // Retry logic for network errors and 5xx (but not on auth endpoints)
+    if (!isAuthEndpoint &&
+        !originalRequest._retry &&
+        (error.code === 'ECONNABORTED' || 
+         error.code === 'ERR_NETWORK' ||
+         error.message === 'Network Error' ||
          (error.response?.status >= 500 && error.response?.status < 600))) {
 
       originalRequest._retry = true;
-      logger.warn(`Retrying request to ${originalRequest.url} (attempt ${originalRequest._retry})`);
+      logger.warn(`Retrying request to ${originalRequest.url}`);
 
       // Exponential backoff
-      const delay = Math.min(1000 * Math.pow(2, originalRequest._retry - 1), 5000);
+      const delay = Math.min(1000 * Math.pow(2, (originalRequest._retry || 1) - 1), 5000);
       await new Promise(resolve => setTimeout(resolve, delay));
 
       return apiClient(originalRequest);
@@ -108,12 +169,13 @@ apiClient.interceptors.response.use(
 
 // API methods
 export const api = {
-  // Auth endpoints
+  // Auth endpoints - use separate client with shorter timeout
   auth: {
-    login: (credentials) => apiClient.post('/api/login', credentials),
-    register: (userData) => apiClient.post('/api/register', userData),
-    validateToken: () => apiClient.post('/api/validate-token'),
-    resendVerification: (data) => apiClient.post('/api/resend-verification', data),
+    login: (credentials) => authClient.post('/api/login', credentials),
+    register: (userData) => authClient.post('/api/register', userData),
+    validateToken: () => authClient.post('/api/validate-token'),
+    resendVerification: (data) => authClient.post('/api/resend-verification', data),
+    confirmEmail: (token) => authClient.post('/api/confirm-email', { token }),
   },
 
   // Problems

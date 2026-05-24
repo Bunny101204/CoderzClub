@@ -20,33 +20,34 @@ export function AuthProvider({ children }) {
     return null;
   };
 
-  // Secure token validation function
+  // Secure token validation function with proper state management
   const validateToken = async (token) => {
     try {
       const response = await api.auth.validateToken();
       const userData = response.data;
-      setIsAuthenticated(true);
-      setUser({
+      const userObj = {
         username: userData.username,
         role: userData.role.toString().toUpperCase(),
-      });
-      return true;
+      };
+      setUser(userObj);
+      setIsAuthenticated(true);
+      return { success: true, user: userObj };
     } catch (error) {
       // Only clear token for explicit auth failures
       if (error.response?.status === 401 || error.response?.status === 403) {
         localStorage.removeItem("jwtToken");
         setIsAuthenticated(false);
         setUser(null);
-        return false;
+        return { success: false, reason: 'invalid' };
       }
       // For other errors, try local decode fallback
       const decoded = decodeJwt(token);
       if (decoded) {
-        setIsAuthenticated(true);
         setUser(decoded);
-        return true;
+        setIsAuthenticated(true);
+        return { success: true, user: decoded, offline: true };
       }
-      return false;
+      return { success: false, reason: 'decode_failed' };
     }
   };
 
@@ -54,7 +55,9 @@ export function AuthProvider({ children }) {
     // Check for JWT token and validate it with server
     const token = localStorage.getItem("jwtToken");
     if (token) {
-      validateToken(token).finally(() => setLoading(false));
+      validateToken(token)
+        .catch((err) => logger.warn('Token validation error during init:', err.message))
+        .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }

@@ -13,6 +13,7 @@ import Judge0CodeEditor from "./Components/Judge0CodeEditor";
 import HomePage from "./Components/HomePage";
 import ProblemPage from "./Components/ProblemPage";
 import ProblemPageNew from "./Components/ProblemPageNew";
+import LandingPage from "./Components/LandingPage";
 import { useAuth, AuthProvider } from "./context/AuthContext";
 import Header from "./Components/Header";
 import AuthPage from "./Components/AuthPage";
@@ -27,6 +28,7 @@ import SubscriptionPlans from "./Components/SubscriptionPlans";
 import Leaderboard from "./Components/Leaderboard";
 import UserStats from "./Components/UserStats";
 import Profile from "./Components/Profile";
+import ErrorBoundary from "./Components/ErrorBoundary";
 import { api } from "./apiClient";
 
 function AdminRoute({ user, problems }) {
@@ -237,11 +239,13 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <AppContent />
-      </Router>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

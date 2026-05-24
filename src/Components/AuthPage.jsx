@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../apiClient';
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -26,19 +27,17 @@ const AuthPage = () => {
 
     if (verificationToken) {
       setLoading(true);
-      fetch('/api/confirm-email?token=' + encodeURIComponent(verificationToken))
-        .then(async (response) => {
-          if (!response.ok) {
-            const json = await response.json().catch(() => null);
-            const message = json?.error || json?.message || 'Email verification failed';
-            setError(message);
-          } else {
-            setInfo('Email verified successfully. Please login.');
-          }
+      api.auth.confirmEmail(verificationToken)
+        .then((response) => {
+          const data = response.data;
+          setInfo(data?.message || 'Email verified successfully. Please login.');
         })
         .catch((err) => {
-          setError('Email verification failed. Please try again.');
-          console.error('Email verification error:', err);
+          const message = err.response?.data?.error || 
+                         err.response?.data?.message || 
+                         err.message || 
+                         'Email verification failed. Please try again.';
+          setError(message);
         })
         .finally(() => {
           setLoading(false);
@@ -89,7 +88,6 @@ const AuthPage = () => {
 
     try {
       let result;
-      console.log('Submitting', isLogin ? 'login' : 'register', formData); // DEBUG
       if (isLogin) {
         result = await login(formData.username, formData.password);
       } else {
@@ -100,7 +98,6 @@ const AuthPage = () => {
           registerAsAdmin ? 'admin' : 'user'
         );
       }
-      console.log('API result:', result); // DEBUG
       if (result.success) {
         if (result.token) {
           navigate('/');

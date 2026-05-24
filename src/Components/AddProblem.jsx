@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../apiClient";
 
 const PARAMETER_TYPES = [
   "int", "int[]", "long", "long[]", "float", "float[]", "double", "double[]", "String", "String[]", "boolean", "boolean[]", "List<Integer>", "List<String>", "ListNode", "TreeNode", "Graph", "Custom Object"
@@ -30,11 +31,8 @@ const AddProblem = () => {
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("http://localhost:8080/api/bundles");
-      if (response.ok) {
-        const data = await response.json();
-        setBundles(data);
-      }
+      const response = await api.bundles.getAll();
+      setBundles(response.data);
     } catch (error) {
       console.error("Error fetching bundles:", error);
     }

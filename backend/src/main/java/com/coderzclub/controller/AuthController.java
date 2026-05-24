@@ -162,7 +162,7 @@ public class AuthController {
         }
     }
 
-    @GetMapping("/validate-token")
+    @PostMapping("/validate-token")
     public ResponseEntity<?> validateToken(HttpServletRequest request) {
         try {
             String authHeader = request.getHeader("Authorization");
