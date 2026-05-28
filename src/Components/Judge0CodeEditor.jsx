@@ -54,6 +54,18 @@ const Judge0CodeEditor = ({
   const [copySuccess, setCopySuccess] = useState(false); // Copy to clipboard success
   const [isDarkTheme, setIsDarkTheme] = useState(true); // Theme state
 
+  const languageNames = {
+    50: "C",
+    54: "C++",
+    62: "Java",
+    71: "Python",
+    63: "JavaScript",
+    74: "TypeScript",
+    60: "Go",
+    68: "PHP",
+    72: "Ruby",
+  };
+
   // New features
   const [startTime, setStartTime] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -647,21 +659,29 @@ const Judge0CodeEditor = ({
     setErrorDetails(null);
 
     try {
+      const normalizeCases = (cases) => {
+        return (cases || []).map(tc => ({
+          input: tc.input,
+          expectedOutput: tc.expectedOutput ?? tc.output,
+          explanation: tc.explanation
+        }));
+      };
+
       // Create async submission job
       const jobRequest = {
         problemId: problemId,
         code: sourceCode,
         language: languageNames[languageId] || "Unknown",
         languageId: languageId,
-        publicTestCases: publicCases,
-        hiddenTestCases: hiddenCases
+        publicTestCases: normalizeCases(publicCases),
+        hiddenTestCases: normalizeCases(hiddenCases)
       };
 
       const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
       const { jobId } = jobResponse.data;
 
       // Poll for job completion
-      await pollJobStatus(jobId);
+      await pollJobStatus(jobId, publicCases?.length || 0);
 
     } catch (error) {
       console.error("Submission failed:", error);
@@ -671,7 +691,7 @@ const Judge0CodeEditor = ({
   };
 
   // Poll for job completion status
-  const pollJobStatus = async (jobId) => {
+  const pollJobStatus = async (jobId, publicCount = 0) => {
     const maxPolls = 60; // Max 60 polls (about 30 seconds with 500ms intervals)
     const pollInterval = 500; // 500ms between polls
 
@@ -699,8 +719,9 @@ const Judge0CodeEditor = ({
               onSubmissionSuccess();
             }
           } else {
-            // Find first failed test
-            const failedTest = job.testResults?.find(r => !r.passed);
+            // Find first failed test and infer whether it was public or hidden
+            const failedIndex = job.testResults?.findIndex(r => !r.passed);
+            const failedTest = failedIndex !== undefined && failedIndex >= 0 ? job.testResults[failedIndex] : null;
             if (failedTest) {
               const error = failedTest.errorType ? {
                 type: failedTest.errorType,
@@ -708,13 +729,19 @@ const Judge0CodeEditor = ({
                 details: `Expected: ${failedTest.expectedOutput}, Got: ${failedTest.actualOutput}`
               } : null;
 
+              const failedType = failedIndex >= 0
+                ? (failedIndex < publicCount ? 'public' : 'hidden')
+                : 'unknown';
+
               setSubmitResult({
                 status: "failed",
                 failedCase: {
                   input: failedTest.input,
+                  output: failedTest.expectedOutput,
                   expected: failedTest.expectedOutput,
                   actual: failedTest.actualOutput,
-                  type: "test",
+                  type: failedType,
+                  index: failedIndex,
                   error: error
                 },
                 passedCount: job.testResults.filter(r => r.passed).length,
@@ -725,6 +752,14 @@ const Judge0CodeEditor = ({
               if (error) {
                 setErrorDetails(error);
               }
+            } else {
+              setSubmitResult({
+                status: "failed",
+                failedCase: null,
+                passedCount: job.testResults.filter(r => r.passed).length,
+                totalCount: job.testResults.length,
+                failureReason: job.result
+              });
             }
           }
 
@@ -802,24 +837,12 @@ const Judge0CodeEditor = ({
         return;
       }
 
-      const languageNames = {
-        50: "C",
-        54: "C++",
-        62: "Java",
-        71: "Python",
-        63: "JavaScript",
-        74: "TypeScript",
-        60: "Go",
-        68: "PHP",
-        72: "Ruby",
-      };
-
       // Get problem ID from URL or props
       const problemIdFromUrl = window.location.pathname.split("/").pop();
-      const problemId = problemId || problemIdFromUrl;
+      const problemIdToSave = problemId || problemIdFromUrl;
 
       const submissionData = {
-        problemId: problemId,
+        problemId: problemIdToSave,
         code: sourceCode,
         language: languageNames[languageId] || "Unknown",
         result: result,
@@ -1435,7 +1458,9 @@ const Judge0CodeEditor = ({
                     ❌ Test Case Failed (
                     {submitResult.failedCase?.type === "public"
                       ? "Public"
-                      : "Hidden"}{" "}
+                      : submitResult.failedCase?.type === "hidden"
+                        ? "Hidden"
+                        : "Test Case"}{" "}
                     #{submitResult.failedCase?.index !== undefined ? submitResult.failedCase.index + 1 : 'N/A'})
                     {submitResult.failureReason && (
                       <span className="ml-2 text-sm font-normal text-red-300">

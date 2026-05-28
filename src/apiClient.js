@@ -1,9 +1,10 @@
 import axios from 'axios';
 
 // Environment configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 const IS_PRODUCTION = import.meta.env.PROD;
 const IS_DEVELOPMENT = import.meta.env.DEV;
+const API_BASE_URL = IS_DEVELOPMENT ? '' : (rawApiBaseUrl || '');
 
 // Environment-gated logger
 export const logger = {
@@ -175,7 +176,7 @@ export const api = {
     register: (userData) => authClient.post('/api/register', userData),
     validateToken: () => authClient.post('/api/validate-token'),
     resendVerification: (data) => authClient.post('/api/resend-verification', data),
-    confirmEmail: (token) => authClient.post('/api/confirm-email', { token }),
+    confirmEmail: (token) => authClient.get('/api/confirm-email', { params: { token } }),
   },
 
   // Problems

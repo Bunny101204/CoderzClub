@@ -3,6 +3,7 @@ package com.coderzclub.model;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.index.Indexed;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +57,7 @@ public class SubmissionJob {
 
     public static class TestCase {
         private String input;
+        @JsonAlias({"output"})
         private String expectedOutput;
         private String explanation;
 

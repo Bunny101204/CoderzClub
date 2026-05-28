@@ -24,7 +24,7 @@ public class EmailService {
 
     public void sendVerificationEmail(String recipientEmail, String token) {
         String subject = "Verify your CoderzClub account";
-        String verificationLink = String.format("%s/auth?verifyEmailToken=%s", normalizeUrl(frontendUrl), token);
+        String verificationLink = String.format("%s/api/confirm-email?token=%s", normalizeUrl(backendUrl), token);
         String text = "Welcome to CoderzClub!\n\n" +
                 "Please verify your email address by clicking the link below:\n" +
                 verificationLink + "\n\n" +

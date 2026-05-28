@@ -46,6 +46,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/validate-token").permitAll()
                 .requestMatchers("/api/problems").permitAll()
                 .requestMatchers("/api/problems/**").permitAll()
+                .requestMatchers("/api/judge0/**").permitAll()
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/category/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/{id}").permitAll() // GET requests for individual bundles

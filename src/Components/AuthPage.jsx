@@ -26,24 +26,7 @@ const AuthPage = () => {
     const verificationToken = searchParams.get('verifyEmailToken');
 
     if (verificationToken) {
-      setLoading(true);
-      api.auth.confirmEmail(verificationToken)
-        .then((response) => {
-          const data = response.data;
-          setInfo(data?.message || 'Email verified successfully. Please login.');
-        })
-        .catch((err) => {
-          const message = err.response?.data?.error || 
-                         err.response?.data?.message || 
-                         err.message || 
-                         'Email verification failed. Please try again.';
-          setError(message);
-        })
-        .finally(() => {
-          setLoading(false);
-          searchParams.delete('verifyEmailToken');
-          setSearchParams(searchParams, { replace: true });
-        });
+      window.location.href = `/api/confirm-email?token=${encodeURIComponent(verificationToken)}`;
       return;
     }
 
