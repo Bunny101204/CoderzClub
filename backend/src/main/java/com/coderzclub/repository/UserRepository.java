@@ -4,6 +4,7 @@ import com.coderzclub.model.User;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
+import java.util.List;
 import java.util.Optional;
 
 
@@ -17,4 +18,8 @@ public interface UserRepository extends MongoRepository<User, String> {
 
     Optional<User> findByEmailVerificationToken(String token);
     Optional<User> findByPasswordResetToken(String token);
+    
+    // Get top users by total points, efficiently sorted at database level
+    @Query(value = "{}", sort = "{ 'totalPoints': -1 }")
+    List<User> findTopUsersByPoints();
 } 

@@ -436,13 +436,20 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     return map;
   }, [problems]);
 
+  const normalizeDifficulty = (difficulty) => {
+    if (!difficulty) return "UNKNOWN";
+    const diff = String(difficulty).trim().toUpperCase();
+    if (diff === "BASIC" || diff === "EASY") return "EASY";
+    if (diff === "INTERMEDIATE" || diff === "MEDIUM") return "MEDIUM";
+    if (diff === "ADVANCED" || diff === "HARD") return "HARD";
+    return "UNKNOWN";
+  };
+
   const difficultyCounts = useMemo(() => {
     const counts = {
-      BASIC: 0,
-      INTERMEDIATE: 0,
-      ADVANCED: 0,
-      SDE: 0,
-      EXPERT: 0,
+      EASY: 0,
+      MEDIUM: 0,
+      HARD: 0,
       UNKNOWN: 0,
     };
     if (!submissions || !Array.isArray(submissions)) return counts;
@@ -456,7 +463,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     accepted.forEach((s) => {
       if (!s || !s.problemId) return;
       const p = problemMap.get(String(s.problemId));
-      const diff = p?.difficulty || "UNKNOWN";
+      const diff = normalizeDifficulty(p?.difficulty);
       counts[diff] = (counts[diff] || 0) + 1;
     });
     return counts;
@@ -665,39 +672,31 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                 Solved by Difficulty
               </h3>
               <div className="space-y-3">
-                {["BASIC", "INTERMEDIATE", "ADVANCED", "SDE", "EXPERT"].map(
-                  (d) => (
-                    <div key={d} className="flex items-center gap-3">
-                      <div className="w-32 text-sm text-gray-300">{d}</div>
-                      <div className="flex-1 bg-gray-900 rounded h-3 overflow-hidden">
-                        <div
-                          className={`h-3 ${
-                            d === "BASIC"
-                              ? "bg-green-500"
-                              : d === "INTERMEDIATE"
-                              ? "bg-yellow-500"
-                              : d === "ADVANCED"
-                              ? "bg-orange-500"
-                              : d === "SDE"
-                              ? "bg-red-500"
-                              : "bg-purple-500"
-                          }`}
-                          style={{
-                            width: `${Math.min(
-                              ((difficultyCounts[d] || 0) /
-                                Math.max(1, stats?.totalProblemsSolved || 0)) *
-                                100,
-                              100
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="w-10 text-right text-sm text-gray-300">
-                        {difficultyCounts[d] || 0}
-                      </div>
+                {[
+                  { key: "EASY", label: "Easy", color: "bg-green-500" },
+                  { key: "MEDIUM", label: "Medium", color: "bg-yellow-500" },
+                  { key: "HARD", label: "Hard", color: "bg-orange-500" },
+                ].map((d) => (
+                  <div key={d.key} className="flex items-center gap-3">
+                    <div className="w-32 text-sm text-gray-300">{d.label}</div>
+                    <div className="flex-1 bg-gray-900 rounded h-3 overflow-hidden">
+                      <div
+                        className={`h-3 ${d.color}`}
+                        style={{
+                          width: `${Math.min(
+                            ((difficultyCounts[d.key] || 0) /
+                              Math.max(1, stats?.totalProblemsSolved || 0)) *
+                              100,
+                            100
+                          )}%`,
+                        }}
+                      />
                     </div>
-                  )
-                )}
+                    <div className="w-10 text-right text-sm text-gray-300">
+                      {difficultyCounts[d.key] || 0}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

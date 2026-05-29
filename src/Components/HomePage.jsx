@@ -282,11 +282,6 @@ const HomePage = ({ problems: propsProblems }) => {
             <option value="EASY">Easy</option>
             <option value="MEDIUM">Medium</option>
             <option value="HARD">Hard</option>
-            <option value="BASIC">Basic</option>
-            <option value="INTERMEDIATE">Intermediate</option>
-            <option value="ADVANCED">Advanced</option>
-            <option value="SDE">SDE</option>
-            <option value="EXPERT">Expert</option>
           </select>
           <input
             type="text"

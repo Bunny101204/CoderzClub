@@ -133,8 +133,26 @@ public class SubmissionService {
      * Update user stats after successful submission
      */
     private void updateUserStats(User user, Problem problem) {
-        // This would be implemented based on your existing logic
-        // For now, just log
-        logger.info("User {} solved problem {}", user.getUsername(), problem.getTitle());
+        // Check if user already solved this problem
+        if (user.getSolvedProblemIds() != null && 
+            user.getSolvedProblemIds().contains(problem.getId())) {
+            return; // Already solved, don't award points again
+        }
+        
+        // Add problem to solved list
+        if (user.getSolvedProblemIds() == null) {
+            user.setSolvedProblemIds(new java.util.ArrayList<>());
+        }
+        user.getSolvedProblemIds().add(problem.getId());
+        
+        // Update stats
+        user.setProblemsSolved(user.getProblemsSolved() + 1);
+        user.setTotalPoints(user.getTotalPoints() + problem.getPoints());
+        
+        // Save the updated user
+        userRepository.save(user);
+        
+        logger.info("Updated user {} stats: +{} points, total problems solved: {}",
+            user.getUsername(), problem.getPoints(), user.getProblemsSolved());
     }
 }

@@ -87,7 +87,7 @@ public class Judge0ExecutionService {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
-            int maxRetries = 3;
+            int maxRetries = 7;
             int attempt = 0;
             HttpResponse<String> response;
             while (true) {
@@ -100,7 +100,15 @@ public class Judge0ExecutionService {
                 if (attempt > maxRetries) {
                     break;
                 }
-                Thread.sleep(500L * attempt);
+                long waitMs = 1000L * attempt;
+                String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
+                if (retryAfter != null) {
+                    try {
+                        waitMs = Math.max(waitMs, Long.parseLong(retryAfter) * 1000L);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                Thread.sleep(waitMs);
             }
 
             Map<String, Object> responseMap = objectMapper.readValue(response.body(), Map.class);

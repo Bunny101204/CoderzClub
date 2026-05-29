@@ -1,6 +1,8 @@
 package com.coderzclub.controller;
 
 import com.coderzclub.model.SubmissionJob;
+import com.coderzclub.model.User;
+import com.coderzclub.repository.UserRepository;
 import com.coderzclub.service.SubmissionJobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +26,9 @@ public class SubmissionJobController {
     @Autowired
     private SubmissionJobService jobService;
 
+    @Autowired
+    private UserRepository userRepository;
+
     /**
      * Create a new submission job
      */
@@ -34,9 +39,16 @@ public class SubmissionJobController {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             String username = auth.getName();
 
-            // Create job
+            Optional<User> userOpt = userRepository.findByUsername(username);
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
+            }
+
+            User user = userOpt.get();
+
+            // Create job using actual user ID
             SubmissionJob job = jobService.createJob(
-                username, // Using username as userId for now
+                user.getId(),
                 request.getProblemId(),
                 request.getCode(),
                 request.getLanguage(),

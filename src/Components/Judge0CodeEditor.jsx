@@ -521,9 +521,19 @@ const Judge0CodeEditor = ({
       
     } catch (error) {
       console.error("Error in handleRunAll:", error);
-      setOutput(
-        "Error running test cases: " + (error.message || "Unknown error")
-      );
+      if (error?.response?.status === 429) {
+        setOutput(
+          "Judge0 rate limit reached. Please wait a few seconds and try again."
+        );
+      } else if (error?.response?.status === 503) {
+        setOutput(
+          "Judge0 is temporarily unavailable. Please try again in a few seconds."
+        );
+      } else {
+        setOutput(
+          "Error running test cases: " + (error.message || "Unknown error")
+        );
+      }
       setResults([]); // Clear results on error
     } finally {
       setIsLoading(false);
@@ -718,6 +728,7 @@ const Judge0CodeEditor = ({
             if (onSubmissionSuccess) {
               onSubmissionSuccess();
             }
+            window.dispatchEvent(new Event("leaderboardRefresh"));
           } else {
             // Find first failed test and infer whether it was public or hidden
             const failedIndex = job.testResults?.findIndex(r => !r.passed);

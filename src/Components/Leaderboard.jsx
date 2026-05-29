@@ -5,53 +5,82 @@ const Leaderboard = () => {
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
+    // Initial fetch
     fetchLeaderboard();
+
+    // Set up auto-refresh every 30 seconds
+    const intervalId = setInterval(() => {
+      fetchLeaderboard(true); // true = silent refresh
+    }, 30000);
+
+    // Refresh immediately when a successful submission occurs
+    const handleLeaderboardRefresh = () => fetchLeaderboard(true);
+    window.addEventListener("leaderboardRefresh", handleLeaderboardRefresh);
+
+    // Cleanup on component unmount
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener("leaderboardRefresh", handleLeaderboardRefresh);
+    };
   }, []);
 
-  const fetchLeaderboard = async () => {
+  const fetchLeaderboard = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
+      setIsRefreshing(true);
+      
       const response = await axios.get("/api/users/leaderboard");
       // Ensure data is an array
       const leaderboardData = Array.isArray(response.data) ? response.data : [];
       setLeaderboard(leaderboardData);
+      setLastUpdated(new Date());
       setError(null);
     } catch (err) {
       setError(
         "Failed to fetch leaderboard. Please restart the backend server."
       );
       console.error("Error fetching leaderboard:", err);
-      setLeaderboard([]);
+      if (!silent) setLeaderboard([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
-  const getRankIcon = (index) => {
+  const getRankBadge = (index) => {
     switch (index) {
       case 0:
-        return "🥇";
+        return {
+          icon: "🥇",
+          bg: "bg-yellow-500/20",
+          text: "text-yellow-400",
+          border: "border-yellow-500/30"
+        };
       case 1:
-        return "🥈";
+        return {
+          icon: "🥈",
+          bg: "bg-gray-500/20",
+          text: "text-gray-300",
+          border: "border-gray-500/30"
+        };
       case 2:
-        return "🥉";
+        return {
+          icon: "🥉",
+          bg: "bg-orange-500/20",
+          text: "text-orange-400",
+          border: "border-orange-500/30"
+        };
       default:
-        return `#${index + 1}`;
-    }
-  };
-
-  const getRankColor = (index) => {
-    switch (index) {
-      case 0:
-        return "text-yellow-400";
-      case 1:
-        return "text-gray-300";
-      case 2:
-        return "text-orange-400";
-      default:
-        return "text-gray-400";
+        return {
+          icon: `#${index + 1}`,
+          bg: "bg-blue-500/10",
+          text: "text-blue-400",
+          border: "border-blue-500/20"
+        };
     }
   };
 
@@ -73,9 +102,15 @@ const Leaderboard = () => {
       <div className="min-h-screen bg-gray-900 text-white p-6">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-3xl font-bold mb-6">🏆 Leaderboard</h1>
-          <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 text-red-300">
+          <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 text-red-300 mb-4">
             {error}
           </div>
+          <button
+            onClick={() => fetchLeaderboard()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
@@ -99,19 +134,39 @@ const Leaderboard = () => {
                 <h2 className="text-2xl font-bold mb-1">Top Coders</h2>
                 <p className="text-gray-300">Compete and climb the ranks</p>
               </div>
-              <div className="text-right">
-                <div className="text-sm text-gray-300 mb-1">
-                  Total Participants
+              <div className="flex items-center gap-6">
+                <div className="text-right">
+                  <div className="text-sm text-gray-300 mb-1">
+                    Total Participants
+                  </div>
+                  <div className="text-3xl font-bold">{leaderboard.length}</div>
                 </div>
-                <div className="text-3xl font-bold">{leaderboard.length}</div>
+                <button
+                  onClick={() => fetchLeaderboard(false)}
+                  disabled={isRefreshing}
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all ${
+                    isRefreshing
+                      ? "bg-gray-600 cursor-not-allowed opacity-50"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
+                  title="Refresh leaderboard"
+                >
+                  <span>🔄</span>
+                  {isRefreshing ? "Refreshing..." : "Refresh"}
+                </button>
               </div>
             </div>
+            {lastUpdated && (
+              <div className="text-xs text-gray-400 mt-3">
+                Last updated: {lastUpdated.toLocaleTimeString()}
+              </div>
+            )}
           </div>
 
           {/* Leaderboard List */}
           <div className="divide-y divide-gray-700">
             {leaderboard.map((user, index) => {
-              const badge = getRankIcon(index);
+              const badge = getRankBadge(index);
               return (
                 <div
                   key={user.id}
@@ -125,7 +180,7 @@ const Leaderboard = () => {
                     <div className="flex items-center space-x-6 flex-1">
                       {/* Rank Badge */}
                       <div
-                        className={`w-16 h-16 ${badge.bg} ${badge.text} rounded-full flex items-center justify-center font-bold text-xl shadow-lg flex-shrink-0`}
+                        className={`w-16 h-16 ${badge.bg} ${badge.text} rounded-full flex items-center justify-center font-bold text-xl shadow-lg flex-shrink-0 border ${badge.border}`}
                       >
                         {badge.icon}
                       </div>

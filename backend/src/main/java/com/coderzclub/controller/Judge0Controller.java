@@ -60,7 +60,7 @@ public class Judge0Controller {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
-            int maxRetries = 3;
+            int maxRetries = 7;
             int attempt = 0;
             HttpResponse<String> response;
             while (true) {
@@ -73,12 +73,26 @@ public class Judge0Controller {
                 if (attempt > maxRetries) {
                     break;
                 }
-                Thread.sleep(500L * attempt);
+                long waitMs = 1000L * attempt;
+                String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
+                if (retryAfter != null) {
+                    try {
+                        waitMs = Math.max(waitMs, Long.parseLong(retryAfter) * 1000L);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                Thread.sleep(waitMs);
             }
 
             int statusCode = response.statusCode();
             String responseBody = response.body();
             Map<String, Object> responseMap = objectMapper.readValue(responseBody, Map.class);
+            if (statusCode == 429) {
+                return ResponseEntity.status(429).body(Map.of(
+                    "error", "Judge0 rate limit exceeded. Please wait a few seconds and try again.",
+                    "details", responseMap
+                ));
+            }
             return ResponseEntity.status(statusCode).body(responseMap);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Judge0 execution failed", "details", e.getMessage()));

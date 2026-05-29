@@ -83,9 +83,9 @@ public class UserController {
     @GetMapping("/leaderboard")
     public ResponseEntity<List<User>> getLeaderboard() {
         try {
-            List<User> topUsers = userRepository.findAll()
+            // Use database-level sorting for efficiency
+            List<User> topUsers = userRepository.findTopUsersByPoints()
                 .stream()
-                .sorted((a, b) -> Integer.compare(b.getTotalPoints(), a.getTotalPoints()))
                 .limit(50)
                 .collect(java.util.stream.Collectors.toList());
             
