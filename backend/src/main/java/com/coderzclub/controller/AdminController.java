@@ -7,6 +7,10 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.SubmissionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -32,25 +36,26 @@ public class AdminController {
         try {
             Map<String, Object> stats = new HashMap<>();
             
-            // User stats
-            List<User> allUsers = userRepository.findAll();
-            stats.put("totalUsers", allUsers.size());
-            stats.put("activeUsers", allUsers.stream()
-                .filter(user -> user.getLastActiveDate() != null && 
-                    user.getLastActiveDate().after(new java.util.Date(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)))
-                .count());
+            // Get counts without loading all data (more efficient)
+            stats.put("totalUsers", userRepository.count());
+            stats.put("totalProblems", problemRepository.count());
+            stats.put("totalSubmissions", submissionRepository.count());
             
-            // Problem stats
-            List<Problem> allProblems = problemRepository.findAll();
-            stats.put("totalProblems", allProblems.size());
-            stats.put("problemsByDifficulty", allProblems.stream()
-                .collect(Collectors.groupingBy(Problem::getDifficulty, Collectors.counting())));
+            // For statistics, we still need some data, but limit to recent entries
+            List<Submission> recentSubmissions = submissionRepository.findAll(
+                PageRequest.of(0, 1000, Sort.by("createdAt").descending())
+            ).getContent();
             
-            // Submission stats
-            List<Submission> allSubmissions = submissionRepository.findAll();
-            stats.put("totalSubmissions", allSubmissions.size());
-            stats.put("submissionsByResult", allSubmissions.stream()
+            stats.put("submissionsByResult", recentSubmissions.stream()
                 .collect(Collectors.groupingBy(Submission::getResult, Collectors.counting())));
+            
+            // Get first page of problems for difficulty stats (limit to 500)
+            List<Problem> problems = problemRepository.findAll(
+                PageRequest.of(0, 500)
+            ).getContent();
+            
+            stats.put("problemsByDifficulty", problems.stream()
+                .collect(Collectors.groupingBy(Problem::getDifficulty, Collectors.counting())));
             
             return ResponseEntity.ok(stats);
             
@@ -60,26 +65,46 @@ public class AdminController {
     }
     
     @GetMapping("/users")
-    public ResponseEntity<List<User>> getAllUsers() {
+    public ResponseEntity<?> getAllUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
         try {
-            List<User> users = userRepository.findAll();
-            // Remove sensitive data
-            users.forEach(user -> user.setPasswordHash(null));
-            return ResponseEntity.ok(users);
+            Pageable pageable = PageRequest.of(page, size, Sort.by("_id").ascending());
+            Page<User> usersPage = userRepository.findAll(pageable);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("users", usersPage.getContent().stream()
+                .peek(user -> user.setPasswordHash(null))  // Remove sensitive data
+                .collect(Collectors.toList()));
+            response.put("currentPage", page);
+            response.put("totalPages", usersPage.getTotalPages());
+            response.put("totalItems", usersPage.getTotalElements());
+            
+            return ResponseEntity.ok(response);
             
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(null);
+            return ResponseEntity.badRequest().body("Error fetching users: " + e.getMessage());
         }
     }
     
     @GetMapping("/submissions")
-    public ResponseEntity<List<Submission>> getAllSubmissions() {
+    public ResponseEntity<?> getAllSubmissions(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
         try {
-            List<Submission> submissions = submissionRepository.findAll();
-            return ResponseEntity.ok(submissions);
+            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+            Page<Submission> submissionsPage = submissionRepository.findAll(pageable);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("submissions", submissionsPage.getContent());
+            response.put("currentPage", page);
+            response.put("totalPages", submissionsPage.getTotalPages());
+            response.put("totalItems", submissionsPage.getTotalElements());
+            
+            return ResponseEntity.ok(response);
             
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(null);
+            return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
         }
     }
     
@@ -115,13 +140,16 @@ public class AdminController {
     @GetMapping("/analytics/submissions")
     public ResponseEntity<?> getSubmissionAnalytics() {
         try {
-            List<Submission> submissions = submissionRepository.findAll();
+            // Limit to last 1000 submissions for performance
+            List<Submission> recentSubmissions = submissionRepository.findAll(
+                PageRequest.of(0, 1000, Sort.by("createdAt").descending())
+            ).getContent();
             
             Map<String, Object> analytics = new HashMap<>();
             
             // Daily submissions for last 30 days
-            Map<String, Long> dailySubmissions = submissions.stream()
-                .filter(s -> s.getCreatedAt().after(new java.util.Date(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)))
+            Map<String, Long> dailySubmissions = recentSubmissions.stream()
+                .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().after(new java.util.Date(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)))
                 .collect(Collectors.groupingBy(
                     s -> new java.text.SimpleDateFormat("yyyy-MM-dd").format(s.getCreatedAt()),
                     Collectors.counting()
@@ -130,13 +158,13 @@ public class AdminController {
             analytics.put("dailySubmissions", dailySubmissions);
             
             // Language distribution
-            Map<String, Long> languageDistribution = submissions.stream()
+            Map<String, Long> languageDistribution = recentSubmissions.stream()
                 .collect(Collectors.groupingBy(Submission::getLanguage, Collectors.counting()));
             
             analytics.put("languageDistribution", languageDistribution);
             
             // Success rate by language
-            Map<String, Double> successRateByLanguage = submissions.stream()
+            Map<String, Double> successRateByLanguage = recentSubmissions.stream()
                 .collect(Collectors.groupingBy(
                     Submission::getLanguage,
                     Collectors.collectingAndThen(

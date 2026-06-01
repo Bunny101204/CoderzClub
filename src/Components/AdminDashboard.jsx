@@ -1,27 +1,41 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 
-const AdminDashboard = ({ problems: propsProblems }) => {
+const AdminDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
-  const [problemList, setProblemList] = useState([]);
+  const [problemList, setProblemList] = useState([]); // holds current page of problems
   const [bundles, setBundles] = useState([]);
   const [activeTab, setActiveTab] = useState("problems");
   const [bundlePage, setBundlePage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const problemsPerPage = 10;
-  const bundlesPerPage = 10;
+  const [problemsPerPage, setProblemsPerPage] = useState(10);
+  const [problemSearch, setProblemSearch] = useState("");
+  const [problemTopic, setProblemTopic] = useState("");
+  const [bundlesPerPage, setBundlesPerPage] = useState(10);
+  const [bundleSearch, setBundleSearch] = useState("");
+  const [totalProblemPages, setTotalProblemPages] = useState(0);
+  const [totalProblemItems, setTotalProblemItems] = useState(0);
   
   // Ensure problemList and bundles are always arrays
   const safeProblemList = Array.isArray(problemList) ? problemList : [];
   const safeBundles = Array.isArray(bundles) ? bundles : [];
   
-  const totalPages = Math.ceil(safeProblemList.length / problemsPerPage);
-  const totalBundlePages = Math.ceil(safeBundles.length / bundlesPerPage);
-  const paginatedProblems = safeProblemList.slice(
-    (currentPage - 1) * problemsPerPage,
-    currentPage * problemsPerPage
-  );
-  const paginatedBundles = safeBundles.slice(
+  const compareById = (a, b) => {
+    const idA = String(a.id || "");
+    const idB = String(b.id || "");
+    return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+  };
+  const paginatedProblems = [...safeProblemList].sort(compareById);
+  const totalPages = totalProblemPages;
+  const filteredBundles = safeBundles.filter((bundle) => {
+    if (!bundleSearch || bundleSearch.trim() === "") return true;
+    const searchLower = bundleSearch.toLowerCase().trim();
+    const bundleId = String(bundle.id || "").toLowerCase();
+    const name = String(bundle.name || "").toLowerCase();
+    return bundleId === searchLower || bundleId.startsWith(searchLower) || name.includes(searchLower);
+  });
+  const totalBundlePages = Math.ceil(filteredBundles.length / bundlesPerPage);
+  const paginatedBundles = filteredBundles.slice(
     (bundlePage - 1) * bundlesPerPage,
     bundlePage * bundlesPerPage
   );
@@ -37,30 +51,37 @@ const AdminDashboard = ({ problems: propsProblems }) => {
     }, 30000);
     
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    // Update problem list when props change - ensure it's an array
-    if (propsProblems && Array.isArray(propsProblems)) {
-      if (propsProblems.length > 0) {
-        setProblemList(propsProblems);
-        setLoading(false);
-      }
-    }
-  }, [propsProblems]);
+  }, [currentPage, problemsPerPage, problemSearch, problemTopic]);
+  // Note: AdminDashboard fetches paginated problems directly from API; props are not used.
 
   const fetchProblems = async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/problems");
+      const respPage = Math.max(0, currentPage - 1);
+      const params = new URLSearchParams({ page: respPage.toString(), size: problemsPerPage.toString() });
+      if (problemSearch && problemSearch.trim() !== '') {
+        params.append('search', problemSearch.trim());
+      }
+      if (problemTopic && problemTopic !== '') {
+        params.append('tags', problemTopic);
+      }
+      const response = await fetch(`/api/problems?${params}`);
       if (response.ok) {
         const data = await response.json();
-        // Handle both paginated and non-paginated responses
+        // Handle paginated response
         let problemsArray = [];
-        if (Array.isArray(data)) {
-          problemsArray = data;
-        } else if (data.problems && Array.isArray(data.problems)) {
+        if (data.problems && Array.isArray(data.problems)) {
           problemsArray = data.problems;
+          setTotalProblemPages(data.totalPages || 0);
+          setTotalProblemItems(data.totalItems || (data.totalElements || problemsArray.length));
+        } else if (Array.isArray(data)) {
+          problemsArray = data;
+          if (problemTopic && problemTopic !== '') {
+            problemsArray = problemsArray.filter(p => (p.tags || []).map(String).map(t => t.toLowerCase()).includes(problemTopic.toLowerCase()));
+          }
+          // no pagination info available
+          setTotalProblemPages(Math.ceil(problemsArray.length / problemsPerPage));
+          setTotalProblemItems(problemsArray.length);
         }
         setProblemList(problemsArray);
       } else {
@@ -217,7 +238,7 @@ const AdminDashboard = ({ problems: propsProblems }) => {
                 : "text-gray-400 hover:text-white"
             }`}
           >
-            Problems ({safeProblemList.length})
+            Problems ({totalProblemItems})
           </button>
           <button
             onClick={() => setActiveTab("bundles")}
@@ -234,6 +255,47 @@ const AdminDashboard = ({ problems: propsProblems }) => {
         {activeTab === "problems" && (
           <>
             <h2 className="text-xl font-semibold mb-4">All Problems</h2>
+        <div className="flex flex-col lg:flex-row items-center justify-between mb-4 gap-4">
+          <div className="text-sm text-gray-300">Showing page {currentPage} of {totalPages}</div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm text-gray-400">Topic:</label>
+            <select
+              value={problemTopic}
+              onChange={(e) => { setProblemTopic(e.target.value); setCurrentPage(1); }}
+              className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white"
+            >
+              <option value="">All Topics</option>
+              <option value="arrays">Arrays</option>
+              <option value="strings">Strings</option>
+              <option value="dynamic-programming">Dynamic Programming</option>
+              <option value="graphs">Graphs</option>
+              <option value="trees">Trees</option>
+              <option value="greedy">Greedy</option>
+              <option value="math">Math</option>
+              <option value="bit-manipulation">Bit Manipulation</option>
+              <option value="two-pointers">Two Pointers</option>
+              <option value="sliding-window">Sliding Window</option>
+              <option value="backtracking">Backtracking</option>
+              <option value="sorting">Sorting</option>
+            </select>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-400">Items:</label>
+              <select value={problemsPerPage} onChange={(e) => { setProblemsPerPage(Number(e.target.value)); setCurrentPage(1); }} className="px-3 py-1 bg-gray-800 rounded border border-gray-600">
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+          <input
+            type="text"
+            placeholder="Search problems by ID or title prefix..."
+            value={problemSearch}
+            onChange={(e) => { setProblemSearch(e.target.value); setCurrentPage(1); }}
+            className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white w-full lg:w-80"
+          />
+        </div>
         <div className="bg-gray-800 rounded-lg shadow p-4">
           {paginatedProblems.length === 0 ? (
             <div className="text-gray-400">No problems found.</div>
@@ -241,6 +303,7 @@ const AdminDashboard = ({ problems: propsProblems }) => {
             <table className="w-full text-left">
               <thead>
                 <tr>
+                  <th className="py-2 px-3">ID</th>
                   <th className="py-2 px-3">Title</th>
                   <th className="py-2 px-3">Difficulty</th>
                   <th className="py-2 px-3">Tags</th>
@@ -250,6 +313,7 @@ const AdminDashboard = ({ problems: propsProblems }) => {
               <tbody>
                 {paginatedProblems.map((problem) => (
                   <tr key={problem.id} className="border-t border-gray-700">
+                    <td className="py-2 px-3 font-mono">{problem.id}</td>
                     <td className="py-2 px-3">{problem.title}</td>
                     <td className="py-2 px-3">{problem.difficulty || "N/A"}</td>
                     <td className="py-2 px-3">
@@ -309,6 +373,27 @@ const AdminDashboard = ({ problems: propsProblems }) => {
         {activeTab === "bundles" && (
           <>
             <h2 className="text-xl font-semibold mb-4">All Bundles</h2>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-sm text-gray-300">Bundles: {safeBundles.length}</div>
+              <div className="flex flex-col lg:flex-row items-center gap-3">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-gray-400">Items:</label>
+                  <select value={bundlesPerPage} onChange={(e) => { setBundlesPerPage(Number(e.target.value)); setBundlePage(1); }} className="px-3 py-1 bg-gray-800 rounded border border-gray-600">
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search bundles by ID or name..."
+                  value={bundleSearch}
+                  onChange={(e) => { setBundleSearch(e.target.value); setBundlePage(1); }}
+                  className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white w-full lg:w-80"
+                />
+              </div>
+            </div>
             <div className="bg-gray-800 rounded-lg shadow p-4">
               {paginatedBundles.length === 0 ? (
                 <div className="text-gray-400">No bundles found.</div>

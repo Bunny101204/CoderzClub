@@ -9,6 +9,8 @@ const BundleDashboard = () => {
   const [selectedDifficulty, setSelectedDifficulty] = useState("ALL");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [showAdminControls, setShowAdminControls] = useState(false);
+  const [bundlePage, setBundlePage] = useState(1);
+  const [bundleItemsPerPage, setBundleItemsPerPage] = useState(10);
 
   const difficulties = ["ALL", "BASIC", "INTERMEDIATE", "ADVANCED", "SDE", "EXPERT"];
   const categories = ["ALL", "ALGORITHMS", "DATA_STRUCTURES", "SYSTEM_DESIGN", "DATABASE", "WEB_DEVELOPMENT"];
@@ -51,6 +53,9 @@ const BundleDashboard = () => {
     const activeMatch = showAdminControls ? true : (bundle.isActive !== false);
     return difficultyMatch && categoryMatch && activeMatch;
   });
+
+  const totalBundlePages = Math.ceil(filteredBundles.length / bundleItemsPerPage);
+  const paginatedBundles = filteredBundles.slice((bundlePage - 1) * bundleItemsPerPage, bundlePage * bundleItemsPerPage);
 
   const getDifficultyColor = (difficulty) => {
     const colors = {
@@ -169,6 +174,55 @@ const BundleDashboard = () => {
           )}
         </div>
 
+        {/* Bundles Pagination Controls */}
+        {totalBundlePages > 1 && (
+          <div className="flex justify-center mt-6 space-x-2">
+            <button
+              onClick={() => setBundlePage((p) => Math.max(1, p - 1))}
+              disabled={bundlePage === 1}
+              className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+            >
+              Prev
+            </button>
+            {Array.from({ length: totalBundlePages }, (_, i) => (
+              <button
+                key={i + 1}
+                onClick={() => setBundlePage(i + 1)}
+                className={`px-3 py-1 rounded ${bundlePage === i + 1 ? 'bg-blue-500' : 'bg-gray-700'} text-white`}
+              >
+                {i + 1}
+              </button>
+            ))}
+            <button
+              onClick={() => setBundlePage((p) => Math.min(totalBundlePages, p + 1))}
+              disabled={bundlePage === totalBundlePages}
+              className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        )}
+
+        {/* Bundle Links */}
+        <div className="mb-8 bg-gray-800 border border-gray-700 rounded-xl p-5">
+          <h2 className="text-xl font-semibold mb-3">Problem Bundle</h2>
+          <div className="flex flex-wrap gap-3">
+            {safeBundles.length > 0 ? (
+              safeBundles.map((bundle) => (
+                <Link
+                  key={bundle.id}
+                  to={`/bundle/${bundle.id}`}
+                  className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-full transition-colors"
+                >
+                  {bundle.name}
+                </Link>
+              ))
+            ) : (
+              <div className="text-gray-400">No bundles available yet.</div>
+            )}
+          </div>
+        </div>
+
         {/* Filters */}
         <div className="flex flex-wrap gap-4 mb-8 justify-center">
           <div className="flex flex-col">
@@ -199,8 +253,20 @@ const BundleDashboard = () => {
         </div>
 
         {/* Bundles Grid */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-sm text-gray-300">Showing {filteredBundles.length} bundles</div>
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-400">Items:</label>
+            <select value={bundleItemsPerPage} onChange={(e) => { setBundleItemsPerPage(Number(e.target.value)); setBundlePage(1); }} className="px-3 py-1 bg-gray-800 rounded border border-gray-600">
+              <option value={6}>6</option>
+              <option value={9}>9</option>
+              <option value={12}>12</option>
+              <option value={24}>24</option>
+            </select>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredBundles.map((bundle) => (
+          {paginatedBundles.map((bundle) => (
             <div
               key={bundle.id}
               className="bg-gray-800 rounded-xl p-6 hover:bg-gray-700 transition-all duration-300 border border-gray-700 hover:border-blue-500 cursor-pointer"

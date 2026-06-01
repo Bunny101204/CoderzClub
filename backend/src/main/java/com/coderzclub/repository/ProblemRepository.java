@@ -25,12 +25,20 @@ public interface ProblemRepository extends MongoRepository<Problem, String> {
     @Query("{ $or: [ { 'title': { $regex: ?0, $options: 'i' } }, { 'statement': { $regex: ?0, $options: 'i' } } ] }")
     Page<Problem> findByTitleOrStatementContaining(String search, Pageable pageable);
     
-    // Combined filter query
+    // Combined filter query with pageable support
     @Query("{ $and: [ " +
            "?0 == null || { 'difficulty': ?0 }, " +
            "?1 == null || { 'category': ?1 }, " +
-           "?2 == null || { $or: [ { 'title': { $regex: ?2, $options: 'i' } }, { 'statement': { $regex: ?2, $options: 'i' } } ] }, " +
+           "?2 == null || { $or: [ { 'title': { $regex: ?2, $options: 'i' } }, { 'statement': { $regex: ?2, $options: 'i' } }, { '_id': { $regex: ?2, $options: 'i' } } ] }, " +
            "?3 == null || { 'tags': { $in: ?3 } } " +
            "] }")
     Page<Problem> findWithFilters(String difficulty, String category, String search, List<String> tags, Pageable pageable);
+
+    @Query("{ $and: [ " +
+           "?0 == null || { 'difficulty': ?0 }, " +
+           "?1 == null || { 'category': ?1 }, " +
+           "?2 == null || { $or: [ { 'title': { $regex: ?2, $options: 'i' } }, { 'statement': { $regex: ?2, $options: 'i' } }, { '_id': { $regex: ?2, $options: 'i' } } ] }, " +
+           "?3 == null || { 'tags': { $in: ?3 } } " +
+           "] }")
+    List<Problem> findAllWithFilters(String difficulty, String category, String search, List<String> tags);
 } 

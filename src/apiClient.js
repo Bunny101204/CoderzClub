@@ -181,7 +181,7 @@ export const api = {
 
   // Problems
   problems: {
-    getAll: () => apiClient.get('/api/problems'),
+    getAll: (params) => apiClient.get('/api/problems', { params }),
     getById: (id) => apiClient.get(`/api/problems/${id}`),
     create: (problem) => apiClient.post('/api/problems', problem),
     update: (id, problem) => apiClient.put(`/api/problems/${id}`, problem),

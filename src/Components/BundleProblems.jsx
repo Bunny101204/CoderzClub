@@ -59,7 +59,7 @@ const BundleProblems = () => {
         return;
       }
       
-      const response = await fetch("/api/problems");
+      const response = await fetch("/api/problems?page=0&size=1000");
       if (response.ok) {
         const data = await response.json();
         console.log("[BundleProblems] Fetched problems data:", data);

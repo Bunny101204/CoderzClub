@@ -37,7 +37,6 @@ com/coderzclub/service/EmailService.class
 com/coderzclub/controller/ProblemController.class
 com/coderzclub/controller/SubmissionJobController.class
 com/coderzclub/controller/UserController.class
-com/coderzclub/config/DataSeeder.class
 com/coderzclub/config/JwtFilter.class
 com/coderzclub/controller/AdminController.class
 com/coderzclub/model/Problem.class
@@ -46,7 +45,6 @@ com/coderzclub/dto/ResendVerificationRequest.class
 com/coderzclub/model/SubmissionJob$JobStatus.class
 com/coderzclub/controller/SubmissionController.class
 com/coderzclub/config/CorsConfig.class
-com/coderzclub/config/ProblemDataInitializer.class
 com/coderzclub/config/RequestLoggingFilter.class
 com/coderzclub/config/SecurityConfig.class
 com/coderzclub/dto/LoginRequest.class

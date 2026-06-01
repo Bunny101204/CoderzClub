@@ -1,18 +1,23 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useProblemStatus } from "../hooks/useProblemStatus";
 
 const HomePage = ({ problems: propsProblems }) => {
   const { user } = useAuth();
+
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("");
+  const [topic, setTopic] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
   const [problems, setProblems] = useState([]);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [problemStatus, setProblemStatus] = useState({});
-  const problemsPerPage = 10;
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Use optimized custom hook for problem status (batches requests, prevents N+1 queries)
+  const { problemStatus } = useProblemStatus(problems, user);
 
   // Debounce search input
   useEffect(() => {
@@ -30,49 +35,7 @@ const HomePage = ({ problems: propsProblems }) => {
   // Fetch problems from API with filters
   useEffect(() => {
     fetchProblems();
-  }, [currentPage, difficulty]);
-
-  useEffect(() => {
-    const loadPageStatus = async () => {
-      if (!user || problems.length === 0) {
-        setProblemStatus({});
-        return;
-      }
-
-      const statusMap = {};
-      await Promise.all(
-        problems.map(async (problem) => {
-          try {
-            const token = localStorage.getItem('jwtToken');
-            if (!token) return;
-
-            const response = await fetch(`/api/submissions/my-submissions?problemId=${problem.id}&size=1`, {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            });
-            if (!response.ok) return;
-
-            const data = await response.json();
-            const submissions = Array.isArray(data.submissions) ? data.submissions : [];
-            const solved = submissions.some(s =>
-              s.result === 'ACCEPTED' || s.verdict === 'ACCEPTED'
-            );
-            statusMap[problem.id] = solved
-              ? 'SOLVED'
-              : submissions.length > 0
-              ? 'ATTEMPTED'
-              : 'NOT_STARTED';
-          } catch (err) {
-            console.error('Error fetching problem status:', err);
-          }
-        })
-      );
-      setProblemStatus(statusMap);
-    };
-
-    loadPageStatus();
-  }, [user, problems]);
+  }, [currentPage, difficulty, topic, itemsPerPage]);
 
   const getDifficultyBadge = (difficulty) => {
     const styles = {
@@ -98,17 +61,26 @@ const HomePage = ({ problems: propsProblems }) => {
     return null;
   };
 
+  const compareById = (a, b) => {
+    const idA = String(a.id || "");
+    const idB = String(b.id || "");
+    return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+  };
+
   const fetchProblems = async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: currentPage.toString(),
-        size: problemsPerPage.toString()
+        size: itemsPerPage.toString()
       });
       
       // Add difficulty filter to API call
       if (difficulty && difficulty !== '') {
         params.append('difficulty', difficulty);
+      }
+      if (topic && topic !== '') {
+        params.append('tags', topic);
       }
       if (search && search.trim() !== '') {
         params.append('search', search.trim());
@@ -125,46 +97,23 @@ const HomePage = ({ problems: propsProblems }) => {
       // Handle both new paginated response and old array response
       if (data.problems && Array.isArray(data.problems)) {
         problemsArray = data.problems;
-        
-        // Apply client-side filtering if API doesn't fully support it
-        if (difficulty && difficulty !== '') {
-          problemsArray = problemsArray.filter(p => 
-            p.difficulty === difficulty || 
-            (difficulty === 'EASY' && p.difficulty === 'BASIC') ||
-            (difficulty === 'MEDIUM' && p.difficulty === 'INTERMEDIATE') ||
-            (difficulty === 'HARD' && p.difficulty === 'ADVANCED')
-          );
-        }
-        
-        if (search && search.trim() !== '') {
-          const searchLower = search.toLowerCase().trim();
-          problemsArray = problemsArray.filter(p => {
-            const title = (p.title || '').toLowerCase();
-            const idStr = String(p.id || '');
-            
-            // For ID search: exact match or prefix match only
-            if (/^\d+$/.test(searchLower)) {
-              return idStr === searchLower || idStr.startsWith(searchLower);
-            }
-            
-            // For title search: prefix match or substring match
-            return title.startsWith(searchLower) || title.includes(searchLower);
-          });
-        }
-        
         setTotalPages(data.totalPages || 0);
-        setTotalItems(problemsArray.length);
+        setTotalItems(data.totalItems || data.totalElements || problemsArray.length);
       } else if (Array.isArray(data)) {
         // Fallback for old API format - filter client-side if needed
         problemsArray = data;
         
-        // Apply client-side filtering if API doesn't support it
         if (difficulty && difficulty !== '') {
           problemsArray = problemsArray.filter(p => 
             p.difficulty === difficulty || 
             (difficulty === 'EASY' && p.difficulty === 'BASIC') ||
             (difficulty === 'MEDIUM' && p.difficulty === 'INTERMEDIATE') ||
             (difficulty === 'HARD' && p.difficulty === 'ADVANCED')
+          );
+        }
+        if (topic && topic !== '') {
+          problemsArray = problemsArray.filter(p => 
+            (p.tags || []).map(String).map(t => t.toLowerCase()).includes(topic.toLowerCase())
           );
         }
         
@@ -174,22 +123,19 @@ const HomePage = ({ problems: propsProblems }) => {
             const title = (p.title || '').toLowerCase();
             const idStr = String(p.id || '');
             
-            // For ID search: exact match or prefix match only
             if (/^\d+$/.test(searchLower)) {
               return idStr === searchLower || idStr.startsWith(searchLower);
             }
             
-            // For title search: prefix match or substring match
-            return title.startsWith(searchLower) || title.includes(searchLower);
+            return title.startsWith(searchLower);
           });
         }
         
-        setTotalPages(Math.ceil(problemsArray.length / problemsPerPage));
+        setTotalPages(Math.ceil(problemsArray.length / itemsPerPage));
         setTotalItems(problemsArray.length);
         
-        // Apply pagination
-        const startIndex = currentPage * problemsPerPage;
-        problemsArray = problemsArray.slice(startIndex, startIndex + problemsPerPage);
+        const startIndex = currentPage * itemsPerPage;
+        problemsArray = problemsArray.slice(startIndex, startIndex + itemsPerPage);
       } else if (propsProblems && Array.isArray(propsProblems)) {
         // Use props if API fails
         problemsArray = propsProblems;
@@ -201,6 +147,11 @@ const HomePage = ({ problems: propsProblems }) => {
             (difficulty === 'HARD' && p.difficulty === 'ADVANCED')
           );
         }
+        if (topic && topic !== '') {
+          problemsArray = problemsArray.filter(p => 
+            (p.tags || []).map(String).map(t => t.toLowerCase()).includes(topic.toLowerCase())
+          );
+        }
         if (search && search.trim() !== '') {
           const searchLower = search.toLowerCase().trim();
           problemsArray = problemsArray.filter(p => {
@@ -212,28 +163,17 @@ const HomePage = ({ problems: propsProblems }) => {
               return idStr === searchLower || idStr.startsWith(searchLower);
             }
             
-            // For title search: prefix match or substring match
-            return title.startsWith(searchLower) || title.includes(searchLower);
+            // For title search: prefix match only
+            return title.startsWith(searchLower);
           });
         }
-        setTotalPages(Math.ceil(problemsArray.length / problemsPerPage));
+        setTotalPages(Math.ceil(problemsArray.length / itemsPerPage));
         setTotalItems(problemsArray.length);
       }
       
-      // Sort by difficulty order
+      // Sort by ID for stable display order
       if (problemsArray.length > 0) {
-        const difficultyOrder = {
-          'EASY': 1, 'BASIC': 1,
-          'MEDIUM': 2, 'INTERMEDIATE': 2,
-          'HARD': 3, 'ADVANCED': 3,
-          'SDE': 4,
-          'EXPERT': 5
-        };
-        problemsArray.sort((a, b) => {
-          const aOrder = difficultyOrder[a.difficulty] || 99;
-          const bOrder = difficultyOrder[b.difficulty] || 99;
-          return aOrder - bOrder;
-        });
+        problemsArray.sort(compareById);
       }
       
       setProblems(problemsArray);
@@ -245,15 +185,20 @@ const HomePage = ({ problems: propsProblems }) => {
         if (difficulty && difficulty !== '') {
           problemsArray = problemsArray.filter(p => p.difficulty === difficulty);
         }
+        if (topic && topic !== '') {
+          problemsArray = problemsArray.filter(p => 
+            (p.tags || []).map(String).map(t => t.toLowerCase()).includes(topic.toLowerCase())
+          );
+        }
         if (search && search.trim() !== '') {
           const searchLower = search.toLowerCase();
           problemsArray = problemsArray.filter(p => 
-            p.title?.toLowerCase().includes(searchLower) ||
-            String(p.id).includes(searchLower)
+            p.title?.toLowerCase().startsWith(searchLower) ||
+            String(p.id).startsWith(searchLower)
           );
         }
         setProblems(problemsArray);
-        setTotalPages(Math.ceil(problemsArray.length / problemsPerPage));
+        setTotalPages(Math.ceil(problemsArray.length / itemsPerPage));
         setTotalItems(problemsArray.length);
       } else {
         setProblems([]);
@@ -269,23 +214,60 @@ const HomePage = ({ problems: propsProblems }) => {
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-3xl mx-auto">
         <h1 className="text-3xl font-bold mb-6">Problem List</h1>
-        <div className="flex gap-4 mb-6">
-          <select
-            value={difficulty}
-            onChange={(e) => {
-              setDifficulty(e.target.value);
-              setCurrentPage(0);
-            }}
-            className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
-          >
-            <option value="">All Difficulties</option>
-            <option value="EASY">Easy</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="HARD">Hard</option>
-          </select>
+        <div className="flex flex-col lg:flex-row gap-4 mb-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={difficulty}
+              onChange={(e) => {
+                setDifficulty(e.target.value);
+                setCurrentPage(0);
+              }}
+              className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+            >
+              <option value="">All Difficulties</option>
+              <option value="EASY">Easy</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HARD">Hard</option>
+            </select>
+            <select
+              value={topic}
+              onChange={(e) => {
+                setTopic(e.target.value);
+                setCurrentPage(0);
+              }}
+              className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+            >
+              <option value="">All Topics</option>
+              <option value="arrays">Arrays</option>
+              <option value="strings">Strings</option>
+              <option value="dynamic-programming">Dynamic Programming</option>
+              <option value="graphs">Graphs</option>
+              <option value="trees">Trees</option>
+              <option value="greedy">Greedy</option>
+              <option value="math">Math</option>
+              <option value="bit-manipulation">Bit Manipulation</option>
+              <option value="two-pointers">Two Pointers</option>
+              <option value="sliding-window">Sliding Window</option>
+              <option value="backtracking">Backtracking</option>
+              <option value="sorting">Sorting</option>
+            </select>
+            <div className="flex items-center">
+              <label className="text-sm text-gray-400 mr-2">Items:</label>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(0); }}
+                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
           <input
             type="text"
-            placeholder="Search by ID or Title..."
+            placeholder="Search by ID or Title prefix..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -295,6 +277,16 @@ const HomePage = ({ problems: propsProblems }) => {
           />
         </div>
         <table className="w-full text-left bg-gray-800 rounded-lg shadow">
+          <thead>
+            <tr>
+              <th className="py-2 px-3">Status</th>
+              <th className="py-2 px-3">ID</th>
+              <th className="py-2 px-3">Title</th>
+              <th className="py-2 px-3">Difficulty</th>
+              <th className="py-2 px-3">Tags</th>
+              <th className="py-2 px-3">Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {loading ? (
               <tr>
@@ -305,14 +297,14 @@ const HomePage = ({ problems: propsProblems }) => {
                 <td colSpan={6} className="text-gray-400 text-center py-4">No problems found.</td>
               </tr>
             ) : (
-              problems.map((problem, idx) => {
+              problems.map((problem) => {
                 const status = problemStatus[problem.id] || 'NOT_STARTED';
                 return (
                   <tr key={problem.id} className="border-t border-gray-700">
                     <td className="py-2 px-3 align-top">
                       {getStatusIcon(status)}
                     </td>
-                    <td className="py-2 px-3 font-mono">{currentPage * problemsPerPage + idx + 1}</td>
+                    <td className="py-2 px-3 font-mono">{problem.id}</td>
                     <td className="py-2 px-3">
                       <div className="font-semibold text-white">{problem.title}</div>
                     </td>

@@ -45,15 +45,11 @@ const ManageBundleProblems = () => {
 
   const fetchBundleProblems = async (problemIds) => {
     try {
-      const response = await fetch("/api/problems");
-      if (response.ok) {
-        const allProblems = await response.json();
-        const problemsArray = Array.isArray(allProblems) ? allProblems : [];
-        const filtered = problemsArray.filter(p => problemIds.includes(p.id));
-        setBundleProblems(filtered);
-      } else {
-        setBundleProblems([]);
-      }
+      // Ensure we have the full list of problems (fetchAllProblems supports batch fetch)
+      const all = await fetchAllProblems();
+      const problemsArray = Array.isArray(all) ? all : [];
+      const filtered = problemsArray.filter(p => problemIds.includes(p.id));
+      setBundleProblems(filtered);
     } catch (error) {
       console.error("Error fetching bundle problems:", error);
       setBundleProblems([]);
@@ -96,9 +92,11 @@ const ManageBundleProblems = () => {
       }
       
       setAvailableProblems(allProblems);
+      return allProblems;
     } catch (error) {
       console.error("Error fetching problems:", error);
       setAvailableProblems([]);
+      return [];
     }
   };
 

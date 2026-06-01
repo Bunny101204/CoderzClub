@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -9,29 +9,42 @@ from "react-router-dom";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import "./App.css";
-import Judge0CodeEditor from "./Components/Judge0CodeEditor";
-import HomePage from "./Components/HomePage";
-import ProblemPage from "./Components/ProblemPage";
-import ProblemPageNew from "./Components/ProblemPageNew";
+
+// Static imports for above-the-fold components
 import LandingPage from "./Components/LandingPage";
-import { useAuth, AuthProvider } from "./context/AuthContext";
 import Header from "./Components/Header";
 import AuthPage from "./Components/AuthPage";
-import AdminDashboard from "./Components/AdminDashboard";
-import AddProblem from "./Components/AddProblem";
-import AddProblemNew from "./Components/AddProblemNew";
-import AddBundle from "./Components/AddBundle";
-import BundleDashboard from "./Components/BundleDashboard";
-import BundleProblems from "./Components/BundleProblems";
-import ManageBundleProblems from "./Components/ManageBundleProblems";
-import SubscriptionPlans from "./Components/SubscriptionPlans";
-import Leaderboard from "./Components/Leaderboard";
-import UserStats from "./Components/UserStats";
-import Profile from "./Components/Profile";
 import ErrorBoundary from "./Components/ErrorBoundary";
+import { useAuth, AuthProvider } from "./context/AuthContext";
 import { api } from "./apiClient";
 
-function AdminRoute({ user, problems }) {
+// Lazy load route-specific components
+const Judge0CodeEditor = lazy(() => import("./Components/Judge0CodeEditor"));
+const HomePage = lazy(() => import("./Components/HomePage"));
+const ProblemPage = lazy(() => import("./Components/ProblemPage"));
+const ProblemPageNew = lazy(() => import("./Components/ProblemPageNew"));
+const AdminDashboard = lazy(() => import("./Components/AdminDashboard"));
+const AddProblem = lazy(() => import("./Components/AddProblem"));
+const AddProblemNew = lazy(() => import("./Components/AddProblemNew"));
+const AddBundle = lazy(() => import("./Components/AddBundle"));
+const BundleDashboard = lazy(() => import("./Components/BundleDashboard"));
+const BundleProblems = lazy(() => import("./Components/BundleProblems"));
+const ManageBundleProblems = lazy(() => import("./Components/ManageBundleProblems"));
+const SubscriptionPlans = lazy(() => import("./Components/SubscriptionPlans"));
+const Leaderboard = lazy(() => import("./Components/Leaderboard"));
+const UserStats = lazy(() => import("./Components/UserStats"));
+const Profile = lazy(() => import("./Components/Profile"));
+
+// Fallback component for Suspense
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="text-white text-lg">Loading...</div>
+    </div>
+  );
+}
+
+function AdminRoute({ user }) {
   const isAdmin = user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin");
 
   if (!isAdmin) {
@@ -47,36 +60,11 @@ function AdminRoute({ user, problems }) {
     );
   }
 
-  return <AdminDashboard problems={problems} />;
+  return <AdminDashboard />;
 }
 
 function AppContent() {
   const { isAuthenticated, user, loading } = useAuth();
-  const [problems, setProblems] = useState([]);
-  const [problemsLoading, setProblemsLoading] = useState(false);
-  const [problemsError, setProblemsError] = useState(null);
-
-  useEffect(() => {
-    async function fetchProblems() {
-      setProblemsLoading(true);
-      setProblemsError(null);
-      try {
-        const response = await api.problems.getAll();
-        setProblems(response.data);
-      } catch (err) {
-        setProblemsError(err.message || "Failed to fetch problems");
-      } finally {
-        setProblemsLoading(false);
-      }
-    }
-    if (isAuthenticated) {
-      fetchProblems();
-    } else {
-      setProblems([]);
-      setProblemsLoading(false);
-      setProblemsError(null);
-    }
-  }, [isAuthenticated]);
 
   if (loading) {
     return (
@@ -86,20 +74,7 @@ function AppContent() {
     );
   }
 
-  if (problemsLoading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading problems...</div>
-      </div>
-    );
-  }
-  if (problemsError) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-red-400 text-xl">{problemsError}</div>
-      </div>
-    );
-  }
+  // App no longer fetches the full problem list globally; individual pages fetch as needed.
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -132,7 +107,7 @@ function AppContent() {
             />
             <Route
               path="/home"
-              element={<HomePage problems={problems} />}
+              element={<Suspense fallback={<LoadingFallback />}><HomePage /></Suspense>}
             />
             <Route
               path="/auth"
@@ -142,49 +117,49 @@ function AppContent() {
         )}
         <Route
           path="/editor"
-          element={<Judge0CodeEditor />}
+          element={<Suspense fallback={<LoadingFallback />}><Judge0CodeEditor /></Suspense>}
         />
         <Route
           path="/problem/:id"
-          element={<ProblemPageNew problems={problems} />}
+          element={<Suspense fallback={<LoadingFallback />}><ProblemPageNew /></Suspense>}
         />
         <Route
           path="/problem-old/:id"
-          element={<ProblemPage problems={problems} />}
+          element={<Suspense fallback={<LoadingFallback />}><ProblemPage /></Suspense>}
         />
         <Route
           path="/bundles"
-          element={<BundleDashboard />}
+          element={<Suspense fallback={<LoadingFallback />}><BundleDashboard /></Suspense>}
         />
         <Route
           path="/bundle/:id"
-          element={<BundleProblems />}
+          element={<Suspense fallback={<LoadingFallback />}><BundleProblems /></Suspense>}
         />
         <Route
           path="/subscription"
-          element={<SubscriptionPlans />}
+          element={<Suspense fallback={<LoadingFallback />}><SubscriptionPlans /></Suspense>}
         />
         <Route
           path="/leaderboard"
-          element={<Leaderboard />}
+          element={<Suspense fallback={<LoadingFallback />}><Leaderboard /></Suspense>}
         />
         <Route
           path="/stats"
-          element={<UserStats />}
+          element={<Suspense fallback={<LoadingFallback />}><UserStats /></Suspense>}
         />
         <Route
           path="/profile"
-          element={<Profile isOpen={true} onClose={() => {}} asPage={true} />}
+          element={<Suspense fallback={<LoadingFallback />}><Profile isOpen={true} onClose={() => {}} asPage={true} /></Suspense>}
         />
         <Route
           path="/admin"
-          element={<AdminRoute user={user} problems={problems} />}
+          element={<Suspense fallback={<LoadingFallback />}><AdminRoute user={user} /></Suspense>}
         />
         <Route
           path="/admin/add-problem"
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
-              <AddProblemNew />
+              <Suspense fallback={<LoadingFallback />}><AddProblemNew /></Suspense>
             ) : (
               <Navigate to="/home" replace />
             )
@@ -194,7 +169,7 @@ function AppContent() {
           path="/admin/add-problem-old"
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
-              <AddProblem />
+              <Suspense fallback={<LoadingFallback />}><AddProblem /></Suspense>
             ) : (
               <Navigate to="/home" replace />
             )
@@ -204,7 +179,7 @@ function AppContent() {
           path="/admin/add-bundle"
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
-              <AddBundle />
+              <Suspense fallback={<LoadingFallback />}><AddBundle /></Suspense>
             ) : (
               <Navigate to="/home" replace />
             )
@@ -214,7 +189,7 @@ function AppContent() {
           path="/admin/edit-bundle/:id"
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
-              <AddBundle />
+              <Suspense fallback={<LoadingFallback />}><AddBundle /></Suspense>
             ) : (
               <Navigate to="/home" replace />
             )
@@ -224,7 +199,7 @@ function AppContent() {
           path="/admin/manage-bundle/:id"
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
-              <ManageBundleProblems />
+              <Suspense fallback={<LoadingFallback />}><ManageBundleProblems /></Suspense>
             ) : (
               <Navigate to="/home" replace />
             )
