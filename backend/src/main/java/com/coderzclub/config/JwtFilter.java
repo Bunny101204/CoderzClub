@@ -4,6 +4,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -16,6 +18,8 @@ import java.io.IOException;
 
 @Component
 public class JwtFilter extends OncePerRequestFilter {
+    private static final Logger logger = LoggerFactory.getLogger(JwtFilter.class);
+
     @Autowired
     private JwtUtil jwtUtil;
     
@@ -27,11 +31,11 @@ public class JwtFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         
         String requestURI = request.getRequestURI();
-        System.out.println("JWT Filter processing: " + requestURI);
+        logger.debug("JWT Filter processing: {}", requestURI);
         
         // Skip JWT processing for authentication endpoints
         if (requestURI.equals("/api/login") || requestURI.equals("/api/register") || requestURI.equals("/api/resend-verification") || requestURI.equals("/api/test-password") || requestURI.equals("/api/test")) {
-            System.out.println("Skipping JWT processing for: " + requestURI);
+            logger.debug("Skipping JWT processing for: {}", requestURI);
             filterChain.doFilter(request, response);
             return;
         }
@@ -49,24 +53,24 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            System.out.println("JWT Filter: Processing request for username: " + username);
+            logger.debug("JWT Filter: Processing request for username: {}", username);
             UserDetails userDetails = userService.loadUserByUsername(username);
-            System.out.println("JWT Filter: User authorities: " + userDetails.getAuthorities());
+            logger.debug("JWT Filter: User authorities: {}", userDetails.getAuthorities());
             
             if (jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
-                System.out.println("JWT Filter: Token is valid, setting authentication");
+                logger.debug("JWT Filter: Token is valid, setting authentication");
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
-                System.out.println("JWT Filter: Authentication set successfully");
+                logger.debug("JWT Filter: Authentication set successfully");
             } else {
-                System.out.println("JWT Filter: Token is invalid");
+                logger.debug("JWT Filter: Token is invalid");
             }
         } else if (username == null) {
-            System.out.println("JWT Filter: No username extracted from token");
+            logger.debug("JWT Filter: No username extracted from token");
         } else {
-            System.out.println("JWT Filter: Authentication already exists");
+            logger.debug("JWT Filter: Authentication already exists");
         }
         filterChain.doFilter(request, response);
     }

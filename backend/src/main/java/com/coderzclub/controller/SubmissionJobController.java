@@ -3,15 +3,24 @@ package com.coderzclub.controller;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
 import com.coderzclub.repository.UserRepository;
+import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.service.SubmissionJobService;
+import com.coderzclub.service.SubmissionLimitService;
+import com.coderzclub.service.SubmissionValidator;
+import com.coderzclub.model.Problem;
+import com.coderzclub.dto.CreateSubmissionJobRequest;
+import com.coderzclub.dto.SubmissionJobResponse;
+import com.coderzclub.dto.TestResultResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,15 +36,40 @@ public class SubmissionJobController {
     private SubmissionJobService jobService;
 
     @Autowired
+    private SubmissionLimitService submissionLimitService;
+
+    @Autowired
+    private SubmissionValidator submissionValidator;
+
+    @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private ProblemRepository problemRepository;
+
     /**
-     * Create a new submission job
+     * Create a new submission job with strict validation
      */
     @PostMapping
-    public ResponseEntity<?> createJob(@RequestBody SubmissionJobRequest request) {
+    public ResponseEntity<?> createJob(@Valid @RequestBody CreateSubmissionJobRequest request) {
         try {
-            // Get current user
+            // Step 1: Validate code size and content
+            try {
+                submissionValidator.validateCode(request.getCode());
+            } catch (IllegalArgumentException e) {
+                logger.warn("Code validation failed: {}", e.getMessage());
+                return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            }
+
+            // Step 2: Validate language ID
+            try {
+                submissionValidator.validateLanguageId(request.getLanguageId());
+            } catch (IllegalArgumentException e) {
+                logger.warn("Language validation failed: {}", e.getMessage());
+                return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            }
+
+            // Step 3: Get current user
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             String username = auth.getName();
 
@@ -46,25 +80,59 @@ public class SubmissionJobController {
 
             User user = userOpt.get();
 
-            // Create job using actual user ID
+            if (!submissionLimitService.canSubmitNow(user.getId())) {
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of(
+                        "error", "Please wait before submitting again.",
+                        "retryAfterSeconds", submissionLimitService.getCooldownSeconds(user.getId())
+                    ));
+            }
+
+            if (submissionLimitService.hasExceededDailyLimit(user.getId())) {
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of("error", "Daily submission limit exceeded."));
+            }
+
+            if (submissionLimitService.hasExceededProblemLimit(user.getId(), request.getProblemId())) {
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of("error", "Daily submission limit for this problem exceeded."));
+            }
+
+            // Step 4: Load problem and validate it exists
+            Optional<Problem> problemOpt = problemRepository.findById(request.getProblemId());
+            if (problemOpt.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Problem not found"));
+            }
+            Problem problem = problemOpt.get();
+
+            // Step 5: Validate problem testcases against limits
+            try {
+                submissionValidator.validateProblemTestCases(problem);
+            } catch (IllegalArgumentException e) {
+                logger.error("Problem testcases validation failed: {}", e.getMessage());
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Problem configuration error: " + e.getMessage()));
+            }
+
+            // Step 6: Create job using server-side testcases
             SubmissionJob job = jobService.createJob(
                 user.getId(),
                 request.getProblemId(),
                 request.getCode(),
                 request.getLanguage(),
                 request.getLanguageId(),
-                request.getPublicTestCases(),
-                request.getHiddenTestCases()
+                problem.getPublicTestCases(),
+                problem.getHiddenTestCases()
             );
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("jobId", job.getId());
-            response.put("status", job.getStatus().toString());
-            response.put("createdAt", job.getCreatedAt());
+            SubmissionJobResponse resp = new SubmissionJobResponse();
+            resp.setJobId(job.getId());
+            resp.setStatus(job.getStatus().toString());
+            resp.setCreatedAt(job.getCreatedAt());
 
             logger.info("Created submission job {} for user {}", job.getId(), username);
 
-            return ResponseEntity.accepted().body(response);
+            return ResponseEntity.accepted().body(resp);
 
         } catch (Exception e) {
             logger.error("Failed to create submission job", e);
@@ -84,27 +152,56 @@ public class SubmissionJobController {
             }
 
             SubmissionJob job = jobOpt.get();
-            Map<String, Object> response = new HashMap<>();
-            response.put("jobId", job.getId());
-            response.put("status", job.getStatus().toString());
-            response.put("createdAt", job.getCreatedAt());
-            response.put("startedAt", job.getStartedAt());
-            response.put("completedAt", job.getCompletedAt());
-            response.put("progress", Map.of(
-                "completed", job.getCompletedTests(),
-                "total", job.getTotalTests()
-            ));
+
+            SubmissionJobResponse resp = new SubmissionJobResponse();
+            resp.setJobId(job.getId());
+            resp.setStatus(job.getStatus().toString());
+            resp.setCreatedAt(job.getCreatedAt());
+            resp.setStartedAt(job.getStartedAt());
+            resp.setCompletedAt(job.getCompletedAt());
+            resp.setProgress(Map.of("completed", job.getCompletedTests(), "total", job.getTotalTests()));
 
             if (job.getStatus() == SubmissionJob.JobStatus.COMPLETED) {
-                response.put("result", job.getFinalResult());
-                response.put("runtime", job.getTotalRuntime());
-                response.put("memory", job.getTotalMemory());
-                response.put("testResults", job.getTestResults());
+                resp.setResult(job.getFinalResult());
+                resp.setRuntime(job.getTotalRuntime());
+                resp.setMemory(job.getTotalMemory());
+
+                // Sanitize test results: do not leak hidden test input/expected output
+                List<SubmissionJob.TestResult> storedResults = job.getTestResults();
+                int publicCount = job.getPublicTestCases() != null ? job.getPublicTestCases().size() : 0;
+                List<TestResultResponse> sanitized = new java.util.ArrayList<>();
+                for (int i = 0; i < (storedResults != null ? storedResults.size() : 0); i++) {
+                    SubmissionJob.TestResult r = storedResults.get(i);
+                    if (i < publicCount) {
+                        TestResultResponse tr = new TestResultResponse();
+                        tr.setInput(r.getInput());
+                        tr.setExpectedOutput(r.getExpectedOutput());
+                        tr.setActualOutput(r.getActualOutput());
+                        tr.setPassed(r.isPassed());
+                        tr.setRuntime(r.getRuntime());
+                        tr.setMemory(r.getMemory());
+                        tr.setErrorType(r.getErrorType());
+                        tr.setErrorMessage(r.getErrorMessage());
+                        sanitized.add(tr);
+                    } else {
+                        // Hidden test: never expose input or expected output
+                        TestResultResponse tr = new TestResultResponse();
+                        tr.setType("hidden");
+                        tr.setStatus(r.isPassed() ? "PASSED" : "FAILED");
+                        tr.setPassed(r.isPassed());
+                        tr.setRuntime(r.getRuntime());
+                        tr.setMemory(r.getMemory());
+                        if (!r.isPassed()) tr.setMessage("Failed on hidden testcase");
+                        sanitized.add(tr);
+                    }
+                }
+
+                resp.setTestResults(sanitized);
             } else if (job.getStatus() == SubmissionJob.JobStatus.FAILED) {
-                response.put("error", job.getErrorMessage());
+                resp.setError(job.getErrorMessage());
             }
 
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(resp);
 
         } catch (Exception e) {
             logger.error("Failed to get job status", e);
@@ -129,7 +226,22 @@ public class SubmissionJobController {
                 jobs = jobs.subList(0, limit);
             }
 
-            return ResponseEntity.ok(Map.of("jobs", jobs));
+            List<Map<String, Object>> summaries = new java.util.ArrayList<>();
+            for (SubmissionJob job : jobs) {
+                Map<String, Object> summary = new HashMap<>();
+                summary.put("jobId", job.getId());
+                summary.put("problemId", job.getProblemId());
+                summary.put("status", job.getStatus().toString());
+                summary.put("createdAt", job.getCreatedAt());
+                summary.put("startedAt", job.getStartedAt());
+                summary.put("completedAt", job.getCompletedAt());
+                summary.put("result", job.getFinalResult());
+                summary.put("completedTests", job.getCompletedTests());
+                summary.put("totalTests", job.getTotalTests());
+                summaries.add(summary);
+            }
+
+            return ResponseEntity.ok(Map.of("jobs", summaries));
 
         } catch (Exception e) {
             logger.error("Failed to get user jobs", e);
@@ -160,34 +272,5 @@ public class SubmissionJobController {
         }
     }
 
-    /**
-     * Request DTO for creating jobs
-     */
-    public static class SubmissionJobRequest {
-        private String problemId;
-        private String code;
-        private String language;
-        private Integer languageId;
-        private List<SubmissionJob.TestCase> publicTestCases;
-        private List<SubmissionJob.TestCase> hiddenTestCases;
-
-        // Getters and setters
-        public String getProblemId() { return problemId; }
-        public void setProblemId(String problemId) { this.problemId = problemId; }
-
-        public String getCode() { return code; }
-        public void setCode(String code) { this.code = code; }
-
-        public String getLanguage() { return language; }
-        public void setLanguage(String language) { this.language = language; }
-
-        public Integer getLanguageId() { return languageId; }
-        public void setLanguageId(Integer languageId) { this.languageId = languageId; }
-
-        public List<SubmissionJob.TestCase> getPublicTestCases() { return publicTestCases; }
-        public void setPublicTestCases(List<SubmissionJob.TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
-
-        public List<SubmissionJob.TestCase> getHiddenTestCases() { return hiddenTestCases; }
-        public void setHiddenTestCases(List<SubmissionJob.TestCase> hiddenTestCases) { this.hiddenTestCases = hiddenTestCases; }
-    }
+    // Request DTO for creating jobs moved to com.coderzclub.dto.CreateSubmissionJobRequest
 }

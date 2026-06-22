@@ -94,22 +94,28 @@ public class SubmissionService {
         if (job.getTestResults() == null || job.getTestResults().isEmpty()) {
             return "No test results";
         }
-
         long passed = job.getTestResults().stream().filter(SubmissionJob.TestResult::isPassed).count();
         long total = job.getTestResults().size();
 
         StringBuilder summary = new StringBuilder();
         summary.append(String.format("Passed %d/%d test cases", passed, total));
 
-        // Add details for failed tests
+        // Add details for first failed public test only; do not reveal hidden test expected output
         job.getTestResults().stream()
             .filter(r -> !r.isPassed())
             .findFirst()
             .ifPresent(failed -> {
-                summary.append(". Failed case - Expected: ")
-                       .append(failed.getExpectedOutput())
-                       .append(", Got: ")
-                       .append(failed.getActualOutput());
+                int failedIndex = job.getTestResults().indexOf(failed);
+                int publicCount = job.getPublicTestCases() != null ? job.getPublicTestCases().size() : 0;
+                if (failedIndex < publicCount) {
+                    summary.append(". Failed case - Expected: ")
+                           .append(failed.getExpectedOutput())
+                           .append(", Got: ")
+                           .append(failed.getActualOutput());
+                } else {
+                    summary.append(". Failed on a hidden testcase");
+                }
+
                 if (failed.getErrorMessage() != null) {
                     summary.append(" (").append(failed.getErrorMessage()).append(")");
                 }
@@ -125,7 +131,34 @@ public class SubmissionService {
         java.util.Map<String, Object> details = new java.util.HashMap<>();
         details.put("jobId", job.getId());
         details.put("completedAt", job.getCompletedAt());
-        details.put("testResults", job.getTestResults());
+
+        // Sanitize test results for storage/return: never include hidden test input/expected
+        java.util.List<java.util.Map<String, Object>> sanitized = new java.util.ArrayList<>();
+        int publicCount = job.getPublicTestCases() != null ? job.getPublicTestCases().size() : 0;
+        if (job.getTestResults() != null) {
+            for (int i = 0; i < job.getTestResults().size(); i++) {
+                SubmissionJob.TestResult r = job.getTestResults().get(i);
+                java.util.Map<String, Object> m = new java.util.HashMap<>();
+                if (i < publicCount) {
+                    m.put("input", r.getInput());
+                    m.put("expectedOutput", r.getExpectedOutput());
+                    m.put("actualOutput", r.getActualOutput());
+                    m.put("passed", r.isPassed());
+                    m.put("runtime", r.getRuntime());
+                    m.put("memory", r.getMemory());
+                    m.put("errorType", r.getErrorType());
+                    m.put("errorMessage", r.getErrorMessage());
+                } else {
+                    // Hidden tests: only record pass/fail summary
+                    m.put("type", "hidden");
+                    m.put("status", r.isPassed() ? "PASSED" : "FAILED");
+                    if (!r.isPassed()) m.put("message", "Failed on hidden testcase");
+                }
+                sanitized.add(m);
+            }
+        }
+
+        details.put("testResults", sanitized);
         return details;
     }
 

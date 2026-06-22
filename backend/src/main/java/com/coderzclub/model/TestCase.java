@@ -33,6 +33,12 @@ public class TestCase {
     
     public String getOutput() { return output; }
     public void setOutput(String output) { this.output = output; }
+
+    @Deprecated
+    public String getExpectedOutput() { return output; }
+
+    @Deprecated
+    public void setExpectedOutput(String expectedOutput) { this.output = expectedOutput; }
     
     public String getExplanation() { return explanation; }
     public void setExplanation(String explanation) { this.explanation = explanation; }

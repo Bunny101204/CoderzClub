@@ -1,9 +1,11 @@
 package com.coderzclub.service;
 
+import com.coderzclub.config.SubmissionLimitsConfig;
 import com.coderzclub.model.SubmissionJob;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +36,12 @@ public class Judge0ExecutionService {
     @Value("${judge0.api.key:${JUDGE0_API_KEY:${VITE_JUDGE0_API_KEY:}}}")
     private String judge0ApiKey;
 
+    @Autowired
+    private SubmissionLimitsConfig limitsConfig;
+
+    @Autowired
+    private SubmissionValidator submissionValidator;
+
     /**
      * Execute all test cases for a submission
      */
@@ -62,7 +70,7 @@ public class Judge0ExecutionService {
     }
 
     /**
-     * Execute a single test case
+     * Execute a single test case with output truncation and size limits
      */
     private SubmissionJob.TestResult executeSingleTest(String code, Integer languageId, SubmissionJob.TestCase testCase) {
         SubmissionJob.TestResult result = new SubmissionJob.TestResult();
@@ -73,6 +81,11 @@ public class Judge0ExecutionService {
             Map<String, Object> payload = new HashMap<>();
             payload.put("language_id", languageId);
             payload.put("source_code", code);
+            
+            // Add time and memory limits
+            payload.put("cpu_time_limit", limitsConfig.getMaxExecutionTimeSeconds());
+            payload.put("memory_limit", limitsConfig.getMaxMemoryKb() * 1024); // Convert KB to bytes
+            
             if (testCase.getInput() != null && !testCase.getInput().trim().isEmpty()) {
                 payload.put("stdin", testCase.getInput());
             }
@@ -131,14 +144,45 @@ public class Judge0ExecutionService {
                 }
             }
 
-            // Determine actual output
+            // Extract and truncate stdout
+            String stdout = responseMap.get("stdout") != null ? responseMap.get("stdout").toString().trim() : "";
+            boolean stdoutTruncated = false;
+            if (stdout.length() > limitsConfig.getMaxStdoutLength()) {
+                stdoutTruncated = true;
+                stdout = submissionValidator.truncateOutput(stdout, limitsConfig.getMaxStdoutLength());
+                logger.warn("stdout_truncated", "originalLength", stdout.length(), "truncatedAt", limitsConfig.getMaxStdoutLength());
+            }
+
+            // Extract and truncate stderr
+            String stderr = responseMap.get("stderr") != null ? responseMap.get("stderr").toString().trim() : "";
+            boolean stderrTruncated = false;
+            if (stderr.length() > limitsConfig.getMaxStderrLength()) {
+                stderrTruncated = true;
+                stderr = submissionValidator.truncateOutput(stderr, limitsConfig.getMaxStderrLength());
+                logger.warn("stderr_truncated", "originalLength", stderr.length(), "truncatedAt", limitsConfig.getMaxStderrLength());
+            }
+
+            // Extract and truncate compile output
+            String compileOutput = responseMap.get("compile_output") != null ? responseMap.get("compile_output").toString().trim() : "";
+            boolean compileOutputTruncated = false;
+            if (compileOutput.length() > limitsConfig.getMaxCompileOutputLength()) {
+                compileOutputTruncated = true;
+                compileOutput = submissionValidator.truncateOutput(compileOutput, limitsConfig.getMaxCompileOutputLength());
+                logger.warn("compile_output_truncated", "originalLength", compileOutput.length(), "truncatedAt", limitsConfig.getMaxCompileOutputLength());
+            }
+
+            // Determine actual output (prioritize stderr if present, then compile_output, then stdout)
             String actualOutput = "";
-            if (responseMap.get("stdout") != null && !responseMap.get("stdout").toString().trim().isEmpty()) {
-                actualOutput = responseMap.get("stdout").toString().trim();
-            } else if (responseMap.get("stderr") != null && !responseMap.get("stderr").toString().trim().isEmpty()) {
-                actualOutput = responseMap.get("stderr").toString().trim();
-            } else if (responseMap.get("compile_output") != null && !responseMap.get("compile_output").toString().trim().isEmpty()) {
-                actualOutput = responseMap.get("compile_output").toString().trim();
+            boolean outputTruncated = false;
+            if (!stderr.isEmpty()) {
+                actualOutput = stderr;
+                outputTruncated = stderrTruncated;
+            } else if (!compileOutput.isEmpty()) {
+                actualOutput = compileOutput;
+                outputTruncated = compileOutputTruncated;
+            } else if (!stdout.isEmpty()) {
+                actualOutput = stdout;
+                outputTruncated = stdoutTruncated;
             } else {
                 actualOutput = "No Output";
             }
@@ -148,9 +192,16 @@ public class Judge0ExecutionService {
             result.setMemory(memory);
             result.setExecutionDetails(responseMap);
 
+            // Mark as OUTPUT_LIMIT_EXCEEDED if outputs were truncated
+            if (outputTruncated) {
+                result.setErrorType("OUTPUT_LIMIT_EXCEEDED");
+                result.setPassed(false);
+                logger.warn("output_limit_exceeded_on_testcase");
+            }
+
             // Check for errors
             String errorType = parseErrorType(responseMap);
-            if (errorType != null) {
+            if (errorType != null && !outputTruncated) {
                 result.setPassed(false);
                 result.setErrorType(errorType);
                 result.setErrorMessage(parseErrorMessage(responseMap));
@@ -161,7 +212,7 @@ public class Judge0ExecutionService {
                     "errorType", errorType,
                     "runtimeMs", runtime,
                     "memoryBytes", memory);
-            } else {
+            } else if (errorType == null && !outputTruncated) {
                 // Check if output matches expected
                 String expected = testCase.getExpectedOutput() != null ? testCase.getExpectedOutput().trim() : "";
                 boolean passed = actualOutput.equals(expected);

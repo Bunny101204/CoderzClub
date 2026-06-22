@@ -2,6 +2,7 @@ package com.coderzclub.controller;
 
 import com.coderzclub.model.Problem;
 import com.coderzclub.repository.ProblemRepository;
+import com.coderzclub.service.SubmissionValidator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,9 @@ import java.util.regex.Pattern;
 public class ProblemController {
     @Autowired
     private ProblemRepository problemRepository;
+
+    @Autowired
+    private SubmissionValidator submissionValidator;
 
     @Autowired
     private MongoTemplate mongoTemplate;
@@ -70,6 +74,11 @@ public class ProblemController {
             int endIndex = Math.min(startIndex + size, totalItems);
             List<Problem> pageProblems = startIndex < endIndex ? matchedProblems.subList(startIndex, endIndex) : new ArrayList<>();
 
+            // Ensure hidden testcases are not returned to clients
+            for (Problem p : pageProblems) {
+                p.setHiddenTestCases(null);
+            }
+
             Map<String, Object> response = new HashMap<>();
             response.put("problems", pageProblems);
             response.put("currentPage", page);
@@ -109,8 +118,11 @@ public class ProblemController {
     @GetMapping("/{id}")
     public ResponseEntity<Problem> getProblemById(@PathVariable String id) {
         Optional<Problem> problem = problemRepository.findById(id);
-        return problem.map(ResponseEntity::ok)
-                      .orElseGet(() -> ResponseEntity.notFound().build());
+        if (problem.isEmpty()) return ResponseEntity.notFound().build();
+        Problem p = problem.get();
+        // Remove hidden testcases from API response
+        p.setHiddenTestCases(null);
+        return ResponseEntity.ok(p);
     }
 
     @GetMapping("/test")
@@ -119,7 +131,12 @@ public class ProblemController {
     }
 
     @PostMapping
-    public ResponseEntity<Problem> addProblem(@RequestBody Problem problem) {
+    public ResponseEntity<?> addProblem(@RequestBody Problem problem) {
+        try {
+            submissionValidator.validateProblemTestCases(problem);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
         Problem saved = problemRepository.save(problem);
         return ResponseEntity.ok(saved);
     }

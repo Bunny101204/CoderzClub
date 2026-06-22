@@ -31,16 +31,31 @@ public class SubmissionJobService {
      * Create a new submission job
      */
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
-                                   Integer languageId, List<SubmissionJob.TestCase> publicTestCases,
-                                   List<SubmissionJob.TestCase> hiddenTestCases) {
+                                   Integer languageId, List<com.coderzclub.model.TestCase> publicTestCases,
+                                   List<com.coderzclub.model.TestCase> hiddenTestCases) {
         SubmissionJob job = new SubmissionJob();
         job.setUserId(userId);
         job.setProblemId(problemId);
         job.setCode(code);
         job.setLanguage(language);
         job.setLanguageId(languageId);
-        job.setPublicTestCases(publicTestCases);
-        job.setHiddenTestCases(hiddenTestCases);
+        // Convert model.TestCase to SubmissionJob.TestCase
+        java.util.List<SubmissionJob.TestCase> jobPublic = new java.util.ArrayList<>();
+        if (publicTestCases != null) {
+            for (com.coderzclub.model.TestCase tc : publicTestCases) {
+                jobPublic.add(new SubmissionJob.TestCase(tc.getInput(), tc.getOutput(), tc.getExplanation()));
+            }
+        }
+
+        java.util.List<SubmissionJob.TestCase> jobHidden = new java.util.ArrayList<>();
+        if (hiddenTestCases != null) {
+            for (com.coderzclub.model.TestCase tc : hiddenTestCases) {
+                jobHidden.add(new SubmissionJob.TestCase(tc.getInput(), tc.getOutput(), tc.getExplanation()));
+            }
+        }
+
+        job.setPublicTestCases(jobPublic);
+        job.setHiddenTestCases(jobHidden);
         job.setStatus(SubmissionJob.JobStatus.PENDING);
         job.setTotalTests((publicTestCases != null ? publicTestCases.size() : 0) +
                          (hiddenTestCases != null ? hiddenTestCases.size() : 0));
