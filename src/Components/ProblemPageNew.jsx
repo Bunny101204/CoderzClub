@@ -313,7 +313,6 @@ const ProblemPageNew = ({ problems }) => {
             <Judge0CodeEditor
             initialCode={problem.template || ""}
             testCases={isStdinMode ? (problem.publicTestCases || []) : (problem.testCases || [])}
-            hiddenTestCases={problem.hiddenTestCases || []}
             functionName={problem.functionName}
             parameters={problem.parameters || []}
             problemId={problem.id}

@@ -175,7 +175,7 @@ const ProblemPage = ({ problems }) => {
             languageId={languageId}
             setLanguageId={handleLanguageChange}
             testCases={problem.testCases}
-            hiddenTestCases={problem.hiddenTestCases}
+            
             showButtonsBelow
             functionName={problem.functionName}
             parameters={problem.parameters}

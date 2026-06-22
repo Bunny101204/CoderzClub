@@ -9,7 +9,6 @@ import { auth } from "./AuthHelper";
 const Judge0CodeEditor = ({
   initialCode = "",
   testCases = [],
-  hiddenTestCases = [],
   languageId: propLanguageId,
   setLanguageId: propSetLanguageId,
   setEditorCode: propSetEditorCode,
@@ -24,7 +23,6 @@ const Judge0CodeEditor = ({
     console.log("=== Judge0CodeEditor mounted ===");
     console.log("testCases:", testCases);
     console.log("testCases.length:", testCases?.length);
-    console.log("hiddenTestCases:", hiddenTestCases);
     console.log("problemId:", problemId);
     console.log("executionMode:", executionMode);
   }, []);
@@ -618,7 +616,7 @@ const Judge0CodeEditor = ({
   };
 
   // Helper to run a single test case (for submit)
-  const handleSubmitSolution = async (publicCases, hiddenCases) => {
+  const handleSubmitSolution = async (publicCases) => {
     // Check submission limits before submitting
     try {
       const limitsResponse = await axios.get(`/api/submissions/limits?problemId=${problemId}`, auth.getAuthConfig());
@@ -677,14 +675,12 @@ const Judge0CodeEditor = ({
         }));
       };
 
-      // Create async submission job
+      // Create async submission job - only send identifiers and code
       const jobRequest = {
         problemId: problemId,
         code: sourceCode,
         language: languageNames[languageId] || "Unknown",
-        languageId: languageId,
-        publicTestCases: normalizeCases(publicCases),
-        hiddenTestCases: normalizeCases(hiddenCases)
+        languageId: languageId
       };
 
       const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
@@ -1279,9 +1275,7 @@ const Judge0CodeEditor = ({
               {isLoading ? "⏳ Running..." : `▶️ Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
             </button>
             <button
-              onClick={() =>
-                handleSubmitSolution(testCases || [], hiddenTestCases || [])
-              }
+              onClick={() => handleSubmitSolution(testCases || [])}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 disabled:cursor-not-allowed`}
               disabled={isLoading}
             >
@@ -1489,24 +1483,33 @@ const Judge0CodeEditor = ({
                   )}
                   {submitResult.failedCase && (
                     <>
-                      <div className="mb-3">
-                        <span className="font-bold text-red-300">Input:</span>
-                        <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm">
-                          {submitResult.failedCase.input || 'N/A'}
-                        </pre>
-                      </div>
-                      <div className="mb-3">
-                        <span className="font-bold text-red-300">Expected Output:</span>
-                        <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-green-300">
-                          {submitResult.failedCase.output || 'N/A'}
-                        </pre>
-                      </div>
-                      <div className="mb-3">
-                        <span className="font-bold text-red-300">Your Output:</span>
-                        <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-red-300">
-                          {submitResult.failedCase.actual || 'N/A'}
-                        </pre>
-                      </div>
+                      {submitResult.failedCase.type === 'hidden' ? (
+                        <div className="mb-3">
+                          <span className="font-bold text-red-300">Hidden Testcase</span>
+                          <div className="mt-2 text-gray-300">Failed on a hidden testcase. Details are not shown.</div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mb-3">
+                            <span className="font-bold text-red-300">Input:</span>
+                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm">
+                              {submitResult.failedCase.input || 'N/A'}
+                            </pre>
+                          </div>
+                          <div className="mb-3">
+                            <span className="font-bold text-red-300">Expected Output:</span>
+                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-green-300">
+                              {submitResult.failedCase.output || 'N/A'}
+                            </pre>
+                          </div>
+                          <div className="mb-3">
+                            <span className="font-bold text-red-300">Your Output:</span>
+                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-red-300">
+                              {submitResult.failedCase.actual || 'N/A'}
+                            </pre>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                   <div className="mt-4 pt-4 border-t border-red-700">
