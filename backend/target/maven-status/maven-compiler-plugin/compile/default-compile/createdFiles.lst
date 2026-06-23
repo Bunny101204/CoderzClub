@@ -23,6 +23,7 @@ com/coderzclub/model/SubmissionJob$TestResult.class
 com/coderzclub/dto/TestResultResponse.class
 com/coderzclub/model/Parameter.class
 com/coderzclub/service/SubmissionService.class
+com/coderzclub/config/RedisConfig.class
 com/coderzclub/service/ProblemBundleService.class
 com/coderzclub/service/UserService.class
 com/coderzclub/controller/UserController$ProfileUpdateRequest.class

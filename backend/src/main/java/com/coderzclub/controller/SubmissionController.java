@@ -107,6 +107,13 @@ public class SubmissionController {
                 .build();
                 
             submission = submissionRepository.save(submission);
+
+            // Record submission attempt for rate limiting
+            try {
+                submissionLimitService.recordSubmissionAttempt(user.getId(), request.getProblemId());
+            } catch (Exception e) {
+                // Log but don't fail the save if redis recording fails (behavior controlled by redisFailOpen)
+            }
             
             // Update user stats if solution is correct
             if ("ACCEPTED".equals(submission.getResult()) || "ACCEPTED".equals(verdict)) {

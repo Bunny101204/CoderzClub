@@ -125,6 +125,13 @@ public class SubmissionJobController {
                 problem.getHiddenTestCases()
             );
 
+            // Record the submission attempt in rate limiter (Redis)
+            try {
+                submissionLimitService.recordSubmissionAttempt(user.getId(), request.getProblemId());
+            } catch (Exception e) {
+                logger.warn("Failed to record submission attempt: {}", e.getMessage());
+            }
+
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());
             resp.setStatus(job.getStatus().toString());

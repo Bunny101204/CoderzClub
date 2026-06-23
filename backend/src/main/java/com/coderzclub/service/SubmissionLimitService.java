@@ -2,137 +2,205 @@ package com.coderzclub.service;
 
 import com.coderzclub.repository.SubmissionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import java.util.Date;
-import java.util.Calendar;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Service to handle submission limits and rate limiting
+ * Redis-backed submission limit service.
  */
 @Service
 public class SubmissionLimitService {
-    
+
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+
     @Autowired
-    private SubmissionRepository submissionRepository;
-    
-    // Default limits (can be made configurable via application.properties)
-    private static final int DEFAULT_DAILY_SUBMISSION_LIMIT = 100;
-    private static final int DEFAULT_PROBLEM_SUBMISSION_LIMIT = 50; // Per problem per day
-    private static final long MIN_SUBMISSION_INTERVAL_MS = 2000; // 2 seconds between submissions
-    
-    /**
-     * Checks if user has exceeded daily submission limit
-     */
-    public boolean hasExceededDailyLimit(String userId) {
-        Date today = getStartOfDay(new Date());
-        long count = submissionRepository.findByUserId(userId)
-            .stream()
-            .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().after(today))
-            .count();
-        return count >= DEFAULT_DAILY_SUBMISSION_LIMIT;
+    private StringRedisTemplate redis;
+
+    @Autowired
+    private SubmissionRepository submissionRepository; // fallback
+
+    @Value("${submission.limit.daily:100}")
+    private int dailyLimit;
+
+    @Value("${submission.limit.perProblemDaily:50}")
+    private int perProblemLimit;
+
+    @Value("${submission.limit.cooldownMs:2000}")
+    private long cooldownMs;
+
+    @Value("${submission.limit.redisFailOpen:false}")
+    private boolean redisFailOpen;
+
+    private String dailyKey(String userId) {
+        return "coderzclub:rate:daily:" + userId + ":" + LocalDate.now().format(DATE_FMT);
     }
-    
-    /**
-     * Checks if user has exceeded submission limit for a specific problem today
-     */
-    public boolean hasExceededProblemLimit(String userId, String problemId) {
-        Date today = getStartOfDay(new Date());
-        long count = submissionRepository.findByUserId(userId)
-            .stream()
-            .filter(s -> problemId.equals(s.getProblemId()) 
-                && s.getCreatedAt() != null 
-                && s.getCreatedAt().after(today))
-            .count();
-        return count >= DEFAULT_PROBLEM_SUBMISSION_LIMIT;
+
+    private String problemKey(String userId, String problemId) {
+        return "coderzclub:rate:problem:" + userId + ":" + problemId + ":" + LocalDate.now().format(DATE_FMT);
     }
-    
-    /**
-     * Gets the number of submissions remaining for today
-     */
-    public int getRemainingDailySubmissions(String userId) {
-        Date today = getStartOfDay(new Date());
-        long count = submissionRepository.findByUserId(userId)
-            .stream()
-            .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().after(today))
-            .count();
-        return Math.max(0, DEFAULT_DAILY_SUBMISSION_LIMIT - (int)count);
+
+    private String lastSubmitKey(String userId) {
+        return "coderzclub:rate:last-submit:" + userId;
     }
-    
+
     /**
-     * Gets the number of submissions remaining for a specific problem today
+     * Atomically record a submission attempt: increments counters and sets TTLs.
      */
-    public int getRemainingProblemSubmissions(String userId, String problemId) {
-        Date today = getStartOfDay(new Date());
-        long count = submissionRepository.findByUserId(userId)
-            .stream()
-            .filter(s -> problemId.equals(s.getProblemId()) 
-                && s.getCreatedAt() != null 
-                && s.getCreatedAt().after(today))
-            .count();
-        return Math.max(0, DEFAULT_PROBLEM_SUBMISSION_LIMIT - (int)count);
+    public void recordSubmissionAttempt(String userId, String problemId) {
+        try {
+            String dKey = dailyKey(userId);
+            Long d = redis.opsForValue().increment(dKey);
+            if (d != null && d == 1L) {
+                // set expiry to next midnight + 1 hour (so 24-25 hours)
+                long seconds = secondsUntilNextMidnight() + 3600;
+                redis.expire(dKey, seconds, TimeUnit.SECONDS);
+            }
+
+            String pKey = problemKey(userId, problemId);
+            Long p = redis.opsForValue().increment(pKey);
+            if (p != null && p == 1L) {
+                long seconds = secondsUntilNextMidnight() + 3600;
+                redis.expire(pKey, seconds, TimeUnit.SECONDS);
+            }
+
+            String lastKey = lastSubmitKey(userId);
+            redis.opsForValue().set(lastKey, String.valueOf(System.currentTimeMillis()), cooldownMs, TimeUnit.MILLISECONDS);
+
+        } catch (Exception e) {
+            if (redisFailOpen) {
+                // best-effort fallback to MongoDB counts
+                // no-op here: repository operations are used in other methods when needed
+                return;
+            }
+            throw new RuntimeException("Redis unavailable", e);
+        }
     }
-    
-    /**
-     * Checks if enough time has passed since last submission (rate limiting)
-     */
+
+    public boolean canSubmit(String userId, String problemId) {
+        // Combined check: cooldown + limits
+        if (!canSubmitNow(userId)) return false;
+        if (hasExceededDailyLimit(userId)) return false;
+        if (hasExceededProblemLimit(userId, problemId)) return false;
+        return true;
+    }
+
     public boolean canSubmitNow(String userId) {
-        var submissions = submissionRepository.findByUserId(userId);
-        if (submissions.isEmpty()) {
+        try {
+            String lastKey = lastSubmitKey(userId);
+            Long ttl = redis.getExpire(lastKey, TimeUnit.SECONDS);
+            if (ttl != null && ttl > 0) return false;
             return true;
+        } catch (Exception e) {
+            if (redisFailOpen) return true;
+            throw new RuntimeException("Redis unavailable", e);
         }
-        
-        // Get most recent submission
-        var mostRecent = submissions.stream()
-            .max((s1, s2) -> {
-                if (s1.getCreatedAt() == null) return -1;
-                if (s2.getCreatedAt() == null) return 1;
-                return s1.getCreatedAt().compareTo(s2.getCreatedAt());
-            });
-        
-        if (mostRecent.isEmpty() || mostRecent.get().getCreatedAt() == null) {
-            return true;
-        }
-        
-        long timeSinceLastSubmission = new Date().getTime() - mostRecent.get().getCreatedAt().getTime();
-        return timeSinceLastSubmission >= MIN_SUBMISSION_INTERVAL_MS;
     }
-    
-    /**
-     * Gets the time remaining until next submission is allowed (in seconds)
-     */
+
     public long getCooldownSeconds(String userId) {
-        var submissions = submissionRepository.findByUserId(userId);
-        if (submissions.isEmpty()) {
-            return 0;
+        try {
+            String lastKey = lastSubmitKey(userId);
+            Long ttl = redis.getExpire(lastKey, TimeUnit.SECONDS);
+            return ttl != null && ttl > 0 ? ttl : 0;
+        } catch (Exception e) {
+            if (redisFailOpen) return 0;
+            throw new RuntimeException("Redis unavailable", e);
         }
-        
-        var mostRecent = submissions.stream()
-            .max((s1, s2) -> {
-                if (s1.getCreatedAt() == null) return -1;
-                if (s2.getCreatedAt() == null) return 1;
-                return s1.getCreatedAt().compareTo(s2.getCreatedAt());
-            });
-        
-        if (mostRecent.isEmpty() || mostRecent.get().getCreatedAt() == null) {
-            return 0;
+    }
+
+    public boolean hasExceededDailyLimit(String userId) {
+        try {
+            String dKey = dailyKey(userId);
+            String val = redis.opsForValue().get(dKey);
+            int count = val != null ? Integer.parseInt(val) : 0;
+            return count >= dailyLimit;
+        } catch (Exception e) {
+            if (redisFailOpen) return fallbackHasExceededDailyLimit(userId);
+            throw new RuntimeException("Redis unavailable", e);
         }
-        
-        long timeSinceLastSubmission = new Date().getTime() - mostRecent.get().getCreatedAt().getTime();
-        long remaining = MIN_SUBMISSION_INTERVAL_MS - timeSinceLastSubmission;
-        return remaining > 0 ? (remaining / 1000) : 0;
     }
-    
-    /**
-     * Gets the start of the day (00:00:00) for a given date
-     */
-    private Date getStartOfDay(Date date) {
-        Calendar cal = Calendar.getInstance();
-        cal.setTime(date);
-        cal.set(Calendar.HOUR_OF_DAY, 0);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-        return cal.getTime();
+
+    public boolean hasExceededProblemLimit(String userId, String problemId) {
+        try {
+            String pKey = problemKey(userId, problemId);
+            String val = redis.opsForValue().get(pKey);
+            int count = val != null ? Integer.parseInt(val) : 0;
+            return count >= perProblemLimit;
+        } catch (Exception e) {
+            if (redisFailOpen) return fallbackHasExceededProblemLimit(userId, problemId);
+            throw new RuntimeException("Redis unavailable", e);
+        }
     }
+
+    public int getRemainingDailySubmissions(String userId) {
+        try {
+            String dKey = dailyKey(userId);
+            String val = redis.opsForValue().get(dKey);
+            int count = val != null ? Integer.parseInt(val) : 0;
+            return Math.max(0, dailyLimit - count);
+        } catch (Exception e) {
+            if (redisFailOpen) return fallbackGetRemainingDaily(userId);
+            throw new RuntimeException("Redis unavailable", e);
+        }
+    }
+
+    public int getRemainingProblemSubmissions(String userId, String problemId) {
+        try {
+            String pKey = problemKey(userId, problemId);
+            String val = redis.opsForValue().get(pKey);
+            int count = val != null ? Integer.parseInt(val) : 0;
+            return Math.max(0, perProblemLimit - count);
+        } catch (Exception e) {
+            if (redisFailOpen) return fallbackGetRemainingProblem(userId, problemId);
+            throw new RuntimeException("Redis unavailable", e);
+        }
+    }
+
+    // Backups using MongoDB counts (only used when redisFailOpen=true)
+    private boolean fallbackHasExceededDailyLimit(String userId) {
+        long count = submissionRepository.findByUserId(userId)
+            .stream()
+            .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDate().isEqual(LocalDate.now()))
+            .count();
+        return count >= dailyLimit;
+    }
+
+    private boolean fallbackHasExceededProblemLimit(String userId, String problemId) {
+        long count = submissionRepository.findByUserId(userId)
+            .stream()
+            .filter(s -> problemId.equals(s.getProblemId()) && s.getCreatedAt() != null && s.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDate().isEqual(LocalDate.now()))
+            .count();
+        return count >= perProblemLimit;
+    }
+
+    private int fallbackGetRemainingDaily(String userId) {
+        long count = submissionRepository.findByUserId(userId)
+            .stream()
+            .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDate().isEqual(LocalDate.now()))
+            .count();
+        return Math.max(0, dailyLimit - (int) count);
+    }
+
+    private int fallbackGetRemainingProblem(String userId, String problemId) {
+        long count = submissionRepository.findByUserId(userId)
+            .stream()
+            .filter(s -> problemId.equals(s.getProblemId()) && s.getCreatedAt() != null && s.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDate().isEqual(LocalDate.now()))
+            .count();
+        return Math.max(0, perProblemLimit - (int) count);
+    }
+
+    private long secondsUntilNextMidnight() {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime nextMid = now.toLocalDate().plusDays(1).atStartOfDay();
+        return java.time.Duration.between(now, nextMid).getSeconds();
+    }
+
 }
+
 
