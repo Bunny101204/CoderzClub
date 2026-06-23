@@ -33,7 +33,7 @@ public class Judge0ExecutionService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${judge0.api.key:${JUDGE0_API_KEY:${VITE_JUDGE0_API_KEY:}}}")
+    @Value("${judge0.api.key}")
     private String judge0ApiKey;
 
     @Autowired
@@ -192,11 +192,17 @@ public class Judge0ExecutionService {
             result.setMemory(memory);
             result.setExecutionDetails(responseMap);
 
+            String actualOutputSummary = actualOutput;
+            if (actualOutputSummary.length() > 200) {
+                actualOutputSummary = actualOutputSummary.substring(0, 200) + "...";
+            }
+
             // Mark as OUTPUT_LIMIT_EXCEEDED if outputs were truncated
             if (outputTruncated) {
                 result.setErrorType("OUTPUT_LIMIT_EXCEEDED");
                 result.setPassed(false);
-                logger.warn("output_limit_exceeded_on_testcase");
+                logger.warn("output_limit_exceeded_on_testcase languageId={} runtimeMs={} memoryBytes={} outputLength={}",
+                    languageId, runtime, memory, actualOutput.length());
             }
 
             // Check for errors
@@ -207,11 +213,8 @@ public class Judge0ExecutionService {
                 result.setErrorMessage(parseErrorMessage(responseMap));
 
                 // Observability: Log execution error
-                logger.warn("judge0_execution_error",
-                    "languageId", languageId,
-                    "errorType", errorType,
-                    "runtimeMs", runtime,
-                    "memoryBytes", memory);
+                logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
+                    languageId, errorType, runtime, memory, actualOutputSummary);
             } else if (errorType == null && !outputTruncated) {
                 // Check if output matches expected
                 String expected = testCase.getExpectedOutput() != null ? testCase.getExpectedOutput().trim() : "";
@@ -219,12 +222,10 @@ public class Judge0ExecutionService {
                 result.setPassed(passed);
 
                 // Observability: Log execution result
-                logger.info("judge0_execution_completed",
-                    "languageId", languageId,
-                    "passed", passed,
-                    "runtimeMs", runtime,
-                    "memoryBytes", memory,
-                    "outputLength", actualOutput.length());
+                logger.info("judge0_execution_result languageId={} passed={} runtimeMs={} memoryBytes={} expectedSummary={} actualOutputSummary={}",
+                    languageId, passed, runtime, memory,
+                    expected.length() > 200 ? expected.substring(0, 200) + "..." : expected,
+                    actualOutputSummary);
             }
 
         } catch (Exception e) {

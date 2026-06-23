@@ -32,3 +32,36 @@ export SPRING_MAIL_PASSWORD=your-app-password
 export APP_EMAIL_FROM=your.email@gmail.com
 export APP_BACKEND_URL=http://localhost:8080
 ```
+
+## Judge0 Execution Key
+
+The Judge0 integration requires a private API key for backend execution. Do not commit this key to source control.
+
+Set it through environment variables or a local `.env` file in the repo root:
+
+- `JUDGE0_API_KEY`
+
+Example:
+
+```bash
+export JUDGE0_API_KEY=your-judge0-api-key
+```
+
+Since `.env` is already ignored by git, you can also place it in the repository root:
+
+```env
+JUDGE0_API_KEY=your-judge0-api-key
+```
+
+Do not expose this key in frontend/Vite environment variables such as `VITE_JUDGE0_API_KEY`.
+
+If you need a fallback property, the backend also supports `judge0.api.key` in `backend/src/main/resources/application.properties`.
+
+## Local Redis / submission limits
+The backend uses Redis for submission rate limiting. If you do not have Redis running locally, enable fail-open mode:
+
+```bash
+export SUBMISSION_LIMIT_REDIS_FAIL_OPEN=true
+```
+
+This lets submissions continue on local development without Redis, while still using Redis when available.

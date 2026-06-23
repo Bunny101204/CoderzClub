@@ -26,7 +26,7 @@ public class Judge0Controller {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${judge0.api.key:${JUDGE0_API_KEY:${VITE_JUDGE0_API_KEY:}}}")
+    @Value("${judge0.api.key}")
     private String judge0ApiKey;
 
     @PostMapping("/execute")

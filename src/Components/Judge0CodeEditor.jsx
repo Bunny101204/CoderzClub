@@ -683,8 +683,10 @@ const Judge0CodeEditor = ({
         languageId: languageId
       };
 
+      console.log("Submitting job request to backend:", jobRequest);
       const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
       const { jobId } = jobResponse.data;
+      console.log("Received submission job ID:", jobId, "response:", jobResponse.data);
 
       // Poll for job completion
       await pollJobStatus(jobId, publicCases?.length || 0);
@@ -712,6 +714,7 @@ const Judge0CodeEditor = ({
         }
 
         if (job.status === 'COMPLETED') {
+          console.log("Submission job completed:", job);
           // Job completed successfully
           setIsLoading(false);
 

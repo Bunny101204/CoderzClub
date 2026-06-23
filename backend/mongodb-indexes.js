@@ -1,89 +1,85 @@
 /**
  * MongoDB Index Creation Script for CoderzClub
- * 
- * Run this script in MongoDB shell to create indexes for frequently queried fields.
- * This will improve query performance by 10-100x depending on collection size.
- * 
- * To run:
- * 1. Connect to MongoDB: mongo "your-connection-string"
- * 2. Select database: use your_database_name
- * 3. Copy and paste the commands below
+ *
+ * Run this script in the MongoDB shell to create or verify production-ready indexes.
+ * This script is idempotent and avoids duplicate indexes when Spring auto-index
+ * creation is enabled.
+ *
+ * Usage:
+ *   mongo "your-connection-string"
+ *   use your_database_name
+ *   load('mongodb-indexes.js')
  */
 
-// ===== PROBLEMS COLLECTION INDEXES =====
-// Indexes for search and filtering
-db.problems.createIndex({ "title": 1 }, { name: "title_index" });
-db.problems.createIndex({ "difficulty": 1 }, { name: "difficulty_index" });
-db.problems.createIndex({ "tags": 1 }, { name: "tags_index" });
-db.problems.createIndex({ "_id": 1 }, { unique: true, name: "id_index_unique" });
+function ensureIndex(coll, keys, options) {
+  options = options || {};
+  var existing = coll.getIndexes().some(function(idx) {
+    return JSON.stringify(idx.key) === JSON.stringify(keys);
+  });
+  if (!existing) {
+    print('Creating index ' + (options.name || JSON.stringify(keys)) + ' on ' + coll.getName());
+    coll.createIndex(keys, options);
+  } else {
+    print('Index already exists on ' + coll.getName() + ': ' + (options.name || JSON.stringify(keys)));
+  }
+}
 
-// Compound index for common search patterns
-db.problems.createIndex({ "title": 1, "difficulty": 1 }, { name: "title_difficulty_index" });
-db.problems.createIndex({ "difficulty": 1, "tags": 1 }, { name: "difficulty_tags_index" });
+// ===== PROBLEMS COLLECTION INDEXES =====
+// Search and filtering by difficulty, category, premium flag, tags, and numeric ID.
+ensureIndex(db.problems, { "difficulty": 1, "category": 1 }, { name: "difficulty_category_idx" });
+ensureIndex(db.problems, { "tags": 1 }, { name: "tags_idx" });
+ensureIndex(db.problems, { "isPremium": 1, "difficulty": 1 }, { name: "isPremium_difficulty_idx" });
+ensureIndex(db.problems, { "numericId": 1 }, { name: "numericId_idx" });
+ensureIndex(db.problems, { "title": "text", "tags": "text", "category": "text" }, { name: "title_tags_category_text_idx" });
+
+// Existing heuristic indexes for queries and filtering.
+ensureIndex(db.problems, { "title": 1 }, { name: "title_idx" });
+ensureIndex(db.problems, { "difficulty": 1 }, { name: "difficulty_idx" });
+ensureIndex(db.problems, { "difficulty": 1, "tags": 1 }, { name: "difficulty_tags_idx" });
 
 // ===== USERS COLLECTION INDEXES =====
-db.users.createIndex({ "_id": 1 }, { unique: true, name: "id_index_unique" });
-db.users.createIndex({ "email": 1 }, { unique: true, name: "email_index_unique" });
-db.users.createIndex({ "username": 1 }, { unique: true, name: "username_index_unique" });
-db.users.createIndex({ "role": 1 }, { name: "role_index" });
-db.users.createIndex({ "lastActiveDate": 1 }, { name: "lastActiveDate_index" });
+// Leaderboard, role lookup, streak ordering, and email verification filtering.
+ensureIndex(db.users, { "totalPoints": -1 }, { name: "totalPoints_desc_idx" });
+ensureIndex(db.users, { "role": 1 }, { name: "role_idx" });
+ensureIndex(db.users, { "currentStreak": -1 }, { name: "currentStreak_desc_idx" });
+ensureIndex(db.users, { "emailVerified": 1 }, { name: "emailVerified_idx" });
+
+// Unique username/email indexes are created by Spring @Indexed(unique=true) in User model.
 
 // ===== SUBMISSIONS COLLECTION INDEXES =====
-db.submissions.createIndex({ "_id": 1 }, { unique: true, name: "id_index_unique" });
-db.submissions.createIndex({ "userId": 1 }, { name: "userId_index" });
-db.submissions.createIndex({ "problemId": 1 }, { name: "problemId_index" });
-db.submissions.createIndex({ "result": 1 }, { name: "result_index" });
-db.submissions.createIndex({ "language": 1 }, { name: "language_index" });
-db.submissions.createIndex({ "createdAt": -1 }, { name: "createdAt_descending_index" });
+// Recent history, per-user/problem counts, and result-based filtering.
+ensureIndex(db.submissions, { "userId": 1, "createdAt": -1 }, { name: "userId_createdAt_desc_idx" });
+ensureIndex(db.submissions, { "userId": 1, "problemId": 1, "createdAt": -1 }, { name: "userId_problemId_createdAt_desc_idx" });
+ensureIndex(db.submissions, { "userId": 1, "result": 1, "createdAt": -1 }, { name: "userId_result_createdAt_desc_idx" });
+ensureIndex(db.submissions, { "problemId": 1, "result": 1, "createdAt": -1 }, { name: "problemId_result_createdAt_desc_idx" });
+ensureIndex(db.submissions, { "userId": 1, "problemId": 1, "result": 1 }, { name: "userId_problemId_result_idx" });
 
-// Compound indexes for common query patterns
-db.submissions.createIndex({ "userId": 1, "problemId": 1 }, { name: "userId_problemId_index" });
-db.submissions.createIndex({ "userId": 1, "result": 1 }, { name: "userId_result_index" });
-db.submissions.createIndex({ "problemId": 1, "result": 1 }, { name: "problemId_result_index" });
+// Existing supporting indexes.
+ensureIndex(db.submissions, { "userId": 1 }, { name: "userId_idx" });
+ensureIndex(db.submissions, { "problemId": 1 }, { name: "problemId_idx" });
+ensureIndex(db.submissions, { "result": 1 }, { name: "result_idx" });
+ensureIndex(db.submissions, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
 
 // ===== SUBMISSION_JOBS COLLECTION INDEXES =====
-db.submission_jobs.createIndex({ "_id": 1 }, { unique: true, name: "id_index_unique" });
-db.submission_jobs.createIndex({ "userId": 1 }, { name: "userId_index" });
-db.submission_jobs.createIndex({ "submissionId": 1 }, { name: "submissionId_index" });
-db.submission_jobs.createIndex({ "status": 1 }, { name: "status_index" });
-db.submission_jobs.createIndex({ "createdAt": -1 }, { name: "createdAt_descending_index" });
+// Queue scanning and recovery for pending/locked jobs.
+ensureIndex(db.submission_jobs, { "status": 1, "createdAt": 1 }, { name: "status_createdAt_idx" });
+ensureIndex(db.submission_jobs, { "userId": 1, "status": 1, "createdAt": -1 }, { name: "userId_status_createdAt_desc_idx" });
+ensureIndex(db.submission_jobs, { "lockedUntil": 1 }, { name: "lockedUntil_idx" });
+ensureIndex(db.submission_jobs, { "status": 1, "lockedUntil": 1 }, { name: "status_lockedUntil_idx" });
+
+// Existing supporting indexes.
+ensureIndex(db.submission_jobs, { "submissionId": 1 }, { name: "submissionId_idx" });
+ensureIndex(db.submission_jobs, { "status": 1 }, { name: "status_idx" });
+ensureIndex(db.submission_jobs, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
 
 // ===== PROBLEM_BUNDLES COLLECTION INDEXES =====
-db.problem_bundles.createIndex({ "_id": 1 }, { unique: true, name: "id_index_unique" });
-db.problem_bundles.createIndex({ "name": 1 }, { name: "name_index" });
-db.problem_bundles.createIndex({ "difficulty": 1 }, { name: "difficulty_index" });
-db.problem_bundles.createIndex({ "createdAt": -1 }, { name: "createdAt_descending_index" });
+ensureIndex(db.problem_bundles, { "name": 1 }, { name: "name_idx" });
+ensureIndex(db.problem_bundles, { "difficulty": 1 }, { name: "difficulty_idx" });
+ensureIndex(db.problem_bundles, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
 
 // ===== SUBSCRIPTIONS COLLECTION INDEXES =====
-db.subscriptions.createIndex({ "_id": 1 }, { unique: true, name: "id_index_unique" });
-db.subscriptions.createIndex({ "userId": 1 }, { name: "userId_index" });
-db.subscriptions.createIndex({ "status": 1 }, { name: "status_index" });
-db.subscriptions.createIndex({ "expiryDate": 1 }, { name: "expiryDate_index" });
+ensureIndex(db.subscriptions, { "userId": 1 }, { name: "userId_idx" });
+ensureIndex(db.subscriptions, { "status": 1 }, { name: "status_idx" });
+ensureIndex(db.subscriptions, { "expiryDate": 1 }, { name: "expiryDate_idx" });
 
-// ===== VERIFY INDEXES =====
-// Run these commands to verify indexes were created successfully
-db.problems.getIndexes();
-db.users.getIndexes();
-db.submissions.getIndexes();
-db.submission_jobs.getIndexes();
-db.problem_bundles.getIndexes();
-db.subscriptions.getIndexes();
-
-// ===== INDEX STATISTICS =====
-// To get index usage statistics (MongoDB 4.4+):
-db.problems.aggregate([{ $indexStats: {} }]);
-db.users.aggregate([{ $indexStats: {} }]);
-db.submissions.aggregate([{ $indexStats: {} }]);
-
-// ===== DROP INDEXES (if needed for maintenance) =====
-// db.problems.dropIndex("title_index");
-// db.users.dropIndex("email_index_unique");
-// db.submissions.dropIndex("userId_problemId_index");
-
-// ===== PERFORMANCE NOTES =====
-// After creating indexes:
-// - Query performance should improve 10-100x depending on collection size
-// - Index creation may take 1-5 minutes depending on collection size
-// - Large collections (>100GB) should be indexed during low-traffic periods
-// - Monitor index size: db.collection.stats() includes "indexSizes"
-// - Indexes consume disk space (~10-30% of collection size)
+print('Index creation script completed. Verify indexes with db.collection.getIndexes().');

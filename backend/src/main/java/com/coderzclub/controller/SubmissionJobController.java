@@ -105,6 +105,13 @@ public class SubmissionJobController {
             }
             Problem problem = problemOpt.get();
 
+            int totalTests = (problem.getPublicTestCases() != null ? problem.getPublicTestCases().size() : 0)
+                + (problem.getHiddenTestCases() != null ? problem.getHiddenTestCases().size() : 0);
+
+            logger.info("submission_request_received user={} problemId={} language={} languageId={} totalTests={} codeLength={}",
+                username, request.getProblemId(), request.getLanguage(), request.getLanguageId(),
+                totalTests, request.getCode() != null ? request.getCode().length() : 0);
+
             // Step 5: Validate problem testcases against limits
             try {
                 submissionValidator.validateProblemTestCases(problem);
@@ -137,7 +144,8 @@ public class SubmissionJobController {
             resp.setStatus(job.getStatus().toString());
             resp.setCreatedAt(job.getCreatedAt());
 
-            logger.info("Created submission job {} for user {}", job.getId(), username);
+            logger.info("Created submission job {} for user {} problemId={} totalTests={}",
+                job.getId(), username, request.getProblemId(), job.getTotalTests());
 
             return ResponseEntity.accepted().body(resp);
 

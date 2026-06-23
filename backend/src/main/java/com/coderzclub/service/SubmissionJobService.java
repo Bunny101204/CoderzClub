@@ -62,13 +62,8 @@ public class SubmissionJobService {
 
         job = jobRepository.save(job);
 
-        // Observability: Log job creation
-        logger.info("submission_job_created",
-            "jobId", job.getId(),
-            "userId", userId,
-            "problemId", problemId,
-            "language", language,
-            "testCases", job.getTotalTests());
+        logger.info("submission_job_created id={} userId={} problemId={} language={} languageId={} totalTests={} codeLength={}",
+            job.getId(), userId, problemId, language, languageId, job.getTotalTests(), code != null ? code.length() : 0);
 
         // Start processing asynchronously
         processJobAsync(job.getId());
@@ -134,7 +129,8 @@ public class SubmissionJobService {
         job.setStartedAt(new Date());
         jobRepository.save(job);
 
-        logger.info("Started processing job {} for user {}", jobId, job.getUserId());
+        logger.info("Processing submission job {} userId={} problemId={} language={} totalTests={}",
+            jobId, job.getUserId(), job.getProblemId(), job.getLanguage(), job.getTotalTests());
 
         try {
             // Execute all test cases
@@ -159,6 +155,7 @@ public class SubmissionJobService {
             job.setFinalResult(finalResult);
             job.setTotalRuntime(maxRuntime);
             job.setTotalMemory(maxMemory);
+            long passedTests = results.stream().filter(SubmissionJob.TestResult::isPassed).count();
             job.setCompletedTests(results.size());
             job.setStatus(SubmissionJob.JobStatus.COMPLETED);
             job.setCompletedAt(new Date());
@@ -168,17 +165,10 @@ public class SubmissionJobService {
             // Create final submission record
             submissionService.createSubmissionFromJob(job);
 
-            // Observability: Log successful completion
-            logger.info("submission_job_completed",
-                "jobId", job.getId(),
-                "userId", job.getUserId(),
-                "problemId", job.getProblemId(),
-                "result", finalResult,
-                "runtimeMs", maxRuntime,
-                "memoryBytes", maxMemory,
-                "passedTests", results.stream().filter(SubmissionJob.TestResult::isPassed).count(),
-                "totalTests", results.size(),
-                "processingTimeMs", job.getCompletedAt().getTime() - job.getStartedAt().getTime());
+            logger.info("submission_job_completed jobId={} userId={} problemId={} result={} passedTests={}/{} runtimeMs={} memoryBytes={} processingTimeMs={} ",
+                job.getId(), job.getUserId(), job.getProblemId(), finalResult,
+                passedTests, results.size(), maxRuntime, maxMemory,
+                job.getCompletedAt().getTime() - job.getStartedAt().getTime());
 
         } catch (Exception e) {
             logger.error("Job {} failed with error", job.getId(), e);
