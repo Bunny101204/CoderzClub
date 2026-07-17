@@ -113,11 +113,14 @@ public class UserService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+        String normalizedRole = (user.getRole() == null ? "USER" : user.getRole().trim().toUpperCase());
+        String roleAuthority = "ROLE_" + normalizedRole;
+
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getUsername())
                 .password(user.getPasswordHash())
                 .disabled(!user.isEmailVerified())
-                .authorities("ROLE_" + user.getRole().toUpperCase())
+                .authorities(roleAuthority)
                 .accountExpired(false)
                 .credentialsExpired(false)
                 .accountLocked(false)

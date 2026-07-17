@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -44,14 +45,18 @@ public class JwtFilter extends OncePerRequestFilter {
         String username = null;
         String jwt = null;
 
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            jwt = authHeader.substring(7);
-            try {
-                username = jwtUtil.extractUsername(jwt);
-            } catch (Exception ignored) {
+        if (authHeader != null) {
+            String trimmedHeader = authHeader.trim();
+            if (trimmedHeader.regionMatches(true, 0, "Bearer ", 0, 7)) {
+                jwt = trimmedHeader.substring(7).trim();
+                try {
+                    username = jwtUtil.extractUsername(jwt);
+                } catch (Exception ignored) {
+                }
             }
         }
 
+<<<<<<< HEAD
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             logger.debug("JWT Filter: Processing request for username: {}", username);
             UserDetails userDetails = userService.loadUserByUsername(username);
@@ -71,6 +76,32 @@ public class JwtFilter extends OncePerRequestFilter {
             logger.debug("JWT Filter: No username extracted from token");
         } else {
             logger.debug("JWT Filter: Authentication already exists");
+=======
+        if (username != null) {
+            var existingAuthentication = SecurityContextHolder.getContext().getAuthentication();
+            boolean shouldReplaceAuthentication = existingAuthentication == null || existingAuthentication instanceof AnonymousAuthenticationToken;
+
+            if (shouldReplaceAuthentication) {
+                System.out.println("JWT Filter: Processing request for username: " + username);
+                UserDetails userDetails = userService.loadUserByUsername(username);
+                System.out.println("JWT Filter: User authorities: " + userDetails.getAuthorities());
+                
+                if (jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
+                    System.out.println("JWT Filter: Token is valid, setting authentication");
+                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                            userDetails, null, userDetails.getAuthorities());
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                    System.out.println("JWT Filter: Authentication set successfully");
+                } else {
+                    System.out.println("JWT Filter: Token is invalid");
+                }
+            } else {
+                System.out.println("JWT Filter: Authentication already exists");
+            }
+        } else {
+            System.out.println("JWT Filter: No username extracted from token");
+>>>>>>> 2c144b6 (allprevious issues fixed, fully functional)
         }
         filterChain.doFilter(request, response);
     }

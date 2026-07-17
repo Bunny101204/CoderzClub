@@ -46,10 +46,11 @@ public class JwtUtil {
     }
 
     private Claims extractAllClaims(String token) {
+        String normalizedToken = token == null ? null : token.trim();
         return Jwts.parserBuilder()
                 .setSigningKey(Keys.hmacShaKeyFor(secret.getBytes()))
                 .build()
-                .parseClaimsJws(token)
+                .parseClaimsJws(normalizedToken)
                 .getBody();
     }
 
