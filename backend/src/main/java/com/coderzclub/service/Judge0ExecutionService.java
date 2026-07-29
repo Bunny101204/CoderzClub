@@ -3,6 +3,7 @@ package com.coderzclub.service;
 import com.coderzclub.config.SubmissionLimitsConfig;
 import com.coderzclub.model.SubmissionJob;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,10 +38,14 @@ public class Judge0ExecutionService {
     private String judge0ApiKey;
 
     @Autowired
+<<<<<<< HEAD
     private SubmissionLimitsConfig limitsConfig;
 
     @Autowired
     private SubmissionValidator submissionValidator;
+
+    private SubmissionValidationService validationService;
+
 
     /**
      * Execute all test cases for a submission
@@ -89,6 +94,7 @@ public class Judge0ExecutionService {
             if (testCase.getInput() != null && !testCase.getInput().trim().isEmpty()) {
                 payload.put("stdin", testCase.getInput());
             }
+            payload.put("memory_limit", validationService.getMaxMemoryKb());
 
             String body = objectMapper.writeValueAsString(payload);
             HttpRequest httpRequest = HttpRequest.newBuilder()
@@ -124,6 +130,7 @@ public class Judge0ExecutionService {
                 Thread.sleep(waitMs);
             }
 
+            @SuppressWarnings("unchecked")
             Map<String, Object> responseMap = objectMapper.readValue(response.body(), Map.class);
 
             // Extract execution details
@@ -138,7 +145,7 @@ public class Judge0ExecutionService {
             }
             if (responseMap.get("memory") != null) {
                 try {
-                    memory = Long.parseLong(responseMap.get("memory").toString()) * 1024; // Convert KB to bytes
+                    memory = Long.parseLong(responseMap.get("memory").toString());
                 } catch (Exception e) {
                     logger.warn("Failed to parse memory: {}", responseMap.get("memory"));
                 }
@@ -190,7 +197,7 @@ public class Judge0ExecutionService {
             result.setActualOutput(actualOutput);
             result.setRuntime(runtime);
             result.setMemory(memory);
-            result.setExecutionDetails(responseMap);
+            result.setExecutionDetails(validationService.sanitizeJudge0Response(responseMap));
 
             String actualOutputSummary = actualOutput;
             if (actualOutputSummary.length() > 200) {
@@ -245,8 +252,8 @@ public class Judge0ExecutionService {
         if (response == null) return null;
 
         Object status = response.get("status");
-        if (status instanceof Map) {
-            Integer id = (Integer) ((Map) status).get("id");
+        if (status instanceof Map<?, ?> statusMap) {
+            Integer id = (Integer) statusMap.get("id");
             if (id != null) {
                 switch (id) {
                     case 6: return "Compilation Error";
@@ -289,8 +296,8 @@ public class Judge0ExecutionService {
         }
 
         Object status = response.get("status");
-        if (status instanceof Map) {
-            Object description = ((Map) status).get("description");
+        if (status instanceof Map<?, ?> statusMap) {
+            Object description = statusMap.get("description");
             if (description != null) {
                 return description.toString();
             }

@@ -2,6 +2,7 @@ package com.coderzclub.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -44,8 +45,13 @@ public class SecurityConfig {
                 .requestMatchers("/api/resend-verification").permitAll()
                 .requestMatchers("/api/test-password").permitAll()
                 .requestMatchers("/api/validate-token").permitAll()
-                .requestMatchers("/api/problems").permitAll()
-                .requestMatchers("/api/problems/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/problems").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/problems/{id}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/problems/test").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/problems").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/problems/{id}").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/problems/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PATCH, "/api/problems/**").hasRole("ADMIN")
                 .requestMatchers("/api/judge0/**").permitAll()
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/category/**").permitAll() // GET requests for filtering

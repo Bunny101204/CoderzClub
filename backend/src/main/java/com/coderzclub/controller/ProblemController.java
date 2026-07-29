@@ -1,8 +1,15 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.dto.AdminProblemResponse;
+import com.coderzclub.dto.ProblemDetailResponse;
+import com.coderzclub.dto.ProblemListResponse;
 import com.coderzclub.model.Problem;
 import com.coderzclub.repository.ProblemRepository;
+
 import com.coderzclub.service.SubmissionValidator;
+
+import com.coderzclub.service.SubmissionValidationService;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/problems")
@@ -30,6 +38,9 @@ public class ProblemController {
 
     @Autowired
     private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private SubmissionValidationService validationService;
 
     @GetMapping
     public ResponseEntity<?> getAllProblems(
@@ -74,13 +85,19 @@ public class ProblemController {
             int endIndex = Math.min(startIndex + size, totalItems);
             List<Problem> pageProblems = startIndex < endIndex ? matchedProblems.subList(startIndex, endIndex) : new ArrayList<>();
 
+
             // Ensure hidden testcases are not returned to clients
             for (Problem p : pageProblems) {
                 p.setHiddenTestCases(null);
             }
 
+            List<ProblemListResponse> sanitizedProblems = pageProblems.stream()
+                    .map(ProblemListResponse::new)
+                    .collect(Collectors.toList());
+
+
             Map<String, Object> response = new HashMap<>();
-            response.put("problems", pageProblems);
+            response.put("problems", sanitizedProblems);
             response.put("currentPage", page);
             response.put("totalPages", totalPages);
             response.put("totalItems", totalItems);
@@ -93,7 +110,7 @@ public class ProblemController {
             e.printStackTrace();
             
             Map<String, Object> response = new HashMap<>();
-            response.put("problems", new ArrayList<Problem>());
+            response.put("problems", new ArrayList<ProblemListResponse>());
             response.put("currentPage", 0);
             response.put("totalPages", 0);
             response.put("totalItems", 0);
@@ -116,13 +133,20 @@ public class ProblemController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Problem> getProblemById(@PathVariable String id) {
+    public ResponseEntity<?> getProblemById(@PathVariable String id) {
         Optional<Problem> problem = problemRepository.findById(id);
+
         if (problem.isEmpty()) return ResponseEntity.notFound().build();
         Problem p = problem.get();
         // Remove hidden testcases from API response
         p.setHiddenTestCases(null);
         return ResponseEntity.ok(p);
+
+        if (problem.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(new ProblemDetailResponse(problem.get()));
+
     }
 
     @GetMapping("/test")
@@ -133,12 +157,20 @@ public class ProblemController {
     @PostMapping
     public ResponseEntity<?> addProblem(@RequestBody Problem problem) {
         try {
+
             submissionValidator.validateProblemTestCases(problem);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
         Problem saved = problemRepository.save(problem);
         return ResponseEntity.ok(saved);
+
+            validationService.validateProblemTestcases(problem);
+            Problem saved = problemRepository.save(problem);
+            return ResponseEntity.ok(new AdminProblemResponse(saved));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
     }
 
     @DeleteMapping("/{id}")

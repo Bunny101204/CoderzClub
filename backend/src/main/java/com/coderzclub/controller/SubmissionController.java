@@ -6,6 +6,7 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.model.User;
 import com.coderzclub.model.Problem;
+import com.coderzclub.service.SubmissionValidationService;
 import com.coderzclub.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -39,6 +40,9 @@ public class SubmissionController {
     @Autowired
     private com.coderzclub.service.SubmissionLimitService submissionLimitService;
 
+    @Autowired
+    private SubmissionValidationService validationService;
+
     @PostMapping
     public ResponseEntity<?> submitSolution(@RequestBody SubmissionRequest request) {
         try {
@@ -52,6 +56,8 @@ public class SubmissionController {
             }
             
             User user = userOpt.get();
+            Integer languageId = request.getLanguageId();
+            validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), languageId);
             Optional<Problem> problemOpt = problemRepository.findById(request.getProblemId());
             if (!problemOpt.isPresent()) {
                 return ResponseEntity.badRequest().body("Problem not found");
@@ -319,6 +325,7 @@ public class SubmissionController {
         private String errorMessage;
         private String stderr;
         private Integer statusId;  // Judge0 status ID
+        private Integer languageId;
         private Integer passedTestCases;
         private Integer totalTestCases;
         private Map<String, Object> executionDetails;
@@ -353,6 +360,9 @@ public class SubmissionController {
         
         public Integer getStatusId() { return statusId; }
         public void setStatusId(Integer statusId) { this.statusId = statusId; }
+
+        public Integer getLanguageId() { return languageId; }
+        public void setLanguageId(Integer languageId) { this.languageId = languageId; }
         
         public Integer getPassedTestCases() { return passedTestCases; }
         public void setPassedTestCases(Integer passedTestCases) { this.passedTestCases = passedTestCases; }

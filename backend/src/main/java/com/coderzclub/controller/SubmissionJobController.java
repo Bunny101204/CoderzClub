@@ -1,16 +1,22 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.model.Problem;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
+import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.service.SubmissionJobService;
+
 import com.coderzclub.service.SubmissionLimitService;
 import com.coderzclub.service.SubmissionValidator;
 import com.coderzclub.model.Problem;
 import com.coderzclub.dto.CreateSubmissionJobRequest;
 import com.coderzclub.dto.SubmissionJobResponse;
 import com.coderzclub.dto.TestResultResponse;
+
+import com.coderzclub.service.SubmissionValidationService;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +53,12 @@ public class SubmissionJobController {
     @Autowired
     private ProblemRepository problemRepository;
 
+
+
+    @Autowired
+    private SubmissionValidationService validationService;
+
+
     /**
      * Create a new submission job with strict validation
      */
@@ -79,6 +91,7 @@ public class SubmissionJobController {
             }
 
             User user = userOpt.get();
+
 
             if (!submissionLimitService.canSubmitNow(user.getId())) {
                 return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -122,14 +135,34 @@ public class SubmissionJobController {
             }
 
             // Step 6: Create job using server-side testcases
+
+            validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), request.getLanguageId());
+
+            // Resolve problem test cases server-side so hidden data never travels in the public submission payload.
+            List<SubmissionJob.TestCase> publicTests = null;
+            List<SubmissionJob.TestCase> hiddenTests = null;
+            if (request.getProblemId() != null) {
+                Optional<Problem> problemOpt = problemRepository.findById(request.getProblemId());
+                if (problemOpt.isPresent()) {
+                    Problem problem = problemOpt.get();
+                    publicTests = toSubmissionTestCases(problem.getPublicTestCases());
+                    hiddenTests = null;
+                }
+            }
+
             SubmissionJob job = jobService.createJob(
                 user.getId(),
                 request.getProblemId(),
                 request.getCode(),
                 request.getLanguage(),
                 request.getLanguageId(),
+
                 problem.getPublicTestCases(),
                 problem.getHiddenTestCases()
+
+                publicTests,
+                hiddenTests
+
             );
 
             // Record the submission attempt in rate limiter (Redis)
@@ -177,6 +210,7 @@ public class SubmissionJobController {
             resp.setProgress(Map.of("completed", job.getCompletedTests(), "total", job.getTotalTests()));
 
             if (job.getStatus() == SubmissionJob.JobStatus.COMPLETED) {
+
                 resp.setResult(job.getFinalResult());
                 resp.setRuntime(job.getTotalRuntime());
                 resp.setMemory(job.getTotalMemory());
@@ -212,6 +246,12 @@ public class SubmissionJobController {
                 }
 
                 resp.setTestResults(sanitized);
+
+                response.put("result", job.getFinalResult());
+                response.put("runtime", job.getTotalRuntime());
+                response.put("memory", job.getTotalMemory());
+                response.put("testResults", sanitizeTestResults(job.getTestResults()));
+
             } else if (job.getStatus() == SubmissionJob.JobStatus.FAILED) {
                 resp.setError(job.getErrorMessage());
             }
@@ -287,5 +327,69 @@ public class SubmissionJobController {
         }
     }
 
+<<<<<<< HEAD
     // Request DTO for creating jobs moved to com.coderzclub.dto.CreateSubmissionJobRequest
+=======
+    private List<SubmissionJob.TestCase> toSubmissionTestCases(List<com.coderzclub.model.TestCase> sourceCases) {
+        if (sourceCases == null) {
+            return null;
+        }
+        return sourceCases.stream().map(source -> {
+            SubmissionJob.TestCase target = new SubmissionJob.TestCase();
+            target.setInput(source.getInput());
+            target.setExpectedOutput(source.getOutput());
+            target.setExplanation(source.getExplanation());
+            return target;
+        }).toList();
+    }
+
+    private List<Map<String, Object>> sanitizeTestResults(List<SubmissionJob.TestResult> testResults) {
+        if (testResults == null) {
+            return null;
+        }
+        return testResults.stream().map(result -> {
+            Map<String, Object> sanitized = new HashMap<>();
+            sanitized.put("input", result.getInput());
+            sanitized.put("expectedOutput", result.getExpectedOutput());
+            sanitized.put("actualOutput", result.getActualOutput());
+            sanitized.put("passed", result.isPassed());
+            sanitized.put("runtime", result.getRuntime());
+            sanitized.put("memory", result.getMemory());
+            sanitized.put("errorType", result.getErrorType());
+            sanitized.put("errorMessage", result.getErrorMessage());
+            return sanitized;
+        }).toList();
+    }
+
+    /**
+     * Request DTO for creating jobs
+     */
+    public static class SubmissionJobRequest {
+        private String problemId;
+        private String code;
+        private String language;
+        private Integer languageId;
+        private List<SubmissionJob.TestCase> publicTestCases;
+        private List<SubmissionJob.TestCase> hiddenTestCases;
+
+        // Getters and setters
+        public String getProblemId() { return problemId; }
+        public void setProblemId(String problemId) { this.problemId = problemId; }
+
+        public String getCode() { return code; }
+        public void setCode(String code) { this.code = code; }
+
+        public String getLanguage() { return language; }
+        public void setLanguage(String language) { this.language = language; }
+
+        public Integer getLanguageId() { return languageId; }
+        public void setLanguageId(Integer languageId) { this.languageId = languageId; }
+
+        public List<SubmissionJob.TestCase> getPublicTestCases() { return publicTestCases; }
+        public void setPublicTestCases(List<SubmissionJob.TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
+
+        public List<SubmissionJob.TestCase> getHiddenTestCases() { return hiddenTestCases; }
+        public void setHiddenTestCases(List<SubmissionJob.TestCase> hiddenTestCases) { this.hiddenTestCases = hiddenTestCases; }
+    }
+>>>>>>> 9418490 (code size hardening completed)
 }

@@ -667,6 +667,7 @@ const Judge0CodeEditor = ({
     setErrorDetails(null);
 
     try {
+
       const normalizeCases = (cases) => {
         return (cases || []).map(tc => ({
           input: tc.input,
@@ -676,6 +677,9 @@ const Judge0CodeEditor = ({
       };
 
       // Create async submission job - only send identifiers and code
+
+      // Create async submission job
+
       const jobRequest = {
         problemId: problemId,
         code: sourceCode,
