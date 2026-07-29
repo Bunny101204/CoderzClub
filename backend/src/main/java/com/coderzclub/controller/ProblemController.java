@@ -142,11 +142,11 @@ public class ProblemController {
         p.setHiddenTestCases(null);
         return ResponseEntity.ok(p);
 
-        if (problem.isEmpty()) {
+        /*if (problem.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(new ProblemDetailResponse(problem.get()));
-
+        */      
     }
 
     @GetMapping("/test")
@@ -165,12 +165,14 @@ public class ProblemController {
         Problem saved = problemRepository.save(problem);
         return ResponseEntity.ok(saved);
 
-            validationService.validateProblemTestcases(problem);
+            /*validationService.validateProblemTestcases(problem);
             Problem saved = problemRepository.save(problem);
             return ResponseEntity.ok(new AdminProblemResponse(saved));
-        } catch (IllegalArgumentException ex) {
+        //} catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
+        */
+
     }
 
     @DeleteMapping("/{id}")

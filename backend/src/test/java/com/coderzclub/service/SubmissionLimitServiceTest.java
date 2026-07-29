@@ -74,7 +74,7 @@ class SubmissionLimitServiceTest {
 
     @Test
     void redisFailureRespectsFailOpenSetting() {
-        doThrow(new RedisSystemException("boom")).when(redisTemplate).execute(any(), anyList(), any());
+        doThrow(new RedisSystemException("boom", new RuntimeException("boom"))).when(redisTemplate).execute(any(), anyList(), any());
 
         SubmissionLimitService service = new SubmissionLimitService(submissionRepository, redisTemplate);
         ReflectionTestUtils.setField(service, "redisFailOpen", true);

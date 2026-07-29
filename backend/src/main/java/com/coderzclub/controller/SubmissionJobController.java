@@ -5,12 +5,12 @@ import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.UserRepository;
-import com.coderzclub.repository.ProblemRepository;
+//import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.service.SubmissionJobService;
 
 import com.coderzclub.service.SubmissionLimitService;
 import com.coderzclub.service.SubmissionValidator;
-import com.coderzclub.model.Problem;
+//import com.coderzclub.model.Problem;
 import com.coderzclub.dto.CreateSubmissionJobRequest;
 import com.coderzclub.dto.SubmissionJobResponse;
 import com.coderzclub.dto.TestResultResponse;
@@ -141,14 +141,9 @@ public class SubmissionJobController {
             // Resolve problem test cases server-side so hidden data never travels in the public submission payload.
             List<SubmissionJob.TestCase> publicTests = null;
             List<SubmissionJob.TestCase> hiddenTests = null;
-            if (request.getProblemId() != null) {
-                Optional<Problem> problemOpt = problemRepository.findById(request.getProblemId());
-                if (problemOpt.isPresent()) {
-                    Problem problem = problemOpt.get();
-                    publicTests = toSubmissionTestCases(problem.getPublicTestCases());
-                    hiddenTests = null;
-                }
-            }
+            
+            publicTests = toSubmissionTestCases(problem.getPublicTestCases());
+            hiddenTests = null;
 
             SubmissionJob job = jobService.createJob(
                 user.getId(),
@@ -160,8 +155,8 @@ public class SubmissionJobController {
                 problem.getPublicTestCases(),
                 problem.getHiddenTestCases()
 
-                publicTests,
-                hiddenTests
+                //publicTests,
+                //hiddenTests
 
             );
 
@@ -247,11 +242,6 @@ public class SubmissionJobController {
 
                 resp.setTestResults(sanitized);
 
-                response.put("result", job.getFinalResult());
-                response.put("runtime", job.getTotalRuntime());
-                response.put("memory", job.getTotalMemory());
-                response.put("testResults", sanitizeTestResults(job.getTestResults()));
-
             } else if (job.getStatus() == SubmissionJob.JobStatus.FAILED) {
                 resp.setError(job.getErrorMessage());
             }
@@ -327,9 +317,7 @@ public class SubmissionJobController {
         }
     }
 
-<<<<<<< HEAD
     // Request DTO for creating jobs moved to com.coderzclub.dto.CreateSubmissionJobRequest
-=======
     private List<SubmissionJob.TestCase> toSubmissionTestCases(List<com.coderzclub.model.TestCase> sourceCases) {
         if (sourceCases == null) {
             return null;
@@ -391,5 +379,4 @@ public class SubmissionJobController {
         public List<SubmissionJob.TestCase> getHiddenTestCases() { return hiddenTestCases; }
         public void setHiddenTestCases(List<SubmissionJob.TestCase> hiddenTestCases) { this.hiddenTestCases = hiddenTestCases; }
     }
->>>>>>> 9418490 (code size hardening completed)
 }

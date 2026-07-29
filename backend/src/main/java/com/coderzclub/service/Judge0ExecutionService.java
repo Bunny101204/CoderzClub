@@ -38,7 +38,7 @@ public class Judge0ExecutionService {
     private String judge0ApiKey;
 
     @Autowired
-<<<<<<< HEAD
+
     private SubmissionLimitsConfig limitsConfig;
 
     @Autowired

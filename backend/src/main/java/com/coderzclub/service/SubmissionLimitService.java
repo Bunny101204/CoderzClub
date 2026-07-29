@@ -12,9 +12,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Redis-backed submission limit service.
-
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +19,10 @@ import java.time.Duration;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+
+/**
+ * Redis-backed submission limit service.
+*/
 
 /**
  * Service to handle submission limits and rate limiting.
@@ -32,140 +33,27 @@ import java.util.List;
 @Service
 public class SubmissionLimitService {
 
-
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-
-    @Autowired
-    private StringRedisTemplate redis;
-
-    @Autowired
-    private SubmissionRepository submissionRepository; // fallback
-
-    @Value("${submission.limit.daily:100}")
-    private int dailyLimit;
-
-    @Value("${submission.limit.perProblemDaily:50}")
-    private int perProblemLimit;
-
-    @Value("${submission.limit.cooldownMs:2000}")
-    private long cooldownMs;
-
-    @Value("${submission.limit.redisFailOpen:false}")
-    private boolean redisFailOpen1;
-
-    private String dailyKey(String userId) {
-        return "coderzclub:rate:daily:" + userId + ":" + LocalDate.now().format(DATE_FMT);
-    }
-
-    private String problemKey(String userId, String problemId) {
-        return "coderzclub:rate:problem:" + userId + ":" + problemId + ":" + LocalDate.now().format(DATE_FMT);
-    }
-
-    private String lastSubmitKey(String userId) {
-        return "coderzclub:rate:last-submit:" + userId;
-    }
-
-    /**
-     * Atomically record a submission attempt: increments counters and sets TTLs.
-     */
-    public void recordSubmissionAttempt(String userId, String problemId) {
-        try {
-            String dKey = dailyKey(userId);
-            Long d = redis.opsForValue().increment(dKey);
-            if (d != null && d == 1L) {
-                // set expiry to next midnight + 1 hour (so 24-25 hours)
-                long seconds = secondsUntilNextMidnight() + 3600;
-                redis.expire(dKey, seconds, TimeUnit.SECONDS);
-            }
-
-            String pKey = problemKey(userId, problemId);
-            Long p = redis.opsForValue().increment(pKey);
-            if (p != null && p == 1L) {
-                long seconds = secondsUntilNextMidnight() + 3600;
-                redis.expire(pKey, seconds, TimeUnit.SECONDS);
-            }
-
-            String lastKey = lastSubmitKey(userId);
-            redis.opsForValue().set(lastKey, String.valueOf(System.currentTimeMillis()), cooldownMs, TimeUnit.MILLISECONDS);
-
-        } catch (Exception e) {
-            if (redisFailOpen1) {
-                // best-effort fallback to MongoDB counts
-                // no-op here: repository operations are used in other methods when needed
-                return;
-            }
-            throw new RuntimeException("Redis unavailable", e);
-        }
-    }
-
-    public boolean canSubmit(String userId, String problemId) {
-        // Combined check: cooldown + limits
-        if (!canSubmitNow(userId)) return false;
-        if (hasExceededDailyLimit(userId)) return false;
-        if (hasExceededProblemLimit(userId, problemId)) return false;
-        return true;
-    }
-
-    public boolean canSubmitNow(String userId) {
-        try {
-            String lastKey = lastSubmitKey(userId);
-            Long ttl = redis.getExpire(lastKey, TimeUnit.SECONDS);
-            if (ttl != null && ttl > 0) return false;
-            return true;
-        } catch (Exception e) {
-            if (redisFailOpen1) return true;
-            throw new RuntimeException("Redis unavailable", e);
-        }
-    }
-
-    public long getCooldownSeconds(String userId) {
-        try {
-            String lastKey = lastSubmitKey(userId);
-            Long ttl = redis.getExpire(lastKey, TimeUnit.SECONDS);
-            return ttl != null && ttl > 0 ? ttl : 0;
-        } catch (Exception e) {
-            if (redisFailOpen1) return 0;
-            throw new RuntimeException("Redis unavailable", e);
-        }
-    }
-
-    public boolean hasExceededDailyLimit(String userId) {
-        try {
-            String dKey = dailyKey(userId);
-            String val = redis.opsForValue().get(dKey);
-            int count = val != null ? Integer.parseInt(val) : 0;
-            return count >= dailyLimit;
-        } catch (Exception e) {
-            if (redisFailOpen1) return fallbackHasExceededDailyLimit(userId);
-            throw new RuntimeException("Redis unavailable", e);
-        }
-    }
-
-    public boolean hasExceededProblemLimit(String userId, String problemId) {
-        try {
-            String pKey = problemKey(userId, problemId);
-            String val = redis.opsForValue().get(pKey);
-            int count = val != null ? Integer.parseInt(val) : 0;
-            return count >= perProblemLimit;
-        } catch (Exception e) {
-            if (redisFailOpen) return fallbackHasExceededProblemLimit(userId, problemId);
-            throw new RuntimeException("Redis unavailable", e);
-        }
-
     private static final int DEFAULT_DAILY_SUBMISSION_LIMIT = 100;
     private static final int DEFAULT_PROBLEM_SUBMISSION_LIMIT = 50;
     private static final long MIN_SUBMISSION_INTERVAL_MS = 2000L;
 
-    private final SubmissionRepository submissionRepository;
-    private final StringRedisTemplate redisTemplate;
+    private SubmissionRepository submissionRepository;
+    private StringRedisTemplate redis;
+    private int dailyLimit = DEFAULT_DAILY_SUBMISSION_LIMIT;
+    private int perProblemLimit = DEFAULT_PROBLEM_SUBMISSION_LIMIT;
+    private long cooldownMs = MIN_SUBMISSION_INTERVAL_MS;
 
     @Value("${app.redis.fail-open:false}")
     private boolean redisFailOpen;
 
+    public SubmissionLimitService() {
+        // Default constructor required for some test setups and proxy creation.
+    }
+
     @Autowired
-    public SubmissionLimitService(SubmissionRepository submissionRepository, StringRedisTemplate redisTemplate) {
+    public SubmissionLimitService(SubmissionRepository submissionRepository, StringRedisTemplate redis) {
         this.submissionRepository = submissionRepository;
-        this.redisTemplate = redisTemplate;
+        this.redis = redis;
     }
 
     public SubmissionLimitDecision tryAcquireSubmissionSlot(String userId, String problemId) {
@@ -178,7 +66,7 @@ public class SubmissionLimitService {
             String dailyKey = buildDailyKey(userId);
             String problemKey = buildProblemKey(userId, problemId);
             long now = System.currentTimeMillis();
-            long cooldownUntil = now + MIN_SUBMISSION_INTERVAL_MS;
+            long cooldownUntil = now + cooldownMs;
             long dailyWindowSeconds = Duration.ofDays(1).getSeconds();
             long problemWindowSeconds = Duration.ofDays(1).getSeconds();
 
@@ -213,12 +101,12 @@ public class SubmissionLimitService {
                 """;
 
             DefaultRedisScript<Long> script = new DefaultRedisScript<>(luaScript, Long.class);
-            Long result = redisTemplate.execute(
+            Long result = redis.execute(
                 script,
                 List.of(cooldownKey, dailyKey, problemKey),
                 String.valueOf(cooldownUntil),
-                String.valueOf(DEFAULT_DAILY_SUBMISSION_LIMIT),
-                String.valueOf(DEFAULT_PROBLEM_SUBMISSION_LIMIT),
+                String.valueOf(dailyLimit),
+                String.valueOf(perProblemLimit),
                 String.valueOf(dailyWindowSeconds),
                 String.valueOf(problemWindowSeconds),
                 String.valueOf(now)
@@ -239,11 +127,15 @@ public class SubmissionLimitService {
             }
             return SubmissionLimitDecision.rejected("PROBLEM_LIMIT");
         } catch (Exception ex) {
-            if (redisFailOpen1) {
+            if (redisFailOpen) {
                 return SubmissionLimitDecision.allowed("REDIS_FALLBACK");
             }
             return SubmissionLimitDecision.rejected("REDIS_UNAVAILABLE");
         }
+    }
+
+    public void recordSubmissionAttempt(String userId, String problemId) {
+        tryAcquireSubmissionSlot(userId, problemId);
     }
 
     public boolean hasExceededDailyLimit(String userId) {
@@ -255,19 +147,19 @@ public class SubmissionLimitService {
     public boolean hasExceededProblemLimit(String userId, String problemId) {
         Date today = getStartOfDay(new Date());
         long count = submissionRepository.countByUserIdAndProblemIdAndCreatedAtAfter(userId, problemId, today);
-        return count >= DEFAULT_PROBLEM_SUBMISSION_LIMIT;
+        return count >= perProblemLimit;
     }
 
     public int getRemainingDailySubmissions(String userId) {
         Date today = getStartOfDay(new Date());
         long count = submissionRepository.countByUserIdAndCreatedAtAfter(userId, today);
-        return Math.max(0, DEFAULT_DAILY_SUBMISSION_LIMIT - (int) count);
+        return Math.max(0, dailyLimit - (int) count);
     }
 
     public int getRemainingProblemSubmissions(String userId, String problemId) {
         Date today = getStartOfDay(new Date());
         long count = submissionRepository.countByUserIdAndProblemIdAndCreatedAtAfter(userId, problemId, today);
-        return Math.max(0, DEFAULT_PROBLEM_SUBMISSION_LIMIT - (int) count);
+        return Math.max(0, perProblemLimit - (int) count);
     }
 
     public boolean canSubmitNow(String userId) {
@@ -281,7 +173,7 @@ public class SubmissionLimitService {
 
         String cooldownKey = buildCooldownKey(userId);
         try {
-            String value = redisTemplate.opsForValue().get(cooldownKey);
+            String value = redis.opsForValue().get(cooldownKey);
             if (value == null) {
                 return 0L;
             }
@@ -315,8 +207,9 @@ public class SubmissionLimitService {
         return cal.getTime();
 
     }
+}
 
-    public int getRemainingDailySubmissions(String userId) {
+    /*public int getRemainingDailySubmissions(String userId) {
         try {
             String dKey = dailyKey(userId);
             String val = redis.opsForValue().get(dKey);
@@ -379,6 +272,6 @@ public class SubmissionLimitService {
         return java.time.Duration.between(now, nextMid).getSeconds();
     }
 
-}
+}*/
 
 

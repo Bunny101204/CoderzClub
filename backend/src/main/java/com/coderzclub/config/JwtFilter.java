@@ -56,7 +56,6 @@ public class JwtFilter extends OncePerRequestFilter {
             }
         }
 
-<<<<<<< HEAD
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             logger.debug("JWT Filter: Processing request for username: {}", username);
             UserDetails userDetails = userService.loadUserByUsername(username);
@@ -76,7 +75,7 @@ public class JwtFilter extends OncePerRequestFilter {
             logger.debug("JWT Filter: No username extracted from token");
         } else {
             logger.debug("JWT Filter: Authentication already exists");
-=======
+        }
         if (username != null) {
             var existingAuthentication = SecurityContextHolder.getContext().getAuthentication();
             boolean shouldReplaceAuthentication = existingAuthentication == null || existingAuthentication instanceof AnonymousAuthenticationToken;
@@ -101,7 +100,6 @@ public class JwtFilter extends OncePerRequestFilter {
             }
         } else {
             System.out.println("JWT Filter: No username extracted from token");
->>>>>>> 2c144b6 (allprevious issues fixed, fully functional)
         }
         filterChain.doFilter(request, response);
     }
