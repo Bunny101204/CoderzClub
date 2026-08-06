@@ -4,14 +4,6 @@ import com.coderzclub.repository.SubmissionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
-
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.concurrent.TimeUnit;
-
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
@@ -134,7 +126,9 @@ public class SubmissionLimitService {
         }
     }
 
+    @Deprecated
     public void recordSubmissionAttempt(String userId, String problemId) {
+        // Deprecated: use tryAcquireSubmissionSlot() before creating the submission job.
         tryAcquireSubmissionSlot(userId, problemId);
     }
 

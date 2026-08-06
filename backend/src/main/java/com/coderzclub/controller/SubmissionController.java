@@ -6,6 +6,8 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.model.User;
 import com.coderzclub.model.Problem;
+import com.coderzclub.service.SubmissionLimitDecision;
+import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionValidationService;
 import com.coderzclub.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +40,9 @@ public class SubmissionController {
     private UserService userService;
     
     @Autowired
+    private SubmissionService submissionService;
+
+    @Autowired
     private com.coderzclub.service.SubmissionLimitService submissionLimitService;
 
     @Autowired
@@ -65,30 +70,39 @@ public class SubmissionController {
             
             Problem problem = problemOpt.get();
             
-            // Check submission limits
-            if (!submissionLimitService.canSubmitNow(user.getId())) {
-                long cooldown = submissionLimitService.getCooldownSeconds(user.getId());
+            SubmissionLimitDecision decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), problem.getId());
+            if (!decision.isAllowed()) {
                 Map<String, Object> errorResponse = new HashMap<>();
-                errorResponse.put("error", "RATE_LIMIT_EXCEEDED");
-                errorResponse.put("message", "Please wait before submitting again.");
-                errorResponse.put("cooldownSeconds", cooldown);
-                return ResponseEntity.status(429).body(errorResponse);
-            }
-            
-            if (submissionLimitService.hasExceededDailyLimit(user.getId())) {
-                Map<String, Object> errorResponse = new HashMap<>();
-                errorResponse.put("error", "DAILY_LIMIT_EXCEEDED");
-                errorResponse.put("message", "You have exceeded your daily submission limit.");
-                errorResponse.put("limit", 100);
-                return ResponseEntity.status(429).body(errorResponse);
-            }
-            
-            if (submissionLimitService.hasExceededProblemLimit(user.getId(), problem.getId())) {
-                Map<String, Object> errorResponse = new HashMap<>();
-                errorResponse.put("error", "PROBLEM_LIMIT_EXCEEDED");
-                errorResponse.put("message", "You have exceeded your submission limit for this problem today.");
-                errorResponse.put("limit", 50);
-                return ResponseEntity.status(429).body(errorResponse);
+                switch (decision.getReason()) {
+                    case "COOLDOWN" -> {
+                        errorResponse.put("error", "RATE_LIMIT_EXCEEDED");
+                        errorResponse.put("message", "Please wait before submitting again.");
+                        errorResponse.put("cooldownSeconds", submissionLimitService.getCooldownSeconds(user.getId()));
+                        return ResponseEntity.status(429).body(errorResponse);
+                    }
+                    case "DAILY_LIMIT" -> {
+                        errorResponse.put("error", "DAILY_LIMIT_EXCEEDED");
+                        errorResponse.put("message", "You have exceeded your daily submission limit.");
+                        errorResponse.put("limit", 100);
+                        return ResponseEntity.status(429).body(errorResponse);
+                    }
+                    case "PROBLEM_LIMIT" -> {
+                        errorResponse.put("error", "PROBLEM_LIMIT_EXCEEDED");
+                        errorResponse.put("message", "You have exceeded your submission limit for this problem today.");
+                        errorResponse.put("limit", 50);
+                        return ResponseEntity.status(429).body(errorResponse);
+                    }
+                    case "REDIS_UNAVAILABLE" -> {
+                        errorResponse.put("error", "RATE_LIMIT_UNAVAILABLE");
+                        errorResponse.put("message", "Rate limit service unavailable. Please try again later.");
+                        return ResponseEntity.status(503).body(errorResponse);
+                    }
+                    default -> {
+                        errorResponse.put("error", "RATE_LIMIT_EXCEEDED");
+                        errorResponse.put("message", "Submission limit exceeded.");
+                        return ResponseEntity.status(429).body(errorResponse);
+                    }
+                }
             }
             
             // Map Judge0 status to verdict
@@ -114,16 +128,12 @@ public class SubmissionController {
                 
             submission = submissionRepository.save(submission);
 
-            // Record submission attempt for rate limiting
-            try {
-                submissionLimitService.recordSubmissionAttempt(user.getId(), request.getProblemId());
-            } catch (Exception e) {
-                // Log but don't fail the save if redis recording fails (behavior controlled by redisFailOpen)
-            }
+            // Note: the rate limit token has already been acquired above.
+            // If save fails after acquisition, the attempt is counted and not compensated.
             
             // Update user stats if solution is correct
             if ("ACCEPTED".equals(submission.getResult()) || "ACCEPTED".equals(verdict)) {
-                updateUserStats(user, problem);
+                submissionService.applyAcceptedSubmission(user, problem, submission);
             }
             
             // Update streak for any submission (accepted or not)
@@ -293,25 +303,6 @@ public class SubmissionController {
         }
     }
     
-    private void updateUserStats(User user, Problem problem) {
-        // Check if user already solved this problem
-        if (user.getSolvedProblemIds() != null && 
-            user.getSolvedProblemIds().contains(problem.getId())) {
-            return; // Already solved
-        }
-        
-        // Add problem to solved list
-        if (user.getSolvedProblemIds() == null) {
-            user.setSolvedProblemIds(new java.util.ArrayList<>());
-        }
-        user.getSolvedProblemIds().add(problem.getId());
-        
-        // Update stats
-        user.setProblemsSolved(user.getProblemsSolved() + 1);
-        user.setTotalPoints(user.getTotalPoints() + problem.getPoints());
-        
-        userRepository.save(user);
-    }
     
     // DTO for submission request
     public static class SubmissionRequest {

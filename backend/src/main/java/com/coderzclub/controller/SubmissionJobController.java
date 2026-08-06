@@ -15,6 +15,7 @@ import com.coderzclub.dto.CreateSubmissionJobRequest;
 import com.coderzclub.dto.SubmissionJobResponse;
 import com.coderzclub.dto.TestResultResponse;
 
+import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionValidationService;
 
 import org.slf4j.Logger;
@@ -92,23 +93,31 @@ public class SubmissionJobController {
 
             User user = userOpt.get();
 
-
-            if (!submissionLimitService.canSubmitNow(user.getId())) {
-                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(Map.of(
-                        "error", "Please wait before submitting again.",
-                        "retryAfterSeconds", submissionLimitService.getCooldownSeconds(user.getId())
-                    ));
-            }
-
-            if (submissionLimitService.hasExceededDailyLimit(user.getId())) {
-                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(Map.of("error", "Daily submission limit exceeded."));
-            }
-
-            if (submissionLimitService.hasExceededProblemLimit(user.getId(), request.getProblemId())) {
-                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(Map.of("error", "Daily submission limit for this problem exceeded."));
+            SubmissionLimitDecision decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), request.getProblemId());
+            if (!decision.isAllowed()) {
+                switch (decision.getReason()) {
+                    case "COOLDOWN" ->
+                        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
+                            "error", "Please wait before submitting again.",
+                            "retryAfterSeconds", submissionLimitService.getCooldownSeconds(user.getId())
+                        ));
+                    case "DAILY_LIMIT" ->
+                        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
+                            "error", "Daily submission limit exceeded."
+                        ));
+                    case "PROBLEM_LIMIT" ->
+                        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
+                            "error", "Daily submission limit for this problem exceeded."
+                        ));
+                    case "REDIS_UNAVAILABLE" ->
+                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                            "error", "Rate limit service unavailable. Please try again later."
+                        ));
+                    default ->
+                        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
+                            "error", "Submission limit exceeded."
+                        ));
+                }
             }
 
             // Step 4: Load problem and validate it exists
@@ -160,12 +169,8 @@ public class SubmissionJobController {
 
             );
 
-            // Record the submission attempt in rate limiter (Redis)
-            try {
-                submissionLimitService.recordSubmissionAttempt(user.getId(), request.getProblemId());
-            } catch (Exception e) {
-                logger.warn("Failed to record submission attempt: {}", e.getMessage());
-            }
+            // Note: the submission attempt is already acquired atomically above.
+            // If job creation fails after acquisition, the attempt is counted and not compensated.
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());

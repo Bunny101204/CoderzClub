@@ -4,15 +4,22 @@ import com.coderzclub.model.Submission;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.UserSolvedProblem;
 import com.coderzclub.repository.SubmissionRepository;
 import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
+import com.coderzclub.repository.UserSolvedProblemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import java.util.Date;
 import java.util.Optional;
 
 @Service
@@ -28,6 +35,12 @@ public class SubmissionService {
 
     @Autowired
     private ProblemRepository problemRepository;
+
+    @Autowired
+    private UserSolvedProblemRepository userSolvedProblemRepository;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
     @Autowired
     private UserService userService;
@@ -73,7 +86,7 @@ public class SubmissionService {
 
             // Update user stats if solution is correct
             if ("ACCEPTED".equals(submission.getResult())) {
-                updateUserStats(user, problem);
+                applyAcceptedSubmission(user, problem, submission);
             }
 
             // Update streak
@@ -163,29 +176,37 @@ public class SubmissionService {
     }
 
     /**
-     * Update user stats after successful submission
+     * Apply accepted submission updates atomically.
      */
-    private void updateUserStats(User user, Problem problem) {
-        // Check if user already solved this problem
-        if (user.getSolvedProblemIds() != null && 
-            user.getSolvedProblemIds().contains(problem.getId())) {
-            return; // Already solved, don't award points again
+    public void applyAcceptedSubmission(User user, Problem problem, Submission submission) {
+        try {
+            UserSolvedProblem solvedProblem = new UserSolvedProblem();
+            solvedProblem.setUserId(user.getId());
+            solvedProblem.setProblemId(problem.getId());
+            solvedProblem.setSubmissionId(submission.getId());
+            solvedProblem.setSolvedAt(new Date());
+            solvedProblem.setPointsAwarded(problem.getPoints());
+            solvedProblem.setDifficulty(problem.getDifficulty());
+            solvedProblem.setLanguage(submission.getLanguage());
+
+            userSolvedProblemRepository.insert(solvedProblem);
+
+            Query query = Query.query(Criteria.where("_id").is(user.getId()));
+            Update update = new Update()
+                .inc("totalPoints", problem.getPoints())
+                .inc("problemsSolved", 1)
+                .addToSet("solvedProblemIds", problem.getId());
+
+            mongoTemplate.updateFirst(query, update, User.class);
+
+            logger.info("Awarded {} points to user {} for problem {}",
+                problem.getPoints(), user.getUsername(), problem.getId());
+        } catch (DuplicateKeyException duplicate) {
+            logger.info("User {} already solved problem {}, skipping duplicate award",
+                user.getUsername(), problem.getId());
+        } catch (Exception e) {
+            logger.error("Failed to apply accepted submission updates for user {} and problem {}",
+                user.getId(), problem.getId(), e);
         }
-        
-        // Add problem to solved list
-        if (user.getSolvedProblemIds() == null) {
-            user.setSolvedProblemIds(new java.util.ArrayList<>());
-        }
-        user.getSolvedProblemIds().add(problem.getId());
-        
-        // Update stats
-        user.setProblemsSolved(user.getProblemsSolved() + 1);
-        user.setTotalPoints(user.getTotalPoints() + problem.getPoints());
-        
-        // Save the updated user
-        userRepository.save(user);
-        
-        logger.info("Updated user {} stats: +{} points, total problems solved: {}",
-            user.getUsername(), problem.getPoints(), user.getProblemsSolved());
     }
 }

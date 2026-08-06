@@ -40,6 +40,15 @@ public class SubmissionJob {
     private Long totalRuntime; // Max runtime across all tests
     private Long totalMemory;  // Max memory across all tests
 
+    // Lease and retry metadata
+    private String lockedBy;
+    private Date lockedUntil;
+    private Date heartbeatAt;
+    private Integer attemptCount = 0;
+    private Integer maxAttempts = 3;
+    private Date nextRetryAt;
+    private String lastError;
+
     // Progress tracking
     private Integer completedTests = 0;
     private Integer totalTests = 0;
@@ -48,10 +57,13 @@ public class SubmissionJob {
     private Map<String, Object> metadata;
 
     public enum JobStatus {
-        PENDING,     // Job created, waiting to be picked up
+        PENDING,     // Job created but not yet queued or prepared
+        QUEUED,      // Job created and ready for workers to claim
         RUNNING,     // Job is being executed
         COMPLETED,   // Job finished successfully
-        FAILED,      // Job failed (network error, etc.)
+        FAILED,      // Job failed after exhausting retries or fatal error
+        RETRYING,    // Job is waiting for retry
+        TIMEOUT,     // Job timed out due to worker lease expiry and no more retries
         CANCELLED    // Job was cancelled
     }
 
@@ -172,6 +184,27 @@ public class SubmissionJob {
 
     public Integer getTotalTests() { return totalTests; }
     public void setTotalTests(Integer totalTests) { this.totalTests = totalTests; }
+
+    public String getLockedBy() { return lockedBy; }
+    public void setLockedBy(String lockedBy) { this.lockedBy = lockedBy; }
+
+    public Date getLockedUntil() { return lockedUntil; }
+    public void setLockedUntil(Date lockedUntil) { this.lockedUntil = lockedUntil; }
+
+    public Date getHeartbeatAt() { return heartbeatAt; }
+    public void setHeartbeatAt(Date heartbeatAt) { this.heartbeatAt = heartbeatAt; }
+
+    public Integer getAttemptCount() { return attemptCount; }
+    public void setAttemptCount(Integer attemptCount) { this.attemptCount = attemptCount; }
+
+    public Integer getMaxAttempts() { return maxAttempts; }
+    public void setMaxAttempts(Integer maxAttempts) { this.maxAttempts = maxAttempts; }
+
+    public Date getNextRetryAt() { return nextRetryAt; }
+    public void setNextRetryAt(Date nextRetryAt) { this.nextRetryAt = nextRetryAt; }
+
+    public String getLastError() { return lastError; }
+    public void setLastError(String lastError) { this.lastError = lastError; }
 
     public Map<String, Object> getMetadata() { return metadata; }
     public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }

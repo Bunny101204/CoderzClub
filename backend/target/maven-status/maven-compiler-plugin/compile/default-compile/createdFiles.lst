@@ -4,6 +4,7 @@ com/coderzclub/model/SubmissionJob$TestCase.class
 com/coderzclub/controller/Judge0Controller$Judge0ExecutionRequest.class
 com/coderzclub/dto/PasswordResetRequest.class
 com/coderzclub/service/SubmissionJobService.class
+com/coderzclub/controller/AuthController.java.backup
 com/coderzclub/dto/CreateSubmissionJobRequest.class
 com/coderzclub/service/SubmissionValidator.class
 com/coderzclub/dto/PasswordResetConfirmRequest.class
