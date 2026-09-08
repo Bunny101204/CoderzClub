@@ -1,0 +1,376 @@
+package com.coderzclub.service;
+
+import com.coderzclub.config.SubmissionLimitsConfig;
+import com.coderzclub.model.SubmissionJob;
+import com.coderzclub.config.WorkerProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import jakarta.annotation.PostConstruct;
+
+@Service
+public class Judge0ExecutionService {
+
+    private static final Logger logger = LoggerFactory.getLogger(Judge0ExecutionService.class);
+
+    // private static final String JUDGE0_URL = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true";
+    // private static final String JUDGE0_HOST = "judge0-ce.p.rapidapi.com";
+    @Value("${judge0.api.url}")
+    private String judge0Url;
+
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(20))
+            .build();
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${judge0.api.key}")
+    private String judge0ApiKey;
+
+    @Autowired
+
+    private SubmissionLimitsConfig limitsConfig;
+
+    @Autowired
+    private WorkerProperties workerProperties;
+
+    @Autowired
+    private SubmissionValidator submissionValidator;
+
+    @Autowired
+    private SubmissionValidationService validationService;
+
+    @Autowired
+    private OperationalMetrics operationalMetrics;
+
+    private Semaphore globalPermits = new Semaphore(8);
+    private final Map<Integer, Semaphore> languagePermits = new ConcurrentHashMap<>();
+
+    @PostConstruct
+    void initializeConcurrency() {
+        globalPermits = new Semaphore(Math.max(1, workerProperties.getMaxGlobalJudge0Concurrency()));
+    }
+
+
+    /**
+     * Execute all test cases for a submission
+     */
+    public List<SubmissionJob.TestResult> executeTestCases(String code, Integer languageId,
+                                                          List<SubmissionJob.TestCase> publicTestCases,
+                                                          List<SubmissionJob.TestCase> hiddenTestCases) {
+        List<SubmissionJob.TestResult> results = new ArrayList<>();
+
+        // Execute public test cases
+        if (publicTestCases != null && !publicTestCases.isEmpty()) {
+            ExecutorService executor = Executors.newFixedThreadPool(
+                Math.max(1, Math.min(workerProperties.getMaxTestcaseConcurrency(), publicTestCases.size())));
+            try {
+                List<Future<SubmissionJob.TestResult>> futures = new ArrayList<>();
+                for (SubmissionJob.TestCase testCase : publicTestCases) {
+                    futures.add(executor.submit(() -> executeSingleTest(code, languageId, testCase)));
+                }
+                for (Future<SubmissionJob.TestResult> future : futures) {
+                    results.add(future.get());
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Exception executionFailure) {
+                logger.warn("Public testcase execution interrupted", executionFailure);
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+
+        // Execute hidden test cases
+        if (hiddenTestCases != null) {
+            for (SubmissionJob.TestCase testCase : hiddenTestCases) {
+                SubmissionJob.TestResult result = executeSingleTest(code, languageId, testCase);
+                results.add(result);
+                if (workerProperties.isStopHiddenOnFailure() && !result.isPassed()) {
+                    break;
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Execute a single test case with output truncation and size limits
+     */
+    private SubmissionJob.TestResult executeSingleTest(String code, Integer languageId, SubmissionJob.TestCase testCase) {
+        io.micrometer.core.instrument.Timer.Sample timer = operationalMetrics.judge0Timer();
+        Semaphore global = globalPermits;
+        Semaphore language = languagePermits.computeIfAbsent(languageId == null ? 0 : languageId,
+            ignored -> new Semaphore(Math.max(1, workerProperties.getMaxPerLanguageJudge0Concurrency())));
+        boolean globalAcquired = false;
+        boolean languageAcquired = false;
+        try {
+            global.acquire();
+            globalAcquired = true;
+            language.acquire();
+            languageAcquired = true;
+            return executeSingleTestBounded(code, languageId, testCase);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            SubmissionJob.TestResult result = new SubmissionJob.TestResult();
+            result.setPassed(false);
+            result.setErrorType("Execution Cancelled");
+            result.setErrorMessage("Execution was cancelled");
+            return result;
+        } finally {
+            operationalMetrics.stopJudge0Timer(timer);
+            if (languageAcquired) language.release();
+            if (globalAcquired) global.release();
+        }
+    }
+
+    private SubmissionJob.TestResult executeSingleTestBounded(String code, Integer languageId, SubmissionJob.TestCase testCase) {
+        SubmissionJob.TestResult result = new SubmissionJob.TestResult();
+        result.setInput(testCase.getInput());
+        result.setExpectedOutput(testCase.getExpectedOutput());
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("language_id", languageId);
+            payload.put("source_code", code);
+            
+            // Add time and memory limits
+            payload.put("cpu_time_limit", limitsConfig.getMaxExecutionTimeSeconds());
+            payload.put("memory_limit", limitsConfig.getMaxMemoryKb() * 1024); // Convert KB to bytes
+            
+            if (testCase.getInput() != null && !testCase.getInput().trim().isEmpty()) {
+                payload.put("stdin", testCase.getInput());
+            }
+            payload.put("memory_limit", validationService.getMaxMemoryKb());
+
+            String body = objectMapper.writeValueAsString(payload);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(judge0Url))
+                    .timeout(Duration.ofSeconds(40))
+                    .header("Content-Type", "application/json")
+                    // .header("X-RapidAPI-Key", judge0ApiKey)
+                    // .header("X-RapidAPI-Host", JUDGE0_HOST)
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+
+            int maxRetries = 7;
+            int attempt = 0;
+            HttpResponse<String> response;
+            while (true) {
+                response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+                int status = response.statusCode();
+                if (status == 429 || status == 503) operationalMetrics.judge0RateLimit(status);
+                if (status != 429 && status != 503) {
+                    break;
+                }
+                attempt++;
+                if (attempt > maxRetries) {
+                    break;
+                }
+                long waitMs = 1000L * attempt;
+                String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
+                if (retryAfter != null) {
+                    try {
+                        waitMs = Math.max(waitMs, Long.parseLong(retryAfter) * 1000L);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                Thread.sleep(waitMs);
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> responseMap = objectMapper.readValue(response.body(), Map.class);
+
+            // Extract execution details
+            Long runtime = null;
+            Long memory = null;
+            if (responseMap.get("time") != null) {
+                try {
+                    runtime = Math.round(Double.parseDouble(responseMap.get("time").toString()) * 1000);
+                } catch (Exception e) {
+                    logger.warn("Failed to parse runtime: {}", responseMap.get("time"));
+                }
+            }
+            if (responseMap.get("memory") != null) {
+                try {
+                    memory = Long.parseLong(responseMap.get("memory").toString());
+                } catch (Exception e) {
+                    logger.warn("Failed to parse memory: {}", responseMap.get("memory"));
+                }
+            }
+
+            // Extract and truncate stdout
+            String stdout = responseMap.get("stdout") != null ? responseMap.get("stdout").toString().trim() : "";
+            boolean stdoutTruncated = false;
+            if (stdout.length() > limitsConfig.getMaxStdoutLength()) {
+                stdoutTruncated = true;
+                stdout = submissionValidator.truncateOutput(stdout, limitsConfig.getMaxStdoutLength());
+                logger.warn("stdout_truncated", "originalLength", stdout.length(), "truncatedAt", limitsConfig.getMaxStdoutLength());
+            }
+
+            // Extract and truncate stderr
+            String stderr = responseMap.get("stderr") != null ? responseMap.get("stderr").toString().trim() : "";
+            boolean stderrTruncated = false;
+            if (stderr.length() > limitsConfig.getMaxStderrLength()) {
+                stderrTruncated = true;
+                stderr = submissionValidator.truncateOutput(stderr, limitsConfig.getMaxStderrLength());
+                logger.warn("stderr_truncated", "originalLength", stderr.length(), "truncatedAt", limitsConfig.getMaxStderrLength());
+            }
+
+            // Extract and truncate compile output
+            String compileOutput = responseMap.get("compile_output") != null ? responseMap.get("compile_output").toString().trim() : "";
+            boolean compileOutputTruncated = false;
+            if (compileOutput.length() > limitsConfig.getMaxCompileOutputLength()) {
+                compileOutputTruncated = true;
+                compileOutput = submissionValidator.truncateOutput(compileOutput, limitsConfig.getMaxCompileOutputLength());
+                logger.warn("compile_output_truncated", "originalLength", compileOutput.length(), "truncatedAt", limitsConfig.getMaxCompileOutputLength());
+            }
+
+            // Determine actual output (prioritize stderr if present, then compile_output, then stdout)
+            String actualOutput = "";
+            boolean outputTruncated = false;
+            if (!stderr.isEmpty()) {
+                actualOutput = stderr;
+                outputTruncated = stderrTruncated;
+            } else if (!compileOutput.isEmpty()) {
+                actualOutput = compileOutput;
+                outputTruncated = compileOutputTruncated;
+            } else if (!stdout.isEmpty()) {
+                actualOutput = stdout;
+                outputTruncated = stdoutTruncated;
+            } else {
+                actualOutput = "No Output";
+            }
+
+            result.setActualOutput(actualOutput);
+            result.setRuntime(runtime);
+            result.setMemory(memory);
+            result.setExecutionDetails(null);
+
+            String actualOutputSummary = actualOutput;
+            if (actualOutputSummary.length() > 200) {
+                actualOutputSummary = actualOutputSummary.substring(0, 200) + "...";
+            }
+
+            // Mark as OUTPUT_LIMIT_EXCEEDED if outputs were truncated
+            if (outputTruncated) {
+                result.setErrorType("OUTPUT_LIMIT_EXCEEDED");
+                result.setPassed(false);
+                logger.warn("output_limit_exceeded_on_testcase languageId={} runtimeMs={} memoryBytes={} outputLength={}",
+                    languageId, runtime, memory, actualOutput.length());
+            }
+
+            // Check for errors
+            String errorType = parseErrorType(responseMap);
+            if (errorType != null && !outputTruncated) {
+                result.setPassed(false);
+                result.setErrorType(errorType);
+                result.setErrorMessage(parseErrorMessage(responseMap));
+
+                // Observability: Log execution error
+                logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
+                    languageId, errorType, runtime, memory, actualOutputSummary);
+            } else if (errorType == null && !outputTruncated) {
+                // Check if output matches expected
+                String expected = testCase.getExpectedOutput() != null ? testCase.getExpectedOutput().trim() : "";
+                boolean passed = actualOutput.equals(expected);
+                result.setPassed(passed);
+
+                // Observability: Log execution result
+                logger.info("judge0_execution_result languageId={} passed={} runtimeMs={} memoryBytes={} expectedSummary={} actualOutputSummary={}",
+                    languageId, passed, runtime, memory,
+                    expected.length() > 200 ? expected.substring(0, 200) + "..." : expected,
+                    actualOutputSummary);
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to execute test case", e);
+            result.setPassed(false);
+            result.setErrorType("Execution Error");
+            result.setErrorMessage("Failed to execute code: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Parse error type from Judge0 response
+     */
+    private String parseErrorType(Map<String, Object> response) {
+        if (response == null) return null;
+
+        Object status = response.get("status");
+        if (status instanceof Map<?, ?> statusMap) {
+            Integer id = (Integer) statusMap.get("id");
+            if (id != null) {
+                switch (id) {
+                    case 6: return "Compilation Error";
+                    case 7:
+                    case 8:
+                    case 9:
+                    case 10:
+                    case 11:
+                    case 12: return "Runtime Error";
+                    case 5: return "Time Limit Exceeded";
+                    case 4: return "Memory Limit Exceeded";
+                }
+            }
+        }
+
+        // Check for compile output as alternative indicator
+        if (response.get("compile_output") != null && !response.get("compile_output").toString().trim().isEmpty()) {
+            return "Compilation Error";
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse error message from Judge0 response
+     */
+    private String parseErrorMessage(Map<String, Object> response) {
+        if (response == null) return null;
+
+        if (response.get("compile_output") != null && !response.get("compile_output").toString().trim().isEmpty()) {
+            return response.get("compile_output").toString();
+        }
+
+        if (response.get("stderr") != null && !response.get("stderr").toString().trim().isEmpty()) {
+            return response.get("stderr").toString();
+        }
+
+        if (response.get("message") != null) {
+            return response.get("message").toString();
+        }
+
+        Object status = response.get("status");
+        if (status instanceof Map<?, ?> statusMap) {
+            Object description = statusMap.get("description");
+            if (description != null) {
+                return description.toString();
+            }
+        }
+
+        return "Unknown error";
+    }
+}

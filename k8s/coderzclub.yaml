@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: Namespace
+metadata: { name: coderzclub }
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: coderzclub-secrets, namespace: coderzclub }
+type: Opaque
+stringData:
+  MONGODB_URI: replace-me
+  JWT_SECRET: replace-me
+  RABBITMQ_USERNAME: replace-me
+  RABBITMQ_PASSWORD: replace-me
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: coderzclub-api, namespace: coderzclub }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: coderzclub-api } }
+  template:
+    metadata: { labels: { app: coderzclub-api } }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/bunny101204/coderzclub-backend:replace-me
+          envFrom: [{ secretRef: { name: coderzclub-secrets } }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: api }
+            - { name: SPRING_REDIS_HOST, value: coderzclub-redis }
+            - { name: RABBITMQ_HOST, value: coderzclub-rabbitmq }
+            - { name: APP_CORS_ALLOWED_ORIGINS, value: https://coderzclub.example.com }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /actuator/health/readiness, port: http }, initialDelaySeconds: 15 }
+          livenessProbe: { httpGet: { path: /actuator/health/liveness, port: http }, initialDelaySeconds: 30 }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "1", memory: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: coderzclub-api, namespace: coderzclub }
+spec:
+  selector: { app: coderzclub-api }
+  ports: [{ port: 80, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: coderzclub-worker, namespace: coderzclub }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: coderzclub-worker } }
+  template:
+    metadata: { labels: { app: coderzclub-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/bunny101204/coderzclub-backend:replace-me
+          envFrom: [{ secretRef: { name: coderzclub-secrets } }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: worker }
+            - { name: WORKER_ENABLED, value: "true" }
+            - { name: SPRING_REDIS_HOST, value: coderzclub-redis }
+            - { name: RABBITMQ_HOST, value: coderzclub-rabbitmq }
+          resources: { requests: { cpu: 500m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: coderzclub-api, namespace: coderzclub }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: coderzclub-api }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } } }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: coderzclub-worker, namespace: coderzclub }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: coderzclub-worker }
+  minReplicas: 2
+  maxReplicas: 30
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }]
+  behavior: { scaleUp: { stabilizationWindowSeconds: 30 }, scaleDown: { stabilizationWindowSeconds: 300 } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: coderzclub-redis, namespace: coderzclub }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: coderzclub-redis } }
+  template:
+    metadata: { labels: { app: coderzclub-redis } }
+    spec: { containers: [{ name: redis, image: redis:7.2-alpine, resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 500m, memory: 512Mi } } }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: coderzclub-redis, namespace: coderzclub }
+spec: { selector: { app: coderzclub-redis }, ports: [{ port: 6379 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: coderzclub-rabbitmq, namespace: coderzclub }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: coderzclub-rabbitmq } }
+  template:
+    metadata: { labels: { app: coderzclub-rabbitmq } }
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.13-management
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom: { secretKeyRef: { name: coderzclub-secrets, key: RABBITMQ_USERNAME } }
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom: { secretKeyRef: { name: coderzclub-secrets, key: RABBITMQ_PASSWORD } }
+          readinessProbe: { exec: { command: ["rabbitmq-diagnostics", "-q", "ping"] }, initialDelaySeconds: 10, periodSeconds: 5 }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "1", memory: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: coderzclub-rabbitmq, namespace: coderzclub }
+spec: { selector: { app: coderzclub-rabbitmq }, ports: [{ port: 5672 }, { port: 15672 }] }

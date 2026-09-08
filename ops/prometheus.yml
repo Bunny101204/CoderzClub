@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: coderzclub-api
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: [api:8080]
