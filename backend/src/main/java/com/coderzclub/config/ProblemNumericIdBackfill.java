@@ -8,6 +8,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
+import org.bson.Document;
 
 import java.util.List;
 
@@ -35,6 +36,11 @@ public class ProblemNumericIdBackfill implements CommandLineRunner {
                 new Update().set("numericId", numericId), Problem.class);
             next = Math.max(next, numericId);
         }
+        mongoTemplate.upsert(
+            Query.query(Criteria.where("_id").is("problems.numericId")),
+            new Update().max("seq", next),
+            Document.class,
+            "counters");
     }
 
     private int parseId(String id, int fallback) {

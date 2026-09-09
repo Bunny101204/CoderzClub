@@ -82,7 +82,8 @@ const BundleProblems = () => {
         let orderedProblems = idsArray
           .map(id => {
             const problem = allProblems.find(p => 
-              String(p.id) === String(id) || p.id === id
+                String(p.id) === String(id) ||
+                String(p.numericId) === String(id)
             );
             if (!problem) {
               console.warn(`[BundleProblems] Problem with ID ${id} not found in bulk fetch`);
@@ -91,34 +92,16 @@ const BundleProblems = () => {
           })
           .filter(Boolean);
         
-        // If some problems are missing, try fetching them individually
-        const missingIds = idsArray.filter(id => 
-          !orderedProblems.some(p => String(p.id) === String(id) || p.id === id)
+        // The bulk request is intentionally large enough to cover the catalog.
+        // Remaining IDs are stale bundle references, so avoid a burst of guaranteed 404s.
+        const missingIds = idsArray.filter(id =>
+          !orderedProblems.some(p =>
+            String(p.id) === String(id) || String(p.numericId) === String(id)
+          )
         );
-        
+
         if (missingIds.length > 0) {
-          console.log(`[BundleProblems] Fetching ${missingIds.length} missing problems individually`);
-          const individualProblems = await Promise.all(
-            missingIds.map(async (problemId) => {
-              try {
-                const response = await fetch(`/api/problems/${problemId}`);
-                if (response.ok) {
-                  return await response.json();
-                }
-              } catch (err) {
-                console.error(`[BundleProblems] Failed to fetch problem ${problemId}:`, err);
-              }
-              return null;
-            })
-          );
-          
-          const foundProblems = individualProblems.filter(Boolean);
-          orderedProblems = [...orderedProblems, ...foundProblems];
-          
-          // Re-order to match original problemIds order
-          orderedProblems = idsArray
-            .map(id => orderedProblems.find(p => String(p.id) === String(id) || p.id === id))
-            .filter(Boolean);
+          console.warn('[BundleProblems] Ignoring stale problem references:', missingIds);
         }
         
         console.log("[BundleProblems] Final ordered problems count:", orderedProblems.length);

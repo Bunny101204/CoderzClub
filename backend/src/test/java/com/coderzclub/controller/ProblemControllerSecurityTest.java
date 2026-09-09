@@ -40,6 +40,9 @@ class ProblemControllerSecurityTest {
     @MockBean
     private ProblemRepository problemRepository;
 
+    @MockBean
+    private com.coderzclub.service.ProblemNumericIdAllocator numericIdAllocator;
+
     @SpyBean
     private MongoTemplate mongoTemplate;
 
@@ -108,5 +111,36 @@ class ProblemControllerSecurityTest {
         org.junit.jupiter.api.Assertions.assertEquals(2L, pageQuery.getSkip());
         org.junit.jupiter.api.Assertions.assertEquals(2, pageQuery.getLimit());
         org.junit.jupiter.api.Assertions.assertEquals(1, pageQuery.getSortObject().get("numericId"));
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void cursorPaginationUsesBoundaryWithoutSkip() throws Exception {
+        Problem first = new Problem();
+        first.setId("30");
+        first.setNumericId(30);
+        first.setTitle("Third");
+        Problem second = new Problem();
+        second.setId("40");
+        second.setNumericId(40);
+        second.setTitle("Fourth");
+        Problem extra = new Problem();
+        extra.setId("50");
+        extra.setNumericId(50);
+
+        doReturn(List.of(first, second, extra)).when(mongoTemplate).find(any(Query.class), eq(Problem.class));
+
+        mockMvc.perform(get("/api/problems?cursor=MjB8MjA&limit=2"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.problems", org.hamcrest.Matchers.hasSize(2)))
+            .andExpect(jsonPath("$.nextCursor").value("NDB8NDA"))
+            .andExpect(jsonPath("$.hasNext").value(true));
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(Problem.class));
+        Query cursorQuery = queryCaptor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(0L, cursorQuery.getSkip());
+        org.junit.jupiter.api.Assertions.assertEquals(3, cursorQuery.getLimit());
+        org.junit.jupiter.api.Assertions.assertTrue(cursorQuery.getQueryObject().containsKey("$or"));
     }
 }

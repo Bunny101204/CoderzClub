@@ -10,8 +10,8 @@ import java.util.List;
 
 @Repository
 public interface ProblemRepository extends MongoRepository<Problem, String> {
-       java.util.Optional<Problem> findTopByOrderByNumericIdDesc();
-    
+       java.util.Optional<Problem> findByNumericId(Integer numericId);
+
     // Filter by difficulty
     Page<Problem> findByDifficulty(String difficulty, Pageable pageable);
     

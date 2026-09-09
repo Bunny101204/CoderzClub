@@ -21,7 +21,8 @@ export const useProblemStatus = (problems, user) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setLoading(true);
     const statusMap = {};
@@ -35,7 +36,7 @@ export const useProblemStatus = (problems, user) => {
     try {
       const response = await fetch('/api/submissions/my-submissions?size=1000', {
         headers: { Authorization: `Bearer ${token}` },
-        signal: abortControllerRef.current.signal
+        signal: controller.signal
       });
       if (!response.ok) {
         throw new Error(`Status request failed with HTTP ${response.status}`);
@@ -71,9 +72,14 @@ export const useProblemStatus = (problems, user) => {
       
       setProblemStatus(statusMap);
     } catch (err) {
-      console.error('Error in batch status fetch:', err);
+      if (err?.name !== 'AbortError') {
+        console.error('Error in batch status fetch:', err);
+      }
     } finally {
-      setLoading(false);
+      if (abortControllerRef.current === controller) {
+        setLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   }, [user]);
 

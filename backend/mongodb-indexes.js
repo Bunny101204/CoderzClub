@@ -13,6 +13,12 @@
 
 function ensureIndex(coll, keys, options) {
   options = options || {};
+  var collectionExists = db.getCollectionNames().indexOf(coll.getName()) !== -1;
+  if (!collectionExists) {
+    print('Creating collection and index ' + (options.name || JSON.stringify(keys)) + ' on ' + coll.getName());
+    coll.createIndex(keys, options);
+    return;
+  }
   var existing = coll.getIndexes().some(function(idx) {
     return JSON.stringify(idx.key) === JSON.stringify(keys);
   });
@@ -25,11 +31,36 @@ function ensureIndex(coll, keys, options) {
 }
 
 function dropIndexIfPresent(coll, name) {
+  if (db.getCollectionNames().indexOf(coll.getName()) === -1) return;
   var existing = coll.getIndexes().some(function(idx) { return idx.name === name; });
   if (existing) {
     print('Dropping obsolete index ' + name + ' from ' + coll.getName());
     coll.dropIndex(name);
   }
+}
+
+function assertIndex(coll, name, predicate) {
+  if (db.getCollectionNames().indexOf(coll.getName()) === -1) {
+    throw new Error('Critical collection missing: ' + coll.getName());
+  }
+  var index = coll.getIndexes().find(function(idx) { return idx.name === name; });
+  if (!index || (predicate && !predicate(index))) {
+    throw new Error('Critical index missing or misconfigured: ' + coll.getName() + '.' + name);
+  }
+  print('Verified critical index ' + coll.getName() + '.' + name);
+}
+
+function assertIndexKeys(coll, keys, predicate) {
+  if (db.getCollectionNames().indexOf(coll.getName()) === -1) {
+    throw new Error('Critical collection missing: ' + coll.getName());
+  }
+  var index = coll.getIndexes().find(function(idx) {
+    return JSON.stringify(idx.key) === JSON.stringify(keys);
+  });
+  if (!index || (predicate && !predicate(index))) {
+    throw new Error('Critical index missing or misconfigured: ' + coll.getName() + ' ' + JSON.stringify(keys));
+  }
+  print('Verified critical index ' + coll.getName() + ' ' + JSON.stringify(keys) + ' (' + index.name + ')');
 }
 
 // ===== PROBLEMS COLLECTION INDEXES =====
@@ -38,6 +69,8 @@ function dropIndexIfPresent(coll, name) {
 ensureIndex(db.problems, { "difficulty": 1, "category": 1 }, { name: "difficulty_category_idx" });
 ensureIndex(db.problems, { "tags": 1 }, { name: "tags_idx" });
 ensureIndex(db.problems, { "numericId": 1, "_id": 1 }, { name: "numericId_id_idx" });
+// Run the numericId backfill and duplicate cleanup before this unique index is created.
+ensureIndex(db.problems, { "numericId": 1 }, { unique: true, sparse: true, name: "numericId_unique_sparse_idx" });
 // Prefix search uses title or _id regex; title supports the title branch.
 ensureIndex(db.problems, { "title": 1 }, { name: "title_idx" });
 ensureIndex(db.problems, { "difficulty": 1 }, { name: "difficulty_idx" });
@@ -93,6 +126,10 @@ ensureIndex(db.submission_test_results, { "jobId": 1, "testcaseType": 1 }, { nam
 ensureIndex(db.user_solved_problems, { "userId": 1, "problemId": 1 }, { unique: true, name: "userId_problemId_unique_idx" });
 ensureIndex(db.user_solved_problems, { "userId": 1, "solvedAt": -1 }, { name: "userId_solvedAt_desc_idx" });
 
+// One creation event per job makes orphan repair safe across multiple API instances.
+ensureIndex(db.submission_outbox, { "aggregateId": 1, "eventType": 1 }, { unique: true, name: "aggregate_event_unique_idx" });
+ensureIndex(db.submission_outbox, { "status": 1, "nextAttemptAt": 1, "lockedUntil": 1 }, { name: "status_nextAttempt_locked_idx" });
+
 // ===== PROBLEM_BUNDLES COLLECTION INDEXES =====
 ensureIndex(db.problem_bundles, { "name": 1 }, { name: "name_idx" });
 ensureIndex(db.problem_bundles, { "difficulty": 1 }, { name: "difficulty_idx" });
@@ -104,3 +141,18 @@ ensureIndex(db.subscriptions, { "status": 1 }, { name: "status_idx" });
 ensureIndex(db.subscriptions, { "expiryDate": 1 }, { name: "expiryDate_idx" });
 
 print('Index creation script completed. Verify indexes with db.collection.getIndexes().');
+
+// Fail migration/deployment validation if critical query indexes are absent or unsafe.
+assertIndex(db.problems, "numericId_id_idx");
+assertIndex(db.problems, "numericId_unique_sparse_idx", function(idx) {
+  return idx.unique === true && idx.sparse === true;
+});
+assertIndex(db.submissions, "userId_createdAt_desc_idx");
+assertIndex(db.submission_jobs, "status_lockedUntil_idx");
+assertIndexKeys(db.user_solved_problems, { "userId": 1, "problemId": 1 }, function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.submission_outbox, "aggregate_event_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.submission_outbox, "status_nextAttempt_locked_idx");

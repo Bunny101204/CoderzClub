@@ -3,13 +3,13 @@ package com.coderzclub.service;
 import com.coderzclub.config.WorkerProperties;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.SubmissionTestResult;
-import com.coderzclub.queue.SubmissionQueuePublisher;
 import com.coderzclub.repository.SubmissionJobRepository;
 import com.coderzclub.repository.SubmissionTestResultRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,7 +26,7 @@ public class SubmissionJobService {
     private SubmissionTestResultRepository resultRepository;
 
     @Autowired
-    private SubmissionQueuePublisher publisher;
+    private SubmissionOutboxService outboxService;
 
     @Autowired
     private SubmissionJobEventService eventService;
@@ -37,6 +37,7 @@ public class SubmissionJobService {
     /**
      * Create a new submission job
      */
+    @Transactional
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests) {
         SubmissionJob job = new SubmissionJob();
@@ -58,11 +59,10 @@ public class SubmissionJobService {
 
         job = jobRepository.save(job);
         eventService.publish(job, SubmissionJob.JobStatus.QUEUED);
+        outboxService.createJobEvent(job.getId());
 
         logger.info("submission_job_created id={} userId={} problemId={} language={} languageId={} totalTests={} codeLength={}",
             job.getId(), userId, problemId, language, languageId, job.getTotalTests(), code != null ? code.length() : 0);
-
-        publisher.publishJob(job.getId());
 
         return job;
     }
