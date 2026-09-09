@@ -8,11 +8,11 @@ export const useProblemStatus = (problems, user) => {
   const [problemStatus, setProblemStatus] = useState({});
   const [loading, setLoading] = useState(false);
   const abortControllerRef = useRef(null);
-  const previousProblemsRef = useRef([]);
 
   // Memoize status calculation to avoid recalculation
   const statusMap = useCallback(async (problemsList) => {
-    if (!user || !problemsList || problemsList.length === 0) {
+    const safeProblems = Array.isArray(problemsList) ? problemsList.filter(Boolean) : [];
+    if (!user || safeProblems.length === 0) {
       setProblemStatus({});
       return;
     }
@@ -26,52 +26,48 @@ export const useProblemStatus = (problems, user) => {
     setLoading(true);
     const statusMap = {};
 
-    // Batch requests in groups of 5 to avoid overwhelming the server
-    const batchSize = 5;
-    const token = localStorage.getItem('jwtToken');
+    const token = localStorage.getItem('jwtToken') || localStorage.getItem('token');
     if (!token) {
       setLoading(false);
       return;
     }
 
     try {
-      for (let i = 0; i < problemsList.length; i += batchSize) {
-        const batch = problemsList.slice(i, i + batchSize);
-        
-        const batchPromises = batch.map(async (problem) => {
-          try {
-            const response = await fetch(
-              `/api/submissions/my-submissions?problemId=${problem.id}&size=1`,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`
-                },
-                signal: abortControllerRef.current.signal
-              }
-            );
-            
-            if (!response.ok) return;
-
-            const data = await response.json();
-            const submissions = Array.isArray(data.submissions) ? data.submissions : [];
-            const solved = submissions.some(s =>
-              s.result === 'ACCEPTED' || s.verdict === 'ACCEPTED'
-            );
-            
-            statusMap[problem.id] = solved
-              ? 'SOLVED'
-              : submissions.length > 0
-              ? 'ATTEMPTED'
-              : 'NOT_STARTED';
-          } catch (err) {
-            if (err.name !== 'AbortError') {
-              console.error('Error fetching problem status:', err);
-            }
-          }
-        });
-
-        await Promise.all(batchPromises);
+      const response = await fetch('/api/submissions/my-submissions?size=1000', {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: abortControllerRef.current.signal
+      });
+      if (!response.ok) {
+        throw new Error(`Status request failed with HTTP ${response.status}`);
       }
+
+      const data = await response.json();
+      const submissions = Array.isArray(data)
+        ? data
+        : Array.isArray(data.submissions)
+        ? data.submissions
+        : Array.isArray(data.content)
+        ? data.content
+        : Array.isArray(data.data?.submissions)
+        ? data.data.submissions
+        : [];
+      const currentProblemIds = new Set(safeProblems.map(problem => String(problem.id)));
+
+      submissions.forEach(submission => {
+        const problemId = String(submission.problemId ?? submission.problem?.id ?? '');
+        if (!currentProblemIds.has(problemId)) return;
+
+        const result = String(
+          submission.result ?? submission.verdict ?? submission.status
+            ?? submission.finalResult ?? submission.jobStatus ?? ''
+        ).trim().toUpperCase();
+        const currentStatus = statusMap[problemId];
+        if (['ACCEPTED', 'SOLVED', 'PASSED', 'SUCCESS', 'COMPLETED'].includes(result)) {
+          statusMap[problemId] = 'SOLVED';
+        } else if (currentStatus !== 'SOLVED') {
+          statusMap[problemId] = 'ATTEMPTED';
+        }
+      });
       
       setProblemStatus(statusMap);
     } catch (err) {
@@ -81,17 +77,21 @@ export const useProblemStatus = (problems, user) => {
     }
   }, [user]);
 
-  // Only refetch if problems array actually changed (shallow equality)
   useEffect(() => {
-    const problemIds = problems?.map(p => p.id).join(',') || '';
-    const previousIds = previousProblemsRef.current?.map(p => p.id).join(',') || '';
-    
-    if (problemIds !== previousIds) {
-      previousProblemsRef.current = problems;
-      statusMap(problems);
-    }
+    const refresh = () => statusMap(Array.isArray(problems) ? problems : []);
+    refresh();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const refreshTimer = window.setInterval(refresh, 10000);
 
     return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(refreshTimer);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }

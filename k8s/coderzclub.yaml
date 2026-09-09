@@ -12,6 +12,16 @@ stringData:
   RABBITMQ_USERNAME: replace-me
   RABBITMQ_PASSWORD: replace-me
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: coderzclub-submission-limits, namespace: coderzclub }
+data:
+  SUBMISSION_LIMIT_DAILY: "100"
+  SUBMISSION_LIMIT_PER_PROBLEM_DAILY: "50"
+  SUBMISSION_LIMIT_COOLDOWN_MS: "2000"
+  SUBMISSION_LIMIT_REDIS_FAIL_OPEN: "false"
+  SUBMISSION_LIMIT_TIME_ZONE: UTC
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: coderzclub-api, namespace: coderzclub }
@@ -24,11 +34,15 @@ spec:
       containers:
         - name: api
           image: ghcr.io/bunny101204/coderzclub-backend:replace-me
-          envFrom: [{ secretRef: { name: coderzclub-secrets } }]
+          envFrom:
+            - { secretRef: { name: coderzclub-secrets } }
+            - { configMapRef: { name: coderzclub-submission-limits } }
           env:
             - { name: SPRING_PROFILES_ACTIVE, value: api }
             - { name: SPRING_REDIS_HOST, value: coderzclub-redis }
             - { name: RABBITMQ_HOST, value: coderzclub-rabbitmq }
+            - { name: APP_BACKEND_URL, value: https://coderzclub.example.com }
+            - { name: APP_FRONTEND_URL, value: https://coderzclub.example.com }
             - { name: APP_CORS_ALLOWED_ORIGINS, value: https://coderzclub.example.com }
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe: { httpGet: { path: /actuator/health/readiness, port: http }, initialDelaySeconds: 15 }
@@ -54,7 +68,9 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/bunny101204/coderzclub-backend:replace-me
-          envFrom: [{ secretRef: { name: coderzclub-secrets } }]
+          envFrom:
+            - { secretRef: { name: coderzclub-secrets } }
+            - { configMapRef: { name: coderzclub-submission-limits } }
           env:
             - { name: SPRING_PROFILES_ACTIVE, value: worker }
             - { name: WORKER_ENABLED, value: "true" }

@@ -20,7 +20,8 @@ The backend uses Spring Boot Mail for real email delivery. To enable it, set SMT
 - `SPRING_MAIL_USERNAME`
 - `SPRING_MAIL_PASSWORD`
 - `APP_EMAIL_FROM` (optional)
-- `APP_BACKEND_URL` (for verification/reset links)
+- `APP_BACKEND_URL` (for password-reset links and backend callbacks)
+- `APP_FRONTEND_URL` (the public URL opened by verification emails)
 
 Example for Gmail SMTP:
 
@@ -31,7 +32,10 @@ export SPRING_MAIL_USERNAME=your.email@gmail.com
 export SPRING_MAIL_PASSWORD=your-app-password
 export APP_EMAIL_FROM=your.email@gmail.com
 export APP_BACKEND_URL=http://localhost:8080
+export APP_FRONTEND_URL=http://localhost:5173
 ```
+
+For Codespaces or production, set `APP_FRONTEND_URL` to the publicly forwarded or deployed frontend URL. Do not use a private `localhost` URL or an old Codespaces URL in this setting.
 
 ## Judge0 Execution Key
 
@@ -65,3 +69,7 @@ export SUBMISSION_LIMIT_REDIS_FAIL_OPEN=true
 ```
 
 This lets submissions continue on local development without Redis, while still using Redis when available.
+
+The supported limit environment variables are `SUBMISSION_LIMIT_DAILY`,
+`SUBMISSION_LIMIT_PER_PROBLEM_DAILY`, `SUBMISSION_LIMIT_COOLDOWN_MS`,
+`SUBMISSION_LIMIT_REDIS_FAIL_OPEN`, and `SUBMISSION_LIMIT_TIME_ZONE`.

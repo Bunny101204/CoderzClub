@@ -248,15 +248,19 @@ public class Judge0ExecutionService {
 
             // Determine actual output (prioritize stderr if present, then compile_output, then stdout)
             String actualOutput = "";
+            boolean hasOutput = false;
             boolean outputTruncated = false;
             if (!stderr.isEmpty()) {
                 actualOutput = stderr;
+                hasOutput = true;
                 outputTruncated = stderrTruncated;
             } else if (!compileOutput.isEmpty()) {
                 actualOutput = compileOutput;
+                hasOutput = true;
                 outputTruncated = compileOutputTruncated;
             } else if (!stdout.isEmpty()) {
                 actualOutput = stdout;
+                hasOutput = true;
                 outputTruncated = stdoutTruncated;
             } else {
                 actualOutput = "No Output";
@@ -293,7 +297,7 @@ public class Judge0ExecutionService {
             } else if (errorType == null && !outputTruncated) {
                 // Check if output matches expected
                 String expected = testCase.getExpectedOutput() != null ? testCase.getExpectedOutput().trim() : "";
-                boolean passed = actualOutput.equals(expected);
+                boolean passed = outputsMatch(actualOutput, expected, hasOutput);
                 result.setPassed(passed);
 
                 // Observability: Log execution result
@@ -311,6 +315,14 @@ public class Judge0ExecutionService {
         }
 
         return result;
+    }
+
+    static boolean outputsMatch(String actualOutput, String expectedOutput, boolean hasOutput) {
+        String expected = expectedOutput == null ? "" : expectedOutput.trim();
+        if (!hasOutput && (expected.isEmpty() || "N/A".equalsIgnoreCase(expected))) {
+            return true;
+        }
+        return actualOutput.equals(expected);
     }
 
     /**

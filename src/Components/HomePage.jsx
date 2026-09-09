@@ -53,10 +53,10 @@ const HomePage = ({ problems: propsProblems }) => {
 
   const getStatusIcon = (status) => {
     if (status === 'SOLVED') {
-      return <span className="text-green-400 text-lg">✓</span>;
+      return <span className="inline-flex items-center text-green-400 text-lg leading-none" title="Solved" aria-label="Solved"><span aria-hidden="true">✓</span></span>;
     }
     if (status === 'ATTEMPTED') {
-      return <span className="text-yellow-400 text-lg">●</span>;
+      return <span className="inline-flex items-center text-yellow-400 text-lg leading-none" title="Attempted" aria-label="Attempted"><span aria-hidden="true">●</span></span>;
     }
     return null;
   };
@@ -298,7 +298,7 @@ const HomePage = ({ problems: propsProblems }) => {
               </tr>
             ) : (
               problems.map((problem) => {
-                const status = problemStatus[problem.id] || 'NOT_STARTED';
+                const status = problemStatus[String(problem.id)] || problemStatus[problem.id] || 'NOT_STARTED';
                 return (
                   <tr key={problem.id} className="border-t border-gray-700">
                     <td className="py-2 px-3 align-top">

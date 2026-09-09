@@ -29,10 +29,16 @@ public class LeaderboardService {
         int limit = Math.max(1, Math.min(100, requested));
         String key = CACHE + limit;
         try {
+            long participantCount = userRepository.count();
+            int expectedEntries = (int) Math.min(limit, participantCount);
             String cached = redis.opsForValue().get(key);
-            if (cached != null) return objectMapper.readValue(cached, new TypeReference<List<LeaderboardEntry>>() {});
+            if (cached != null) {
+                List<LeaderboardEntry> cachedEntries = objectMapper.readValue(
+                    cached, new TypeReference<List<LeaderboardEntry>>() {});
+                if (cachedEntries.size() >= expectedEntries) return cachedEntries;
+            }
             Set<String> ids = redis.opsForZSet().reverseRange(ZSET, 0, limit - 1);
-            List<LeaderboardEntry> entries = ids == null || ids.isEmpty()
+            List<LeaderboardEntry> entries = ids == null || ids.size() < expectedEntries
                 ? mongoTop(limit) : hydrate(ids);
             redis.opsForValue().set(key, objectMapper.writeValueAsString(entries), cacheTtlSeconds, TimeUnit.SECONDS);
             return entries;

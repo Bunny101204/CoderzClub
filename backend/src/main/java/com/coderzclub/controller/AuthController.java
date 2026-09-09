@@ -35,16 +35,9 @@ public class AuthController {
     @Value("${app.frontend.url:${app.backend.url:http://localhost:8080}}")
     private String frontendUrl;
 
-    private String buildFrontendRedirect(String query) {
-        String base = frontendUrl != null ? frontendUrl : "";
-        if (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
-        return base + query;
-    }
-
     @PostMapping("/register")
-    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req) {
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
+                                      @RequestHeader(value = "X-Client-Origin", required = false) String clientOrigin) {
         try {
             System.out.println("Registration attempt for username: " + req.getUsername() + ", email: " + req.getEmail());
             String role = req.getRole() != null ? req.getRole() : "user";
@@ -52,7 +45,7 @@ public class AuthController {
             System.out.println("User registered successfully: " + user.getUsername() + ", email verified: " + user.isEmailVerified());
 
             try {
-                emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken());
+                emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken(), clientOrigin);
                 return ResponseEntity.ok(Map.of(
                     "message", "Registration successful. A verification email has been sent.",
                     "emailSent", true
@@ -76,26 +69,24 @@ public class AuthController {
         try {
             userService.verifyEmailToken(token);
             // Redirect to frontend auth page with success message
-            String redirectUrl = buildFrontendRedirect("/auth?verified=true");
-            return ResponseEntity.status(302).header("Location", redirectUrl).build();
+            return ResponseEntity.status(302).header("Location", "/auth?verified=true").build();
         } catch (Exception e) {
             try {
                 String encodedError = java.net.URLEncoder.encode(e.getMessage(), "UTF-8");
-                String redirectUrl = buildFrontendRedirect("/auth?error=" + encodedError);
-                return ResponseEntity.status(302).header("Location", redirectUrl).build();
+                return ResponseEntity.status(302).header("Location", "/auth?error=" + encodedError).build();
             } catch (Exception encodeEx) {
-                String redirectUrl = buildFrontendRedirect("/auth?error=Verification failed");
-                return ResponseEntity.status(302).header("Location", redirectUrl).build();
+                return ResponseEntity.status(302).header("Location", "/auth?error=Verification%20failed").build();
             }
         }
     }
 
     @PostMapping("/resend-verification")
-    public ResponseEntity<?> resendVerification(@Valid @RequestBody ResendVerificationRequest req) {
+    public ResponseEntity<?> resendVerification(@Valid @RequestBody ResendVerificationRequest req,
+                                                @RequestHeader(value = "X-Client-Origin", required = false) String clientOrigin) {
         try {
             User user = userService.resendVerificationEmail(req.getUsernameOrEmail());
             try {
-                emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken());
+                emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken(), clientOrigin);
                 return ResponseEntity.ok(Map.of(
                     "message", "Verification email resent. Please check your inbox.",
                     "emailSent", true
@@ -172,7 +163,6 @@ public class AuthController {
             
             String token = authHeader.substring(7);
             String username = jwtUtil.extractUsername(token);
-            String role = jwtUtil.extractRole(token);
             Optional<User> userOpt = userService.findByUsername(username);
             if (!userOpt.isPresent()) {
                 return ResponseEntity.status(401).body(Map.of("error", "User not found"));
@@ -182,7 +172,8 @@ public class AuthController {
                 return ResponseEntity.status(401).body(Map.of("error", "Invalid or expired token"));
             }
             
-            return ResponseEntity.ok(Map.of("username", username, "role", role));
+            String role = userOpt.get().getRole();
+            return ResponseEntity.ok(Map.of("username", username, "role", role == null ? "USER" : role));
         } catch (Exception e) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid token"));
         }

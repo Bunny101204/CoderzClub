@@ -483,19 +483,24 @@ const Judge0CodeEditor = ({
         
         // Determine actual output - prioritize stdout, then stderr, then compile_output
         let actual = "";
+        let hasOutput = false;
         if (res.stdout && res.stdout.trim()) {
           actual = res.stdout.trim();
+          hasOutput = true;
         } else if (res.stderr && res.stderr.trim()) {
           actual = res.stderr.trim();
+          hasOutput = true;
         } else if (res.compile_output && res.compile_output.trim()) {
           actual = res.compile_output.trim();
+          hasOutput = true;
         } else {
           actual = "No Output";
         }
         
         const expected = String(tc.output || "").trim();
         // Only pass if no error AND output matches
-        const passed = !error && actual === expected;
+        const noOutputExpected = expected === "" || expected.toUpperCase() === "N/A";
+        const passed = !error && ((noOutputExpected && !hasOutput) || actual === expected);
         
         console.log(`Test ${i + 1} result:`, { actual, expected, passed, runtime, memory, error });
         

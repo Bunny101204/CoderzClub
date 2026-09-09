@@ -23,8 +23,16 @@ public class EmailService {
     private String frontendUrl;
 
     public void sendVerificationEmail(String recipientEmail, String token) {
+        sendVerificationEmail(recipientEmail, token, null);
+    }
+
+    public void sendVerificationEmail(String recipientEmail, String token, String publicFrontendUrl) {
         String subject = "Verify your CoderzClub account";
-        String verificationLink = String.format("%s/api/confirm-email?token=%s", normalizeUrl(backendUrl), token);
+        String verificationBaseUrl = normalizeUrl(publicFrontendUrl);
+        if (verificationBaseUrl.isBlank()) {
+            verificationBaseUrl = normalizeUrl(frontendUrl);
+        }
+        String verificationLink = String.format("%s/auth?verifyEmailToken=%s", verificationBaseUrl, token);
         String text = "Welcome to CoderzClub!\n\n" +
                 "Please verify your email address by clicking the link below:\n" +
                 verificationLink + "\n\n" +

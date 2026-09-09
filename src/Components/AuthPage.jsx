@@ -101,6 +101,7 @@ const AuthPage = () => {
   const toggleMode = () => {
     setIsLogin(!isLogin);
     setError('');
+    setInfo('');
     setFormData({
       username: '',
       email: '',

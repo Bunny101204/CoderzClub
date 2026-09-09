@@ -71,6 +71,9 @@ authClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    if (typeof window !== 'undefined') {
+      config.headers['X-Client-Origin'] = window.location.origin;
+    }
     return config;
   },
   (error) => {

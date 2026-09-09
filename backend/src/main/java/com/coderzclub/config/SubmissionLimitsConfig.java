@@ -2,6 +2,11 @@ package com.coderzclub.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+import jakarta.annotation.PostConstruct;
+import java.time.DateTimeException;
+import java.time.ZoneId;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Configuration for submission security and performance limits
@@ -9,6 +14,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "submission")
 public class SubmissionLimitsConfig {
+
+    private static final Logger logger = LoggerFactory.getLogger(SubmissionLimitsConfig.class);
 
     private int daily = 100;
     private int perProblemDaily = 50;
@@ -33,6 +40,30 @@ public class SubmissionLimitsConfig {
     // Execution limits
     private int maxExecutionTimeSeconds = 15;
     private int maxMemoryKb = 262144; // 256 MB
+
+    @PostConstruct
+    void validateAndLog() {
+        if (daily < 0 || perProblemDaily < 0 || cooldownMs < 0
+                || maxCodeLength < 1 || maxStdoutLength < 1 || maxStderrLength < 1
+                || maxCompileOutputLength < 1 || maxTestCasesPerProblem < 1
+                || maxTestCaseInputLength < 1 || maxTestCaseOutputLength < 1
+                || maxExecutionTimeSeconds < 1 || maxMemoryKb < 1) {
+            throw new IllegalStateException("Submission limits must be non-negative and size/time limits must be positive");
+        }
+        try {
+            ZoneId.of(timeZone);
+        } catch (DateTimeException e) {
+            throw new IllegalStateException("Invalid submission.time-zone: " + timeZone, e);
+        }
+        logger.info("Submission limits configured: daily={}, perProblemDaily={}, cooldownMs={}, "
+                + "timeZone={}, redisFailOpen={}, maxCodeLength={}, maxStdoutLength={}, "
+                + "maxStderrLength={}, maxCompileOutputLength={}, maxTestCasesPerProblem={}, "
+                + "maxTestCaseInputLength={}, maxTestCaseOutputLength={}, maxExecutionTimeSeconds={}, "
+                + "maxMemoryKb={}", daily, perProblemDaily, cooldownMs, timeZone, redisFailOpen,
+                maxCodeLength, maxStdoutLength, maxStderrLength, maxCompileOutputLength,
+                maxTestCasesPerProblem, maxTestCaseInputLength, maxTestCaseOutputLength,
+                maxExecutionTimeSeconds, maxMemoryKb);
+    }
 
     public int getDaily() { return daily; }
     public void setDaily(int daily) { this.daily = daily; }
