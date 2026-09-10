@@ -147,7 +147,8 @@ public class SubmissionWorker {
             List<SubmissionJob.TestCase> publicTests = convert(problem.getPublicTestCases());
             List<SubmissionJob.TestCase> hiddenTests = convert(problem.getHiddenTestCases());
             List<SubmissionJob.TestResult> results = executionService.executeTestCases(
-                job.getCode(), job.getLanguageId(), publicTests, hiddenTests);
+                job.getCode(), job.getLanguageId(), publicTests, hiddenTests, job.getExecutionMode(),
+                job.getTestcaseVersion());
 
             if (leaseLost.get() || !leaseService.isOwned(jobId, workerId)) {
                 operationalMetrics.leaseLoss();

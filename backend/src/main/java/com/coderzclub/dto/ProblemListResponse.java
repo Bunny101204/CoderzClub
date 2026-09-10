@@ -31,7 +31,7 @@ public class ProblemListResponse {
         this.premium = problem.isPremium();
         this.points = problem.getPoints();
         this.estimatedTime = problem.getEstimatedTime();
-        this.executionMode = problem.getExecutionMode();
+        this.executionMode = problem.getExecutionMode() == null ? null : problem.getExecutionMode().name();
         this.publicTestCases = problem.getPublicTestCases() == null ? null : problem.getPublicTestCases().stream()
                 .map(tc -> {
                     TestCase sanitized = new TestCase();

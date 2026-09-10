@@ -21,8 +21,7 @@ public class Problem {
     private String createdBy; // user id
     private Date createdAt = new Date();
     
-    // Execution mode: "FUNCTION" (old) or "STDIN_STDOUT" (new)
-    private String executionMode = "STDIN_STDOUT"; // Default to new mode
+    private ExecutionMode executionMode = ExecutionMode.STANDARD_PER_CASE;
     
     // Fields for STDIN_STDOUT mode (NEW - Recommended)
     private List<TestCase> publicTestCases;  // Public test cases (shown to user)
@@ -140,8 +139,9 @@ public class Problem {
     public void setCategory(String category) { this.category = category; }
     
     // New getters and setters for STDIN_STDOUT mode
-    public String getExecutionMode() { return executionMode; }
-    public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
+    public ExecutionMode getExecutionMode() { return executionMode; }
+    public void setExecutionMode(ExecutionMode executionMode) { this.executionMode = executionMode; }
+    public void setExecutionMode(String executionMode) { this.executionMode = ExecutionMode.fromValue(executionMode); }
     
     public List<TestCase> getPublicTestCases() { return publicTestCases; }
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }

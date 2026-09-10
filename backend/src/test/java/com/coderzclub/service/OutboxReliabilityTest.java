@@ -109,7 +109,8 @@ class OutboxReliabilityTest {
         set(service, "workerProperties", properties);
         set(service, "resultRepository", mock(com.coderzclub.repository.SubmissionTestResultRepository.class));
 
-        service.createJob("user", "problem", "code", "java", java.util.Objects.hash(1), "v1", 1);
+        service.createJob("user", "problem", "code", "java", java.util.Objects.hash(1), "v1", 1,
+            com.coderzclub.model.ExecutionMode.STANDARD_PER_CASE);
 
         var order = inOrder(jobs, outbox);
         order.verify(jobs).save(any(SubmissionJob.class));

@@ -2,6 +2,7 @@ package com.coderzclub.service;
 
 import com.coderzclub.config.WorkerProperties;
 import com.coderzclub.model.SubmissionJob;
+import com.coderzclub.model.ExecutionMode;
 import com.coderzclub.model.SubmissionTestResult;
 import com.coderzclub.repository.SubmissionJobRepository;
 import com.coderzclub.repository.SubmissionTestResultRepository;
@@ -39,7 +40,8 @@ public class SubmissionJobService {
      */
     @Transactional
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
-                                   Integer languageId, String testcaseVersion, int totalTests) {
+                                   Integer languageId, String testcaseVersion, int totalTests,
+                                   ExecutionMode executionMode) {
         SubmissionJob job = new SubmissionJob();
         job.setUserId(userId);
         job.setProblemId(problemId);
@@ -47,6 +49,7 @@ public class SubmissionJobService {
         job.setLanguage(language);
         job.setLanguageId(languageId);
         job.setTestcaseVersion(testcaseVersion == null ? "v1" : testcaseVersion);
+        job.setExecutionMode(executionMode == null ? ExecutionMode.STANDARD_PER_CASE : executionMode);
         job.setStatus(SubmissionJob.JobStatus.QUEUED);
         job.setTotalTests(totalTests);
         job.setAttemptCount(0);

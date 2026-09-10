@@ -3,12 +3,13 @@ package com.coderzclub.service;
 import com.coderzclub.config.SubmissionLimitsConfig;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.config.WorkerProperties;
+import com.coderzclub.config.Judge0ProviderProperties;
+import com.coderzclub.model.ExecutionMode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -32,19 +33,13 @@ public class Judge0ExecutionService {
 
     private static final Logger logger = LoggerFactory.getLogger(Judge0ExecutionService.class);
 
-    // private static final String JUDGE0_URL = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true";
-    // private static final String JUDGE0_HOST = "judge0-ce.p.rapidapi.com";
-    @Value("${judge0.api.url}")
-    private String judge0Url;
+    private final Judge0ProviderProperties providerProperties;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
             .build();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Value("${judge0.api.key}")
-    private String judge0ApiKey;
 
     @Autowired
 
@@ -62,6 +57,14 @@ public class Judge0ExecutionService {
     @Autowired
     private OperationalMetrics operationalMetrics;
 
+    @Autowired
+    private FunctionHarnessService harnessService;
+
+    @Autowired
+    public Judge0ExecutionService(Judge0ProviderProperties providerProperties) {
+        this.providerProperties = providerProperties;
+    }
+
     private Semaphore globalPermits = new Semaphore(8);
     private final Map<Integer, Semaphore> languagePermits = new ConcurrentHashMap<>();
 
@@ -76,7 +79,13 @@ public class Judge0ExecutionService {
      */
     public List<SubmissionJob.TestResult> executeTestCases(String code, Integer languageId,
                                                           List<SubmissionJob.TestCase> publicTestCases,
-                                                          List<SubmissionJob.TestCase> hiddenTestCases) {
+                                                          List<SubmissionJob.TestCase> hiddenTestCases,
+                                                          ExecutionMode executionMode,
+                                                          String testcaseVersion) {
+        if (executionMode == ExecutionMode.FUNCTION_HARNESS_BATCH
+            && harnessService.supports(languageId, code, publicTestCases, hiddenTestCases, testcaseVersion)) {
+            return executeHarnessBatch(code, languageId, publicTestCases, hiddenTestCases);
+        }
         List<SubmissionJob.TestResult> results = new ArrayList<>();
 
         // Execute public test cases
@@ -112,6 +121,18 @@ public class Judge0ExecutionService {
         }
 
         return results;
+    }
+
+    private List<SubmissionJob.TestResult> executeHarnessBatch(String code, Integer languageId,
+                                                               List<SubmissionJob.TestCase> publicTestCases,
+                                                               List<SubmissionJob.TestCase> hiddenTestCases) {
+        List<SubmissionJob.TestCase> all = new ArrayList<>();
+        if (publicTestCases != null) all.addAll(publicTestCases);
+        if (hiddenTestCases != null) all.addAll(hiddenTestCases);
+        String wrapped = harnessService.wrap(languageId, code);
+        String stdin = harnessService.buildInput(all);
+        Map<String, Object> response = executeProvider(wrapped, languageId, stdin, all.size());
+        return harnessService.mapResults(response, all);
     }
 
     /**
@@ -150,56 +171,8 @@ public class Judge0ExecutionService {
         result.setExpectedOutput(testCase.getExpectedOutput());
 
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("language_id", languageId);
-            payload.put("source_code", code);
-            
-            // Add time and memory limits
-            payload.put("cpu_time_limit", limitsConfig.getMaxExecutionTimeSeconds());
-            payload.put("memory_limit", limitsConfig.getMaxMemoryKb() * 1024); // Convert KB to bytes
-            
-            if (testCase.getInput() != null && !testCase.getInput().trim().isEmpty()) {
-                payload.put("stdin", testCase.getInput());
-            }
-            payload.put("memory_limit", validationService.getMaxMemoryKb());
-
-            String body = objectMapper.writeValueAsString(payload);
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(judge0Url))
-                    .timeout(Duration.ofSeconds(40))
-                    .header("Content-Type", "application/json")
-                    // .header("X-RapidAPI-Key", judge0ApiKey)
-                    // .header("X-RapidAPI-Host", JUDGE0_HOST)
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            int maxRetries = 7;
-            int attempt = 0;
-            HttpResponse<String> response;
-            while (true) {
-                response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-                int status = response.statusCode();
-                if (status == 429 || status == 503) operationalMetrics.judge0RateLimit(status);
-                if (status != 429 && status != 503) {
-                    break;
-                }
-                attempt++;
-                if (attempt > maxRetries) {
-                    break;
-                }
-                long waitMs = 1000L * attempt;
-                String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
-                if (retryAfter != null) {
-                    try {
-                        waitMs = Math.max(waitMs, Long.parseLong(retryAfter) * 1000L);
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                Thread.sleep(waitMs);
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> responseMap = objectMapper.readValue(response.body(), Map.class);
+            Map<String, Object> responseMap = executeProvider(code, languageId,
+                testCase.getInput(), 1);
 
             // Extract execution details
             Long runtime = null;
@@ -317,6 +290,78 @@ public class Judge0ExecutionService {
         return result;
     }
 
+    Map<String, Object> executeProvider(String code, Integer languageId, String stdin, int testcaseCount) {
+        try {
+            Map<String, Object> payload = buildPayload(code, languageId, stdin, testcaseCount, limitsConfig,
+                providerProperties);
+            String body = objectMapper.writeValueAsString(payload);
+            HttpRequest.Builder request = HttpRequest.newBuilder()
+                .uri(URI.create(providerUrl()))
+                .timeout(Duration.ofSeconds(Math.max(1, providerProperties.getTimeoutSeconds())))
+                .header("Content-Type", "application/json");
+            if (providerProperties.getAuthenticationMode() == Judge0ProviderProperties.AuthenticationMode.RAPID_API) {
+                if (providerProperties.getApiKey() != null && !providerProperties.getApiKey().isBlank()) {
+                    request.header("X-RapidAPI-Key", providerProperties.getApiKey());
+                }
+                if (providerProperties.getHostHeader() != null && !providerProperties.getHostHeader().isBlank()) {
+                    request.header("X-RapidAPI-Host", providerProperties.getHostHeader());
+                }
+            }
+            HttpResponse<String> response;
+            int attempt = 0;
+            while (true) {
+                response = httpClient.send(request.POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+                int status = response.statusCode();
+                if (status == 429 || status == 503) operationalMetrics.judge0RateLimit(status);
+                if (!isTransient(status) || attempt++ >= 5) break;
+                long delay = Math.min(8000L, 250L * (1L << Math.min(5, attempt)))
+                    + java.util.concurrent.ThreadLocalRandom.current().nextLong(100L, 400L);
+                Thread.sleep(delay);
+            }
+            if (response.statusCode() == 401 || response.statusCode() == 403) {
+                return Map.of("status", Map.of("id", 13, "description", "Judge0 authentication failed"));
+            }
+            @SuppressWarnings("unchecked") Map<String, Object> parsed = objectMapper.readValue(response.body(), Map.class);
+            if (response.statusCode() >= 400) {
+                return Map.of("status", Map.of("id", 13,
+                    "description", "Judge0 rejected the execution request: "
+                        + String.valueOf(parsed.getOrDefault("error", parsed.getOrDefault("message", "HTTP " + response.statusCode())))));
+            }
+            return parsed;
+        } catch (Exception e) {
+            return Map.of("status", Map.of("id", 13, "description", "Judge0 provider error: " + e.getMessage()));
+        }
+    }
+
+    private boolean isTransient(int status) {
+        return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+    }
+
+    private String providerUrl() {
+        String base = providerProperties.getBaseUrl();
+        if (base == null || base.isBlank()) throw new IllegalStateException("Judge0 provider baseUrl is missing");
+        String url = base.replaceAll("([?&]wait=)[^&]*", "$1" + providerProperties.isWait());
+        if (!url.contains("base64_encoded=")) url += (url.contains("?") ? "&" : "?") + "base64_encoded=false";
+        if (!url.contains("wait=")) url += (url.contains("?") ? "&" : "?") + "wait=" + providerProperties.isWait();
+        return url;
+    }
+
+    static Map<String, Object> buildPayload(String code, Integer languageId, String stdin, int testcaseCount,
+                                            SubmissionLimitsConfig limits, Judge0ProviderProperties provider) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("language_id", languageId);
+        payload.put("source_code", code);
+        payload.put("cpu_time_limit", Math.min(60, Math.max(1, limits.getMaxExecutionTimeSeconds() * Math.max(1, testcaseCount))));
+        payload.put("compile_time_limit", Math.min(120, Math.max(1, provider.getCompileTimeLimitSeconds())));
+        if (!"KB".equalsIgnoreCase(provider.getMemoryLimitUnit())) {
+            throw new IllegalArgumentException("judge0.provider.memory-limit-unit must be KB");
+        }
+        payload.put("memory_limit", provider.getMemoryLimitKb());
+        if (stdin != null && !stdin.isBlank()) payload.put("stdin", stdin);
+        return payload;
+    }
+
     static boolean outputsMatch(String actualOutput, String expectedOutput, boolean hasOutput) {
         String expected = expectedOutput == null ? "" : expectedOutput.trim();
         if (!hasOutput && (expected.isEmpty() || "N/A".equalsIgnoreCase(expected))) {
@@ -337,6 +382,7 @@ public class Judge0ExecutionService {
             if (id != null) {
                 switch (id) {
                     case 6: return "Compilation Error";
+                    case 14: return "Compilation Time Limit Exceeded";
                     case 7:
                     case 8:
                     case 9:

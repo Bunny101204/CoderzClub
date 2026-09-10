@@ -2,6 +2,8 @@ package com.coderzclub.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.coderzclub.config.Judge0ProviderProperties;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,20 +19,14 @@ import java.util.Map;
 @RequestMapping("/api/judge0")
 public class Judge0Controller {
 
-    // private static final String JUDGE0_URL = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true";
-    // private static final String JUDGE0_HOST = "judge0-ce.p.rapidapi.com";
-
-     @Value("${judge0.api.url}")
-    private String judge0Url;
+    @Autowired
+    private Judge0ProviderProperties providerProperties;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
             .build();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    // @Value("${judge0.api.key}")
-    // private String judge0ApiKey;
 
     @PostMapping("/execute")
     public ResponseEntity<?> execute(@RequestBody Judge0ExecutionRequest request) {
@@ -54,29 +50,34 @@ public class Judge0Controller {
             }
 
             String body = objectMapper.writeValueAsString(payload);
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(judge0Url))
-                    .timeout(Duration.ofSeconds(40))
-                    .header("Content-Type", "application/json")
-                    // .header("X-RapidAPI-Key", judge0ApiKey)
-                    // .header("X-RapidAPI-Host", JUDGE0_HOST)
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(providerUrl()))
+                    .timeout(Duration.ofSeconds(Math.max(1, providerProperties.getTimeoutSeconds())))
+                    .header("Content-Type", "application/json");
+            if (providerProperties.getAuthenticationMode() == Judge0ProviderProperties.AuthenticationMode.RAPID_API) {
+                if (providerProperties.getApiKey() != null && !providerProperties.getApiKey().isBlank()) {
+                    requestBuilder.header("X-RapidAPI-Key", providerProperties.getApiKey());
+                }
+                if (providerProperties.getHostHeader() != null && !providerProperties.getHostHeader().isBlank()) {
+                    requestBuilder.header("X-RapidAPI-Host", providerProperties.getHostHeader());
+                }
+            }
 
-            int maxRetries = 7;
             int attempt = 0;
             HttpResponse<String> response;
             while (true) {
-                response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+                response = httpClient.send(requestBuilder.POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.ofString());
                 int status = response.statusCode();
                 if (!isTransientStatus(status)) {
                     break;
                 }
                 attempt++;
-                if (attempt > maxRetries) {
+                if (attempt > 5) {
                     break;
                 }
-                long waitMs = 1000L * attempt;
+                long waitMs = Math.min(8000L, 250L * (1L << Math.min(5, attempt)))
+                    + java.util.concurrent.ThreadLocalRandom.current().nextLong(100L, 400L);
                 String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
                 if (retryAfter != null) {
                     try {
@@ -117,6 +118,15 @@ public class Judge0Controller {
 
     private boolean isTransientStatus(int status) {
         return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+    }
+
+    private String providerUrl() {
+        String base = providerProperties.getBaseUrl();
+        if (base == null || base.isBlank()) throw new IllegalStateException("Judge0 provider baseUrl is missing");
+        String url = base.replaceAll("([?&]wait=)[^&]*", "$1" + providerProperties.isWait());
+        if (!url.contains("base64_encoded=")) url += (url.contains("?") ? "&" : "?") + "base64_encoded=false";
+        if (!url.contains("wait=")) url += (url.contains("?") ? "&" : "?") + "wait=" + providerProperties.isWait();
+        return url;
     }
 
     public static class Judge0ExecutionRequest {

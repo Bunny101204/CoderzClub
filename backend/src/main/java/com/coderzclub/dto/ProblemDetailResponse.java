@@ -38,7 +38,7 @@ public class ProblemDetailResponse {
         this.premium = problem.isPremium();
         this.points = problem.getPoints();
         this.estimatedTime = problem.getEstimatedTime();
-        this.executionMode = problem.getExecutionMode();
+        this.executionMode = problem.getExecutionMode() == null ? null : problem.getExecutionMode().name();
         this.inputFormat = problem.getInputFormat();
         this.outputFormat = problem.getOutputFormat();
         this.constraints = problem.getConstraints();

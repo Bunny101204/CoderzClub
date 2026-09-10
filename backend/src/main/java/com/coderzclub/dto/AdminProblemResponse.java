@@ -32,7 +32,7 @@ public class AdminProblemResponse {
         this.premium = problem.isPremium();
         this.points = problem.getPoints();
         this.estimatedTime = problem.getEstimatedTime();
-        this.executionMode = problem.getExecutionMode();
+        this.executionMode = problem.getExecutionMode() == null ? null : problem.getExecutionMode().name();
         this.publicTestCases = sanitize(problem.getPublicTestCases());
         this.hiddenTestCases = sanitize(problem.getHiddenTestCases());
     }

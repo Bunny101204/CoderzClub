@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -182,7 +183,8 @@ public class SubmissionJobController {
                 request.getLanguageId(),
 
                 problem.getTestcaseVersion(),
-                totalTests
+                totalTests,
+                problem.getExecutionMode()
 
                 //publicTests,
                 //hiddenTests
@@ -279,17 +281,18 @@ public class SubmissionJobController {
     }
 
     @GetMapping(value = "/{jobId}/events", produces = "text/event-stream")
-    public ResponseEntity<?> streamJobEvents(@PathVariable String jobId,
-                                             @RequestParam String ticket,
-                                             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
+    public ResponseEntity<SseEmitter> streamJobEvents(@PathVariable String jobId,
+                                                      @RequestParam String ticket,
+                                                      @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         Optional<SubmissionJob> jobOpt = jobService.getJob(jobId);
         if (jobOpt.isEmpty()) return ResponseEntity.notFound().build();
         if (sseTicketService.consume(ticket, jobId).isEmpty()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Invalid or expired SSE ticket"));
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         SseEmitter emitter = eventService.register(jobId);
-        return ResponseEntity.ok().header("Cache-Control", "no-cache, no-transform")
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM)
+            .header("Cache-Control", "no-cache, no-transform")
             .header("X-Accel-Buffering", "no")
             .header("Connection", "keep-alive").body(emitter);
     }

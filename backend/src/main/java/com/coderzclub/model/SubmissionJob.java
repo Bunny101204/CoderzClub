@@ -21,6 +21,7 @@ public class SubmissionJob {
     private String problemId;
 
     private String testcaseVersion;
+    private ExecutionMode executionMode = ExecutionMode.STANDARD_PER_CASE;
 
     private String code;
     private String language;
@@ -142,6 +143,8 @@ public class SubmissionJob {
 
     public String getTestcaseVersion() { return testcaseVersion; }
     public void setTestcaseVersion(String testcaseVersion) { this.testcaseVersion = testcaseVersion; }
+    public ExecutionMode getExecutionMode() { return executionMode; }
+    public void setExecutionMode(ExecutionMode executionMode) { this.executionMode = executionMode; }
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
