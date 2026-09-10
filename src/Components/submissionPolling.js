@@ -23,8 +23,8 @@ export function getJobStatusMessage(job) {
     case "QUEUED":
       return "Submission queued";
     case "RUNNING": {
-      const completed = job.progress?.completed;
-      const total = job.progress?.total;
+      const completed = job.progress?.completed ?? job.completedTests;
+      const total = job.progress?.total ?? job.totalTests;
       return Number.isFinite(completed) && Number.isFinite(total) && total > 0
         ? `Running ${completed}/${total} testcases`
         : "Running tests...";

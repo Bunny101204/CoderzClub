@@ -56,17 +56,6 @@ public class JwtFilter extends OncePerRequestFilter {
             }
         }
 
-        // Native EventSource cannot set Authorization headers; accept a token only on the SSE endpoint.
-        if (jwt == null && requestURI.matches("/api/submission-jobs/[^/]+/events")) {
-            jwt = request.getParameter("access_token");
-            if (jwt != null && !jwt.isBlank()) {
-                try {
-                    username = jwtUtil.extractUsername(jwt);
-                } catch (Exception ignored) {
-                }
-            }
-        }
-
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             logger.debug("JWT Filter: Processing request for username: {}", username);
             UserDetails userDetails = userService.loadUserByUsername(username);

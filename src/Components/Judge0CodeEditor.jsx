@@ -397,7 +397,7 @@ const Judge0CodeEditor = ({
       } catch (error) {
         lastErr = error;
         const status = error?.response?.status;
-        if (status === 429 || status === 503) {
+        if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
           const backoffMs = Math.min(10000, 800 * Math.pow(2, attempt));
           await sleep(backoffMs);
           attempt++;
@@ -725,7 +725,7 @@ const Judge0CodeEditor = ({
       activeJobIdRef.current = jobId;
       console.log("Received submission job ID:", jobId, "response:", jobResponse.data);
 
-      subscribeToJobEvents(jobId);
+      await subscribeToJobEvents(jobId);
 
     } catch (error) {
       console.error("Submission failed:", error);
@@ -743,11 +743,25 @@ const Judge0CodeEditor = ({
     pollJobStatus(jobId, pollingControllerRef.current.signal);
   };
 
-  const subscribeToJobEvents = (jobId) => {
-    const token = auth.getToken();
-    const query = token ? `?access_token=${encodeURIComponent(token)}` : "";
-    const source = new EventSource(`/api/submission-jobs/${jobId}/events${query}`);
+  const subscribeToJobEvents = async (jobId) => {
+    let ticket;
+    try {
+      const ticketResponse = await axios.post(`/api/submission-jobs/${jobId}/events/ticket`, {}, auth.getAuthConfig());
+      ticket = ticketResponse.data.ticket;
+    } catch (error) {
+      console.warn("Unable to create SSE ticket; switching to polling", error);
+      startPollingFallback(jobId);
+      return;
+    }
+
+    if (activeJobIdRef.current !== jobId) return;
+    const source = new EventSource(`/api/submission-jobs/${jobId}/events?ticket=${encodeURIComponent(ticket)}`);
     let fallbackStarted = false;
+    const fallbackTimer = setTimeout(() => {
+      if (activeJobIdRef.current !== jobId || fallbackStarted) return;
+      fallbackStarted = true;
+      startPollingFallback(jobId);
+    }, 5000);
     eventSourceRef.current = source;
 
     const handleEvent = (message) => {
@@ -758,6 +772,7 @@ const Judge0CodeEditor = ({
         if (statusMessage) setOutput(statusMessage);
         if (isTerminalJobState(event.status)) {
           source.close();
+          clearTimeout(fallbackTimer);
           eventSourceRef.current = null;
           // The event is progress-only; retrieve the authoritative sanitized final snapshot.
           if (!fallbackStarted) {
@@ -769,6 +784,7 @@ const Judge0CodeEditor = ({
         console.warn("Invalid submission event; switching to polling", error);
         if (!fallbackStarted) {
           fallbackStarted = true;
+          clearTimeout(fallbackTimer);
           startPollingFallback(jobId);
         }
       }
@@ -779,6 +795,7 @@ const Judge0CodeEditor = ({
     source.onerror = () => {
       if (activeJobIdRef.current !== jobId || fallbackStarted) return;
       fallbackStarted = true;
+      clearTimeout(fallbackTimer);
       startPollingFallback(jobId);
     };
   };

@@ -19,6 +19,8 @@ import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionValidationService;
 import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.SubmissionQueueAdmissionService;
+import com.coderzclub.service.SubmissionJobAccessService;
+import com.coderzclub.service.SubmissionJobSseTicketService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +69,12 @@ public class SubmissionJobController {
 
     @Autowired
     private SubmissionQueueAdmissionService queueAdmissionService;
+
+    @Autowired
+    private SubmissionJobAccessService jobAccessService;
+
+    @Autowired
+    private SubmissionJobSseTicketService sseTicketService;
 
 
     /**
@@ -271,37 +279,35 @@ public class SubmissionJobController {
     }
 
     @GetMapping(value = "/{jobId}/events", produces = "text/event-stream")
-    public ResponseEntity<SseEmitter> streamJobEvents(@PathVariable String jobId, Authentication authentication) {
+    public ResponseEntity<?> streamJobEvents(@PathVariable String jobId,
+                                             @RequestParam String ticket,
+                                             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         Optional<SubmissionJob> jobOpt = jobService.getJob(jobId);
         if (jobOpt.isEmpty()) return ResponseEntity.notFound().build();
-        SubmissionJob job = jobOpt.get();
-        if (!canViewJob(authentication, job)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        if (sseTicketService.consume(ticket, jobId).isEmpty()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Invalid or expired SSE ticket"));
+        }
 
         SseEmitter emitter = eventService.register(jobId);
-        try {
-            eventService.sendInitial(emitter, job);
-            if (job.getStatus() == SubmissionJob.JobStatus.COMPLETED
-                || job.getStatus() == SubmissionJob.JobStatus.FAILED
-                || job.getStatus() == SubmissionJob.JobStatus.TIMEOUT
-                || job.getStatus() == SubmissionJob.JobStatus.CANCELLED) {
-                emitter.complete();
-            }
-        } catch (Exception ex) {
-            emitter.completeWithError(ex);
-        }
-        return ResponseEntity.ok().header("Cache-Control", "no-cache")
+        return ResponseEntity.ok().header("Cache-Control", "no-cache, no-transform")
+            .header("X-Accel-Buffering", "no")
             .header("Connection", "keep-alive").body(emitter);
     }
 
     private boolean canViewJob(Authentication authentication, SubmissionJob job) {
-        if (authentication == null || !authentication.isAuthenticated()) return false;
-        boolean admin = authentication.getAuthorities().stream()
-            .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN")
-                || authority.getAuthority().equals("ADMIN"));
-        if (admin) return true;
-        return userRepository.findByUsername(authentication.getName())
-            .map(user -> user.getId().equals(job.getUserId()))
-            .orElse(false);
+        return jobAccessService.canView(authentication, job);
+    }
+
+    @PostMapping("/{jobId}/events/ticket")
+    public ResponseEntity<?> createSseTicket(@PathVariable String jobId, Authentication authentication) {
+        Optional<SubmissionJob> jobOpt = jobService.getJob(jobId);
+        if (jobOpt.isEmpty()) return ResponseEntity.notFound().build();
+        if (!canViewJob(authentication, jobOpt.get())) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+
+        Optional<User> user = userRepository.findByUsername(authentication.getName());
+        if (user.isEmpty()) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        SubmissionJobSseTicketService.Ticket ticket = sseTicketService.create(jobId, user.get().getId());
+        return ResponseEntity.ok(Map.of("ticket", ticket.value(), "expiresInSeconds", ticket.expiresInSeconds()));
     }
 
     /**

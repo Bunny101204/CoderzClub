@@ -53,6 +53,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.PUT, "/api/problems/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/problems/**").hasRole("ADMIN")
                 .requestMatchers("/api/judge0/**").hasAnyRole("USER", "ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/submission-jobs/*/events/ticket").hasAnyRole("USER", "ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/submission-jobs/*/events").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .requestMatchers("/actuator/prometheus").hasRole("ADMIN")
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering

@@ -135,7 +135,7 @@ public class SubmissionJobEventService implements MessageListener {
     }
 
     private void send(SseEmitter emitter, SubmissionJobEvent event) throws IOException {
-        emitter.send(SseEmitter.event().name("submission-job").data(event));
+        emitter.send(SseEmitter.event().id(event.getEventId()).name("submission-job").data(event));
     }
 
     private void remove(String jobId, SseEmitter emitter) {

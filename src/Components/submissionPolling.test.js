@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getPollDelay,
+  getJobStatusMessage,
   isTerminalJobState,
   isHiddenResult,
   normalizeJobResult,
@@ -23,6 +24,14 @@ test("terminal state detection includes every backend terminal state", () => {
   }
   assert.equal(isTerminalJobState("RUNNING"), false);
   assert.equal(isTerminalJobState("RETRYING"), false);
+});
+
+test("progress messages accept SSE event fields and status response fields", () => {
+  assert.equal(getJobStatusMessage({
+    status: "RUNNING",
+    completedTests: 2,
+    totalTests: 5,
+  }), "Running 2/5 testcases");
 });
 
 test("hidden results remain opaque and never receive expected or actual output", () => {

@@ -23,6 +23,8 @@ class SubmissionJobEventServiceTest {
         assertFalse(json.contains("secret"));
         assertEquals("job-1", event.getJobId());
         assertEquals("ACCEPTED", event.getResult());
+        assertNotNull(event.getEventId());
+        assertNotNull(event.getTimestamp());
     }
 
     @Test
@@ -38,5 +40,8 @@ class SubmissionJobEventServiceTest {
         assertNull(event.getResult());
         assertNull(event.getRuntime());
         assertNull(event.getMemory());
+        assertEquals(0, event.getCompletedTests());
+        assertEquals(0, event.getTotalTests());
+        assertEquals(0, event.getAttemptCount());
     }
 }

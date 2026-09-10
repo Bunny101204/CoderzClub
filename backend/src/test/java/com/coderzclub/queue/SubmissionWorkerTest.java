@@ -36,7 +36,7 @@ class SubmissionWorkerTest {
         when(leaseService.isOwned("job-1", "stale-worker")).thenReturn(false);
 
         assertThrows(RuntimeException.class, () -> worker.saveResults(
-            "job-1", "stale-worker", 2, List.of(testResult), 1));
+            "job-1", "stale-worker", 2, List.of(testResult), 1, 1));
 
         verify(resultRepository, never()).save(any());
         verify(leaseService).isOwned(eq("job-1"), eq("stale-worker"));

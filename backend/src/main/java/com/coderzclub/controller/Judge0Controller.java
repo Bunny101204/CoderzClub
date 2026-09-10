@@ -69,7 +69,7 @@ public class Judge0Controller {
             while (true) {
                 response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
                 int status = response.statusCode();
-                if (status != 429 && status != 503) {
+                if (!isTransientStatus(status)) {
                     break;
                 }
                 attempt++;
@@ -89,10 +89,23 @@ public class Judge0Controller {
 
             int statusCode = response.statusCode();
             String responseBody = response.body();
-            Map<String, Object> responseMap = objectMapper.readValue(responseBody, Map.class);
+            Map<String, Object> responseMap;
+            try {
+                responseMap = objectMapper.readValue(responseBody, Map.class);
+            } catch (Exception invalidJson) {
+                responseMap = Map.of("error", responseBody == null || responseBody.isBlank()
+                    ? "Judge0 returned an empty response"
+                    : responseBody.substring(0, Math.min(500, responseBody.length())));
+            }
             if (statusCode == 429) {
                 return ResponseEntity.status(429).body(Map.of(
                     "error", "Judge0 rate limit exceeded. Please wait a few seconds and try again.",
+                    "details", responseMap
+                ));
+            }
+            if (statusCode >= 500) {
+                return ResponseEntity.status(503).body(Map.of(
+                    "error", "Judge0 is temporarily unavailable. Please try again in a few seconds.",
                     "details", responseMap
                 ));
             }
@@ -100,6 +113,10 @@ public class Judge0Controller {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Judge0 execution failed", "details", e.getMessage()));
         }
+    }
+
+    private boolean isTransientStatus(int status) {
+        return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
     }
 
     public static class Judge0ExecutionRequest {

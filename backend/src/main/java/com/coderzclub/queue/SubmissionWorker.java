@@ -154,7 +154,7 @@ public class SubmissionWorker {
                 logger.warn("Lease ownership lost before saving results for job {}; ignoring stale result", jobId);
                 return SubmissionQueueConsumer.MessageDisposition.ACK;
             }
-            saveResults(job.getId(), workerId, job.getAttemptCount(), results, publicTests.size());
+            saveResults(job.getId(), workerId, job.getAttemptCount(), results, publicTests.size(), job.getTotalTests());
 
             String finalResult = analyzeResults(results);
             Long maxRuntime = results.stream()
@@ -243,7 +243,7 @@ public class SubmissionWorker {
     }
 
     void saveResults(String jobId, String workerId, Integer attemptCount,
-                     List<SubmissionJob.TestResult> results, int publicCount) {
+                     List<SubmissionJob.TestResult> results, int publicCount, int totalTests) {
         for (int index = 0; index < results.size(); index++) {
             if (!leaseService.isOwned(jobId, workerId)) {
                 throw new LeaseLostException();
@@ -267,7 +267,21 @@ public class SubmissionWorker {
                 result.setActualOutput(source.getActualOutput());
             }
             resultRepository.save(result);
+            if (!leaseService.updateProgressIfOwned(jobId, workerId, index + 1)) {
+                throw new LeaseLostException();
+            }
+            eventService.publish(progressSnapshot(jobId, attemptCount, index + 1, totalTests));
         }
+    }
+
+    private SubmissionJob progressSnapshot(String jobId, Integer attemptCount, int completed, int totalTests) {
+        SubmissionJob snapshot = new SubmissionJob();
+        snapshot.setId(jobId);
+        snapshot.setStatus(SubmissionJob.JobStatus.RUNNING);
+        snapshot.setAttemptCount(attemptCount);
+        snapshot.setCompletedTests(completed);
+        snapshot.setTotalTests(totalTests);
+        return snapshot;
     }
 
     private static class LeaseLostException extends RuntimeException {

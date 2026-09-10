@@ -76,6 +76,12 @@ public class SubmissionJobLeaseService {
         return renewed;
     }
 
+    public boolean updateProgressIfOwned(String jobId, String workerId, int completedTests) {
+        Query query = ownedRunningJob(jobId, workerId);
+        Update update = new Update().set("completedTests", completedTests);
+        return mongoTemplate.updateFirst(query, update, SubmissionJob.class).getModifiedCount() == 1;
+    }
+
     public boolean completeIfOwned(String jobId, String workerId, SubmissionJob completionPayload) {
         Query query = ownedRunningJob(jobId, workerId);
         Update update = new Update()
