@@ -1,0 +1,72 @@
+groups:
+  - name: coderzclub-queue
+    rules:
+      - alert: SubmissionQueueDepthHigh
+        expr: submission_queue_depth >= 9000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Submission queue depth is high
+          description: The ready submission queue is above the configured admission threshold.
+      - alert: SubmissionDlqNotEmpty
+        expr: submission_queue_dlq_depth > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: Submission DLQ contains messages
+          description: Inspect and replay only verified, safely retryable jobs.
+      - alert: SubmissionQueueOldestJobTooOld
+        expr: submission_queue_oldest_message_age_seconds > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Oldest queued submission is too old
+          description: Queue latency exceeds five minutes.
+      - alert: SubmissionWorkerLeaseLossHigh
+        expr: increase(submission_worker_lease_loss_total[10m]) > 3
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: Worker lease loss is elevated
+          description: Investigate worker, MongoDB, and network stability before replaying jobs.
+
+  - name: coderzclub-dependencies
+    rules:
+      - alert: RedisUnavailable
+        expr: up{job="redis"} == 0 or increase(dependency_errors_total{dependency="redis"}[5m]) > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: Redis is unavailable
+          description: Rate limiting and cache operations may be degraded.
+      - alert: RabbitMQUnavailable
+        expr: up{job="rabbitmq"} == 0 or increase(dependency_errors_total{dependency="broker"}[5m]) > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: RabbitMQ is unavailable
+          description: Submission admission and worker delivery are degraded.
+      - alert: Judge0RateLimitedOrFailing
+        expr: increase(judge0_http_error_total{status=~"429|5.."}[5m]) > 10
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Judge0 is rate-limiting or failing requests
+          description: Check provider capacity, credentials, and retry pressure.
+
+  - name: coderzclub-api
+    rules:
+      - alert: ApiP95LatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{uri!~"/actuator/.*"}[5m]))) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: API p95 latency is high
+          description: API request p95 exceeds one second.
+      - alert: ApiP99LatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{uri!~"/actuator/.*"}[5m]))) > 2
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: API p99 latency is high
+          description: API request p99 exceeds two seconds.

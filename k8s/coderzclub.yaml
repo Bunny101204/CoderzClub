@@ -11,6 +11,7 @@ stringData:
   JWT_SECRET: replace-me
   RABBITMQ_USERNAME: replace-me
   RABBITMQ_PASSWORD: replace-me
+  RABBITMQ_CONNECTION_STRING: amqp://replace-me:replace-me@coderzclub-rabbitmq:5672/
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -39,14 +40,15 @@ spec:
             - { configMapRef: { name: coderzclub-submission-limits } }
           env:
             - { name: SPRING_PROFILES_ACTIVE, value: api }
+            - { name: MANAGEMENT_SERVER_PORT, value: "8081" }
             - { name: SPRING_REDIS_HOST, value: coderzclub-redis }
             - { name: RABBITMQ_HOST, value: coderzclub-rabbitmq }
             - { name: APP_BACKEND_URL, value: https://coderzclub.example.com }
             - { name: APP_FRONTEND_URL, value: https://coderzclub.example.com }
             - { name: APP_CORS_ALLOWED_ORIGINS, value: https://coderzclub.example.com }
-          ports: [{ name: http, containerPort: 8080 }]
-          readinessProbe: { httpGet: { path: /actuator/health/readiness, port: http }, initialDelaySeconds: 15 }
-          livenessProbe: { httpGet: { path: /actuator/health/liveness, port: http }, initialDelaySeconds: 30 }
+          ports: [{ name: http, containerPort: 8080 }, { name: management, containerPort: 8081 }]
+          readinessProbe: { httpGet: { path: /actuator/health/readiness, port: management }, initialDelaySeconds: 15 }
+          livenessProbe: { httpGet: { path: /actuator/health/liveness, port: management }, initialDelaySeconds: 30 }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "1", memory: 1Gi } }
 ---
 apiVersion: v1
@@ -55,6 +57,13 @@ metadata: { name: coderzclub-api, namespace: coderzclub }
 spec:
   selector: { app: coderzclub-api }
   ports: [{ port: 80, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: coderzclub-api-metrics, namespace: coderzclub }
+spec:
+  selector: { app: coderzclub-api }
+  ports: [{ name: management, port: 8081, targetPort: management }]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,6 +83,7 @@ spec:
           env:
             - { name: SPRING_PROFILES_ACTIVE, value: worker }
             - { name: WORKER_ENABLED, value: "true" }
+            - { name: KEDA_RABBITMQ_HOST, valueFrom: { secretKeyRef: { name: coderzclub-secrets, key: RABBITMQ_CONNECTION_STRING } } }
             - { name: SPRING_REDIS_HOST, value: coderzclub-redis }
             - { name: RABBITMQ_HOST, value: coderzclub-rabbitmq }
           resources: { requests: { cpu: 500m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
@@ -87,15 +97,30 @@ spec:
   maxReplicas: 20
   metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } } }]
 ---
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata: { name: coderzclub-worker-rabbitmq, namespace: coderzclub }
+spec:
+  secretTargetRef:
+    - { parameter: host, name: coderzclub-secrets, key: RABBITMQ_CONNECTION_STRING }
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
 metadata: { name: coderzclub-worker, namespace: coderzclub }
 spec:
-  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: coderzclub-worker }
-  minReplicas: 2
-  maxReplicas: 30
-  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }]
-  behavior: { scaleUp: { stabilizationWindowSeconds: 30 }, scaleDown: { stabilizationWindowSeconds: 300 } }
+  scaleTargetRef: { name: coderzclub-worker }
+  minReplicaCount: 2
+  maxReplicaCount: 30
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: rabbitmq
+      metadata:
+        queueName: coderzclub.submissions
+        mode: QueueLength
+        value: "20"
+        activationValue: "5"
+      authenticationRef: { name: coderzclub-worker-rabbitmq }
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -56,7 +56,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/submission-jobs/*/events/ticket").hasAnyRole("USER", "ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/submission-jobs/*/events").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                .requestMatchers("/actuator/prometheus").hasRole("ADMIN")
+                // The management port is internal-only; application/admin APIs remain authenticated.
+                .requestMatchers("/actuator/prometheus").permitAll()
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/category/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/{id}").permitAll() // GET requests for individual bundles

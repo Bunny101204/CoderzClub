@@ -10,7 +10,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -18,19 +22,27 @@ import java.util.stream.Collectors;
 @Service
 public class LeaderboardService {
     private static final String ZSET = "coderzclub:leaderboard";
+    private static final String VERSION = "coderzclub:leaderboard:version";
     private static final String CACHE = "coderzclub:leaderboard:top:";
 
     @Autowired private StringRedisTemplate redis;
     @Autowired private UserRepository userRepository;
     @Autowired private ObjectMapper objectMapper;
     @Value("${leaderboard.cache-ttl-seconds:15}") private long cacheTtlSeconds;
+    @Value("${leaderboard.rebuild-on-startup:false}") private boolean rebuildOnStartup;
+
+    @PostConstruct
+    public void rebuildOnStartupIfEnabled() {
+        if (rebuildOnStartup) rebuild();
+    }
 
     public List<LeaderboardEntry> top(int requested) {
         int limit = Math.max(1, Math.min(100, requested));
-        String key = CACHE + limit;
         try {
             long participantCount = userRepository.count();
             int expectedEntries = (int) Math.min(limit, participantCount);
+            String version = currentVersion();
+            String key = CACHE + version + ":" + limit;
             String cached = redis.opsForValue().get(key);
             if (cached != null) {
                 List<LeaderboardEntry> cachedEntries = objectMapper.readValue(
@@ -56,22 +68,60 @@ public class LeaderboardService {
 
     public void update(User user) {
         try {
-            redis.opsForZSet().add(ZSET, user.getId(), user.getTotalPoints());
-            invalidate();
+            redis.execute(new SessionCallback<List<Object>>() {
+                @Override
+                public List<Object> execute(RedisOperations operations) {
+                    operations.multi();
+                    operations.opsForZSet().add(ZSET, user.getId(), user.getTotalPoints());
+                    operations.opsForValue().increment(VERSION);
+                    return operations.exec();
+                }
+            });
         } catch (Exception ignored) { }
     }
 
     public void invalidate() {
         try {
-            Set<String> keys = redis.keys(CACHE + "*");
-            if (keys != null && !keys.isEmpty()) redis.delete(keys);
+            redis.opsForValue().increment(VERSION);
         } catch (Exception ignored) { }
     }
 
+    @Scheduled(fixedDelayString = "${leaderboard.rebuild-fixed-delay-ms:300000}")
+    public void scheduledRebuild() {
+        rebuild();
+    }
+
+    public void rebuild() {
+        try {
+            List<User> users = userRepository.findAll();
+            redis.execute(new SessionCallback<List<Object>>() {
+                @Override
+                public List<Object> execute(RedisOperations operations) {
+                    operations.multi();
+                    operations.delete(ZSET);
+                    for (User user : users) {
+                        operations.opsForZSet().add(ZSET, user.getId(), user.getTotalPoints());
+                    }
+                    operations.opsForValue().increment(VERSION);
+                    return operations.exec();
+                }
+            });
+        } catch (Exception ignored) { }
+    }
+
+    private String currentVersion() {
+        String version = redis.opsForValue().get(VERSION);
+        if (version != null) return version;
+        redis.opsForValue().setIfAbsent(VERSION, "0");
+        return "0";
+    }
+
     private List<LeaderboardEntry> mongoTop(int limit) {
-        return userRepository.findAllByOrderByTotalPointsDesc(PageRequest.of(0, limit,
+        List<LeaderboardEntry> entries = userRepository.findAllByOrderByTotalPointsDesc(PageRequest.of(0, limit,
             Sort.by(Sort.Direction.DESC, "totalPoints"))).getContent().stream()
             .map(this::entry).collect(Collectors.toList());
+        for (int index = 0; index < entries.size(); index++) entries.get(index).setRank(index + 1L);
+        return entries;
     }
 
     private List<LeaderboardEntry> hydrate(Set<String> ids) {

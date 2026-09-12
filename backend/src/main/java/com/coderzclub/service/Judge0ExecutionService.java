@@ -314,6 +314,7 @@ public class Judge0ExecutionService {
                     HttpResponse.BodyHandlers.ofString());
                 int status = response.statusCode();
                 if (status == 429 || status == 503) operationalMetrics.judge0RateLimit(status);
+                if (status == 429 || status >= 500) operationalMetrics.judge0HttpError(status);
                 if (!isTransient(status) || attempt++ >= 5) break;
                 long delay = Math.min(8000L, 250L * (1L << Math.min(5, attempt)))
                     + java.util.concurrent.ThreadLocalRandom.current().nextLong(100L, 400L);
