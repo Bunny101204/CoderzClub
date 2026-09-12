@@ -151,6 +151,30 @@ public class ProblemController {
         }
     }
 
+    @GetMapping("/by-ids")
+    public ResponseEntity<List<ProblemListResponse>> getProblemsByIds(
+            @RequestParam List<String> ids) {
+        try {
+            List<Problem> problems = new ArrayList<>();
+            for (String rawId : ids) {
+                if (rawId == null || rawId.isBlank()) continue;
+                Problem problem = problemRepository.findById(rawId).orElse(null);
+                if (problem == null) {
+                    try {
+                        problem = problemRepository.findByNumericId(Integer.valueOf(rawId)).orElse(null);
+                    } catch (NumberFormatException ignored) { }
+                }
+                if (problem != null) {
+                    problem.setHiddenTestCases(null);
+                    problems.add(problem);
+                }
+            }
+            return ResponseEntity.ok(problems.stream().map(ProblemListResponse::new).toList());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<?> getProblemById(@PathVariable String id) {
         Optional<Problem> problem = problemRepository.findById(id);

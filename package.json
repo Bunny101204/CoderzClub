@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:polling": "node --test src/Components/submissionPolling.test.js",
+    "test:bundle-progress": "node --test src/Components/bundleProgress.test.js",
     "preview": "vite preview",
     "render:uml": "node scripts/render-uml.cjs"
   },

@@ -59,21 +59,20 @@ const BundleProblems = () => {
         return;
       }
       
-      const response = await fetch("/api/problems?page=0&size=1000");
+      const params = new URLSearchParams();
+      idsArray.forEach(problemId => params.append("ids", problemId));
+      let response = await fetch(`/api/problems/by-ids?${params.toString()}`);
+      if (response.status === 404) {
+        // Support an already-running backend that predates the exact-ID endpoint.
+        response = await fetch("/api/problems?page=0&size=1000");
+      }
       if (response.ok) {
         const data = await response.json();
         console.log("[BundleProblems] Fetched problems data:", data);
         
         // Handle both paginated and non-paginated responses
         let allProblems = [];
-        if (Array.isArray(data)) {
-          allProblems = data;
-        } else if (data.problems && Array.isArray(data.problems)) {
-          allProblems = data.problems;
-        } else {
-          console.warn("[BundleProblems] Unexpected API response format:", data);
-          allProblems = [];
-        }
+        allProblems = Array.isArray(data) ? data : (Array.isArray(data.problems) ? data.problems : []);
         
         console.log("[BundleProblems] All problems count:", allProblems.length);
         

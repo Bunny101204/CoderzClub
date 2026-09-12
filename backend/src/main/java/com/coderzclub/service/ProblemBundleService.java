@@ -1,6 +1,8 @@
 package com.coderzclub.service;
 
 import com.coderzclub.model.ProblemBundle;
+import com.coderzclub.model.Problem;
+import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.ProblemBundleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -15,13 +17,20 @@ public class ProblemBundleService {
     @Autowired
     private ProblemBundleRepository problemBundleRepository;
 
+    @Autowired
+    private ProblemRepository problemRepository;
+
     public List<ProblemBundle> getAllActiveBundles() {
-        return problemBundleRepository.findByIsActiveTrue();
+        return problemBundleRepository.findByIsActiveTrue().stream().map(this::normalize).toList();
+    }
+
+    public List<ProblemBundle> getAllBundles() {
+        return problemBundleRepository.findAllByOrderByCreatedAtDesc().stream().map(this::normalize).toList();
     }
 
     public ProblemBundle getBundleById(String id) {
         Optional<ProblemBundle> bundle = problemBundleRepository.findById(id);
-        return bundle.orElse(null);
+        return bundle.map(this::normalize).orElse(null);
     }
 
     public List<ProblemBundle> getBundlesByDifficulty(String difficulty) {
@@ -38,9 +47,7 @@ public class ProblemBundleService {
         bundle.setActive(true);
         
         // Calculate totals if not provided
-        if (bundle.getTotalProblems() == 0 && bundle.getProblemIds() != null) {
-            bundle.setTotalProblems(bundle.getProblemIds().size());
-        }
+        normalize(bundle);
         
         // Set createdBy to current user (you might want to get this from SecurityContext)
         // For now, we'll set it to a default admin user
@@ -61,9 +68,7 @@ public class ProblemBundleService {
             bundle.setUpdatedAt(new Date());
             
             // Calculate totals if not provided
-            if (bundle.getTotalProblems() == 0 && bundle.getProblemIds() != null) {
-                bundle.setTotalProblems(bundle.getProblemIds().size());
-            }
+            normalize(bundle);
             
             return problemBundleRepository.save(bundle);
         }
@@ -89,6 +94,25 @@ public class ProblemBundleService {
         } else {
             return problemBundleRepository.findByIsPremiumFalseAndIsActiveTrue();
         }
+    }
+
+    private ProblemBundle normalize(ProblemBundle bundle) {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        if (bundle.getProblemIds() != null) {
+            for (String rawId : bundle.getProblemIds()) {
+                if (rawId == null || rawId.isBlank()) continue;
+                Problem problem = problemRepository.findById(rawId).orElse(null);
+                if (problem == null) {
+                    try {
+                        problem = problemRepository.findByNumericId(Integer.valueOf(rawId)).orElse(null);
+                    } catch (NumberFormatException ignored) { }
+                }
+                if (problem != null && !ids.contains(problem.getId())) ids.add(problem.getId());
+            }
+        }
+        bundle.setProblemIds(ids);
+        bundle.setTotalProblems(ids.size());
+        return bundle;
     }
 }
 

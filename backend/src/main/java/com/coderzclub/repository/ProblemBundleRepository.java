@@ -8,6 +8,8 @@ import java.util.List;
 
 @Repository
 public interface ProblemBundleRepository extends MongoRepository<ProblemBundle, String> {
+
+    List<ProblemBundle> findAllByOrderByCreatedAtDesc();
     
     List<ProblemBundle> findByIsActiveTrue();
     

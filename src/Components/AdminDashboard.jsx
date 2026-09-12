@@ -98,7 +98,10 @@ const AdminDashboard = () => {
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("/api/bundles");
+      const token = localStorage.getItem("jwtToken");
+      const response = await fetch("/api/bundles/admin/all", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (response.ok) {
         const data = await response.json();
         // Ensure data is an array

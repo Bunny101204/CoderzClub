@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { buildProblemIdAliases, buildProblemStatus, getBundleProgress } from "./bundleProgress";
 
 const BundleDashboard = () => {
   const { user } = useAuth();
@@ -11,13 +12,21 @@ const BundleDashboard = () => {
   const [showAdminControls, setShowAdminControls] = useState(false);
   const [bundlePage, setBundlePage] = useState(1);
   const [bundleItemsPerPage, setBundleItemsPerPage] = useState(10);
+  const [problemStatus, setProblemStatus] = useState({});
+  const [problemIdAliases, setProblemIdAliases] = useState({});
+  const [progressFilters, setProgressFilters] = useState({
+    completed: false,
+    incomplete: false,
+    unattempted: false
+  });
 
   const difficulties = ["ALL", "BASIC", "INTERMEDIATE", "ADVANCED", "SDE", "EXPERT"];
   const categories = ["ALL", "ALGORITHMS", "DATA_STRUCTURES", "SYSTEM_DESIGN", "DATABASE", "WEB_DEVELOPMENT"];
 
   useEffect(() => {
     fetchBundles();
-  }, []);
+    fetchProblemStatus();
+  }, [user]);
 
   useEffect(() => {
     // Check if user is admin
@@ -26,7 +35,15 @@ const BundleDashboard = () => {
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("/api/bundles");
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      let response = await fetch(user?.role === "ADMIN" ? "/api/bundles/admin/all" : "/api/bundles", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (user?.role === "ADMIN" && response.status === 404) {
+        response = await fetch("/api/bundles?includeInactive=true", {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+      }
       if (response.ok) {
         const data = await response.json();
         // Ensure data is an array
@@ -44,6 +61,35 @@ const BundleDashboard = () => {
     }
   };
 
+  const fetchProblemStatus = async () => {
+    if (!user) {
+      setProblemStatus({});
+      return;
+    }
+    try {
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      const [submissionResponse, problemResponse] = await Promise.all([
+        fetch("/api/submissions/my-submissions?size=1000", {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        }),
+        fetch("/api/problems?page=0&size=1000")
+      ]);
+      if (!submissionResponse.ok) return;
+      const problemData = await problemResponse.json();
+      const problems = Array.isArray(problemData)
+        ? problemData
+        : (problemData.problems || []);
+      const idAliases = buildProblemIdAliases(problems);
+      setProblemIdAliases(idAliases);
+      const response = submissionResponse;
+      const data = await response.json();
+      const submissions = Array.isArray(data) ? data : (data.submissions || []);
+      setProblemStatus(buildProblemStatus(submissions, idAliases));
+    } catch (error) {
+      console.error("Error fetching bundle progress:", error);
+    }
+  };
+
   // Ensure bundles is always an array
   const safeBundles = Array.isArray(bundles) ? bundles : [];
   const filteredBundles = safeBundles.filter(bundle => {
@@ -51,11 +97,21 @@ const BundleDashboard = () => {
     const categoryMatch = selectedCategory === "ALL" || bundle.category === selectedCategory;
     // For non-admin users, only show active bundles
     const activeMatch = showAdminControls ? true : (bundle.isActive !== false);
-    return difficultyMatch && categoryMatch && activeMatch;
+    const selectedProgressStates = Object.entries(progressFilters)
+      .filter(([, selected]) => selected)
+      .map(([state]) => state);
+    const progressMatch = selectedProgressStates.length === 0
+      || selectedProgressStates.includes(getBundleProgress(bundle, problemStatus, problemIdAliases).state);
+    return difficultyMatch && categoryMatch && activeMatch && progressMatch;
   });
 
   const totalBundlePages = Math.ceil(filteredBundles.length / bundleItemsPerPage);
   const paginatedBundles = filteredBundles.slice((bundlePage - 1) * bundleItemsPerPage, bundlePage * bundleItemsPerPage);
+
+  const toggleProgressFilter = (filter) => {
+    setProgressFilters(current => ({ ...current, [filter]: !current[filter] }));
+    setBundlePage(1);
+  };
 
   const getDifficultyColor = (difficulty) => {
     const colors = {
@@ -250,6 +306,26 @@ const BundleDashboard = () => {
               ))}
             </select>
           </div>
+
+          <div className="flex flex-col gap-2 justify-end">
+            <span className="text-sm text-gray-400">Progress</span>
+            {[
+              ["completed", "Completed"],
+              ["incomplete", "Opened / incomplete"],
+              ["unattempted", "Unattempted"]
+            ].map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={progressFilters[value]}
+                  onChange={() => toggleProgressFilter(value)}
+                  disabled={!user}
+                  className="h-4 w-4 accent-blue-500"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
         </div>
 
         {/* Bundles Grid */}
@@ -267,6 +343,10 @@ const BundleDashboard = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {paginatedBundles.map((bundle) => (
+            (() => {
+              const progress = getBundleProgress(bundle, problemStatus, problemIdAliases);
+              const problemCount = progress.total;
+              return (
             <div
               key={bundle.id}
               className="bg-gray-800 rounded-xl p-6 hover:bg-gray-700 transition-all duration-300 border border-gray-700 hover:border-blue-500 cursor-pointer"
@@ -287,6 +367,11 @@ const BundleDashboard = () => {
                     PREMIUM
                   </span>
                 )}
+                {showAdminControls && bundle.isActive === false && (
+                  <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-600 text-gray-200">
+                    INACTIVE
+                  </span>
+                )}
               </div>
 
               {/* Bundle Info */}
@@ -296,7 +381,7 @@ const BundleDashboard = () => {
               {/* Bundle Stats */}
               <div className="grid grid-cols-3 gap-4 mb-6">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-400">{bundle.totalProblems}</div>
+                  <div className="text-2xl font-bold text-blue-400">{problemCount}</div>
                   <div className="text-xs text-gray-400">Problems</div>
                 </div>
                 <div className="text-center">
@@ -389,6 +474,8 @@ const BundleDashboard = () => {
                 </div>
               )}
             </div>
+              );
+            })()
           ))}
         </div>
 

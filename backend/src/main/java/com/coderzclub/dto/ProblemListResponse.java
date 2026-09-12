@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 public class ProblemListResponse {
     private String id;
+    private Integer numericId;
     private String title;
     private String statement;
     private List<String> tags;
@@ -23,6 +24,7 @@ public class ProblemListResponse {
 
     public ProblemListResponse(Problem problem) {
         this.id = problem.getId();
+        this.numericId = problem.getNumericId();
         this.title = problem.getTitle();
         this.statement = problem.getStatement();
         this.tags = problem.getTags();
@@ -45,6 +47,8 @@ public class ProblemListResponse {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+    public Integer getNumericId() { return numericId; }
+    public void setNumericId(Integer numericId) { this.numericId = numericId; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getStatement() { return statement; }

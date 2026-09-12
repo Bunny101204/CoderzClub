@@ -48,7 +48,10 @@ const ManageBundleProblems = () => {
       // Ensure we have the full list of problems (fetchAllProblems supports batch fetch)
       const all = await fetchAllProblems();
       const problemsArray = Array.isArray(all) ? all : [];
-      const filtered = problemsArray.filter(p => problemIds.includes(p.id));
+      const filtered = problemIds
+        .map(problemId => problemsArray.find(problem => String(problem.id) === String(problemId)
+          || String(problem.numericId) === String(problemId)))
+        .filter(Boolean);
       setBundleProblems(filtered);
     } catch (error) {
       console.error("Error fetching bundle problems:", error);

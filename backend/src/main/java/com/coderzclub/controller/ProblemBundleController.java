@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.coderzclub.model.ProblemBundle;
@@ -27,15 +28,22 @@ public class ProblemBundleController {
     @GetMapping
     public ResponseEntity<List<ProblemBundle>> getAllBundles() {
         try {
-            List<ProblemBundle> bundles = problemBundleService.getAllActiveBundles();
-            return ResponseEntity.ok(bundles);
+            return ResponseEntity.ok(problemBundleService.getAllActiveBundles());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/admin/all")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<ProblemBundle>> getAllBundlesForAdmin() {
+        try {
+            return ResponseEntity.ok(problemBundleService.getAllBundles());
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
 
 
-
-        
     }
 
     @GetMapping("/{id}")
