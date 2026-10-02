@@ -14,7 +14,7 @@ public class SubmissionQueueProperties {
     private String dlqName = "coderzclub.submissions.dlq";
     private String retryName = "coderzclub.submissions.retry";
     private boolean durable = true;
-    private int prefetch = 10;
+    private int prefetch = 1;
     private int concurrency = 2;
     private int maxLength = 10000;
     private long retryDelayMs = 5000L;

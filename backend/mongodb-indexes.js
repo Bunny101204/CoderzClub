@@ -102,6 +102,13 @@ ensureIndex(db.submissions, { "userId": 1 }, { name: "userId_idx" });
 ensureIndex(db.submissions, { "problemId": 1 }, { name: "problemId_idx" });
 ensureIndex(db.submissions, { "result": 1 }, { name: "result_idx" });
 ensureIndex(db.submissions, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
+// Unique job-backed submissions. Legacy documents omit submissionJobId and are excluded
+// by the partial filter (safer than a naive unique index, and safer than sparse+null).
+ensureIndex(db.submissions, { "submissionJobId": 1 }, {
+  unique: true,
+  name: "submissionJobId_unique_sparse_idx",
+  partialFilterExpression: { submissionJobId: { $type: "string" } }
+});
 
 // ===== SUBMISSION_JOBS COLLECTION INDEXES =====
 // Queue scanning and recovery for pending/locked jobs.
@@ -148,6 +155,9 @@ assertIndex(db.problems, "numericId_unique_sparse_idx", function(idx) {
   return idx.unique === true && idx.sparse === true;
 });
 assertIndex(db.submissions, "userId_createdAt_desc_idx");
+assertIndex(db.submissions, "submissionJobId_unique_sparse_idx", function(idx) {
+  return idx.unique === true && idx.partialFilterExpression != null;
+});
 assertIndex(db.submission_jobs, "status_lockedUntil_idx");
 assertIndexKeys(db.user_solved_problems, { "userId": 1, "problemId": 1 }, function(idx) {
   return idx.unique === true;

@@ -56,6 +56,7 @@ public class SubmissionJob {
     // Progress tracking
     private Integer completedTests = 0;
     private Integer totalTests = 0;
+    private String submissionId;
 
     // For observability
     private Map<String, Object> metadata;
@@ -193,6 +194,9 @@ public class SubmissionJob {
 
     public Integer getTotalTests() { return totalTests; }
     public void setTotalTests(Integer totalTests) { this.totalTests = totalTests; }
+
+    public String getSubmissionId() { return submissionId; }
+    public void setSubmissionId(String submissionId) { this.submissionId = submissionId; }
 
     public String getLockedBy() { return lockedBy; }
     public void setLockedBy(String lockedBy) { this.lockedBy = lockedBy; }

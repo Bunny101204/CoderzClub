@@ -99,6 +99,22 @@ class SubmissionJobLeaseServiceTest {
     }
 
     @Test
+    void persistJudgementDoesNotCompleteJob() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(SubmissionJob.class)))
+            .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        SubmissionJob judgement = new SubmissionJob();
+        judgement.setFinalResult("ACCEPTED");
+
+        assertTrue(leaseService.persistJudgementIfOwned("job-1", "worker-1", judgement));
+
+        ArgumentCaptor<Update> updateCaptor = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).updateFirst(any(), updateCaptor.capture(), eq(SubmissionJob.class));
+        String update = updateCaptor.getValue().getUpdateObject().toJson();
+        org.junit.jupiter.api.Assertions.assertFalse(update.contains("COMPLETED"));
+        org.junit.jupiter.api.Assertions.assertTrue(update.contains("ACCEPTED"));
+    }
+
+    @Test
     void retryDelayGrowsExponentiallyAndStaysBounded() {
         WorkerProperties properties = new WorkerProperties();
         properties.setRetryDelaySeconds(10);

@@ -46,6 +46,16 @@ class Judge0ExecutionServiceTest {
     }
 
     @Test
+    void harnessPathKeepsSixtySecondCpuCap() {
+        SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
+        limits.setMaxExecutionTimeSeconds(15);
+        Judge0ProviderProperties provider = new Judge0ProviderProperties();
+        Map<String, Object> payload = Judge0ExecutionService.buildPayload(
+            "code", 62, "input", 10, limits, provider);
+        assertEquals(60, payload.get("cpu_time_limit"));
+    }
+
+    @Test
     void status13IsInternalErrorAndIsNotComparedAsWrongAnswer() {
         Map<String, Object> response = Map.of(
             "status", Map.of("id", 13, "description", "Internal Error"),

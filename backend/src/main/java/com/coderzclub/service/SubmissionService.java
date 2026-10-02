@@ -56,19 +56,33 @@ public class SubmissionService {
     private UserService userService;
 
     @Autowired(required = false)
+    private OperationalMetrics operationalMetrics;
+
+    @Autowired(required = false)
     private MongoTransactionManager mongoTransactionManager;
 
     /**
-     * Create a submission record from a completed job
+     * Create a submission record from a judged job. Idempotent on {@code job.id}:
+     * at most one Submission is persisted per SubmissionJob.
      */
-    public void createSubmissionFromJob(SubmissionJob job) {
+    public Submission createSubmissionFromJob(SubmissionJob job) {
+        if (job == null || job.getId() == null) {
+            return null;
+        }
         try {
+            Optional<Submission> existing = submissionRepository.findBySubmissionJobId(job.getId());
+            if (existing.isPresent()) {
+                recordDuplicateMaterialization();
+                logger.info("Reusing submission {} for job {}", existing.get().getId(), job.getId());
+                return existing.get();
+            }
+
             Optional<User> userOpt = userRepository.findById(job.getUserId());
             Optional<Problem> problemOpt = problemRepository.findById(job.getProblemId());
 
             if (!userOpt.isPresent() || !problemOpt.isPresent()) {
                 logger.error("User or problem not found for job {}", job.getId());
-                return;
+                return null;
             }
 
             User user = userOpt.get();
@@ -78,15 +92,14 @@ public class SubmissionService {
             long passedCount = storedResults.isEmpty() && job.getTestResults() != null
                 ? job.getTestResults().stream().filter(SubmissionJob.TestResult::isPassed).count()
                 : storedResults.stream().filter(SubmissionTestResult::isPassed).count();
-            // Count passed test cases
             if (storedResults.isEmpty() && job.getTestResults() == null) {
                 passedCount = 0;
             }
 
-            // Create submission
             Submission submission = Submission.builder()
                 .userId(user.getId())
                 .problemId(job.getProblemId())
+                .submissionJobId(job.getId())
                 .code(job.getCode())
                 .language(job.getLanguage())
                 .result(job.getFinalResult())
@@ -99,23 +112,34 @@ public class SubmissionService {
                 .executionDetails(buildExecutionDetails(job, storedResults))
                 .build();
 
-            submission = submissionRepository.save(submission);
+            try {
+                submission = submissionRepository.save(submission);
+            } catch (DuplicateKeyException duplicate) {
+                recordDuplicateMaterialization();
+                return submissionRepository.findBySubmissionJobId(job.getId()).orElseThrow(() -> duplicate);
+            }
 
-            // Update user stats if solution is correct
             if ("ACCEPTED".equals(submission.getResult())) {
                 applyAcceptedSubmission(user, problem, submission);
                 userRepository.findById(user.getId()).ifPresent(leaderboardService::update);
             }
 
-            // Update streak
             userService.updateUserStreak(user.getId());
             userService.recordFinalSubmission(submission);
 
             logger.info("Created submission {} from job {} with result {}",
                 submission.getId(), job.getId(), job.getFinalResult());
-
+            return submission;
         } catch (Exception e) {
             logger.error("Failed to create submission from job {}", job.getId(), e);
+            Optional<Submission> raced = submissionRepository.findBySubmissionJobId(job.getId());
+            return raced.orElse(null);
+        }
+    }
+
+    private void recordDuplicateMaterialization() {
+        if (operationalMetrics != null) {
+            operationalMetrics.duplicateSubmissionPrevented();
         }
     }
 

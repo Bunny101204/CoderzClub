@@ -12,16 +12,21 @@ import java.util.concurrent.ThreadLocalRandom;
 @ConfigurationProperties(prefix = "worker")
 public class WorkerProperties {
     private boolean enabled = true;
+    /**
+     * Unused by the Rabbit listener. Canonical concurrency is {@code submission.queue.concurrency}.
+     * Kept so existing {@code WORKER_CONCURRENCY} env files do not fail binding.
+     */
     private int concurrency = 2;
     private int maxAttempts = 3;
-    private long leaseDurationSeconds = 60;
+    private long leaseDurationSeconds = ExecutionTimeoutPolicy.DEFAULT_LEASE_DURATION_SECONDS;
+    private long heartbeatIntervalSeconds = ExecutionTimeoutPolicy.DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
     private long retryDelaySeconds = 30;
     private long retryMaxDelaySeconds = 900;
     private long retryJitterSeconds = 5;
     private long recoveryIntervalSeconds = 30;
     private long pollTimeoutSeconds = 5;
     private int maxTestcaseConcurrency = 2;
-    private int maxGlobalJudge0Concurrency = 8;
+    private int maxGlobalJudge0Concurrency = 2;
     private int maxPerLanguageJudge0Concurrency = 2;
     private boolean stopHiddenOnFailure = true;
 
@@ -55,6 +60,14 @@ public class WorkerProperties {
 
     public void setLeaseDurationSeconds(long leaseDurationSeconds) {
         this.leaseDurationSeconds = leaseDurationSeconds;
+    }
+
+    public long getHeartbeatIntervalSeconds() {
+        return heartbeatIntervalSeconds;
+    }
+
+    public void setHeartbeatIntervalSeconds(long heartbeatIntervalSeconds) {
+        this.heartbeatIntervalSeconds = heartbeatIntervalSeconds;
     }
 
     public long getRetryDelaySeconds() {

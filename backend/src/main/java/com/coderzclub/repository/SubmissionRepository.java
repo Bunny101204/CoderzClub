@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface SubmissionRepository extends MongoRepository<Submission, String> {
@@ -24,4 +25,5 @@ public interface SubmissionRepository extends MongoRepository<Submission, String
     Page<Submission> findByUserIdAndResult(String userId, String result, Pageable pageable);
     Page<Submission> findByUserIdAndProblemIdAndResult(String userId, String problemId, String result, Pageable pageable);
     Page<Submission> findByUserIdAndProblemIdIn(String userId, java.util.Collection<String> problemIds, Pageable pageable);
+    Optional<Submission> findBySubmissionJobId(String submissionJobId);
 }

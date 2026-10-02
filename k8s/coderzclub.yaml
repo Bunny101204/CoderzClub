@@ -46,6 +46,10 @@ spec:
             - { name: APP_BACKEND_URL, value: https://coderzclub.example.com }
             - { name: APP_FRONTEND_URL, value: https://coderzclub.example.com }
             - { name: APP_CORS_ALLOWED_ORIGINS, value: https://coderzclub.example.com }
+            - { name: JUDGE0_WAIT, value: "true" }
+            - { name: JUDGE0_TIMEOUT_SECONDS, value: "120" }
+            - { name: JUDGE0_CONNECT_TIMEOUT_SECONDS, value: "20" }
+            - { name: JUDGE0_API_MAX_CONCURRENCY, value: "2" }
           ports: [{ name: http, containerPort: 8080 }, { name: management, containerPort: 8081 }]
           readinessProbe: { httpGet: { path: /actuator/health/readiness, port: management }, initialDelaySeconds: 15 }
           livenessProbe: { httpGet: { path: /actuator/health/liveness, port: management }, initialDelaySeconds: 30 }
@@ -86,15 +90,24 @@ spec:
             - { name: KEDA_RABBITMQ_HOST, valueFrom: { secretKeyRef: { name: coderzclub-secrets, key: RABBITMQ_CONNECTION_STRING } } }
             - { name: SPRING_REDIS_HOST, value: coderzclub-redis }
             - { name: RABBITMQ_HOST, value: coderzclub-rabbitmq }
+            - { name: JUDGE0_WAIT, value: "true" }
+            - { name: JUDGE0_TIMEOUT_SECONDS, value: "120" }
+            - { name: WORKER_LEASE_DURATION_SECONDS, value: "180" }
+            - { name: WORKER_HEARTBEAT_INTERVAL_SECONDS, value: "45" }
+            - { name: WORKER_MAX_GLOBAL_JUDGE0_CONCURRENCY, value: "2" }
+            - { name: SUBMISSION_QUEUE_PREFETCH, value: "1" }
+            - { name: SUBMISSION_QUEUE_CONCURRENCY, value: "2" }
           resources: { requests: { cpu: 500m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata: { name: coderzclub-api, namespace: coderzclub }
+# Temporary headroom until Judge0 capacity is measured. Application-side ceiling:
+# maxReplicas × JUDGE0_API_MAX_CONCURRENCY. Not a Judge0 capacity claim.
 spec:
   scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: coderzclub-api }
   minReplicas: 3
-  maxReplicas: 20
+  maxReplicas: 6
   metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } } }]
 ---
 apiVersion: keda.sh/v1alpha1
@@ -107,10 +120,12 @@ spec:
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata: { name: coderzclub-worker, namespace: coderzclub }
+# Temporary headroom until Judge0 capacity is measured. Application-side ceiling:
+# maxReplicaCount × WORKER_MAX_GLOBAL_JUDGE0_CONCURRENCY. Not a Judge0 capacity claim.
 spec:
   scaleTargetRef: { name: coderzclub-worker }
   minReplicaCount: 2
-  maxReplicaCount: 30
+  maxReplicaCount: 4
   pollingInterval: 15
   cooldownPeriod: 300
   triggers:

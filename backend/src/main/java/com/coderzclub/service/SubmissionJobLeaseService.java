@@ -93,6 +93,7 @@ public class SubmissionJobLeaseService {
             .set("completedTests", completionPayload.getCompletedTests())
             .set("completedAt", completionPayload.getCompletedAt())
             .set("metadata", completionPayload.getMetadata())
+            .set("submissionId", completionPayload.getSubmissionId())
             .set("lockedBy", null)
             .set("lockedUntil", null)
             .set("heartbeatAt", null)
@@ -123,6 +124,48 @@ public class SubmissionJobLeaseService {
             .set("lockedUntil", null)
             .set("heartbeatAt", null)
             .set("nextRetryAt", null);
+        return mongoTemplate.updateFirst(query, update, SubmissionJob.class).getModifiedCount() == 1;
+    }
+
+    public boolean persistJudgementIfOwned(String jobId, String workerId, SubmissionJob judgement) {
+        Query query = ownedRunningJob(jobId, workerId);
+        Update update = new Update()
+            .set("finalResult", judgement.getFinalResult())
+            .set("totalRuntime", judgement.getTotalRuntime())
+            .set("totalMemory", judgement.getTotalMemory())
+            .set("completedTests", judgement.getCompletedTests())
+            .set("metadata", judgement.getMetadata())
+            .set("errorMessage", judgement.getErrorMessage());
+        return mongoTemplate.updateFirst(query, update, SubmissionJob.class).getModifiedCount() == 1;
+    }
+
+    public boolean completeExpiredRunningWithResult(String jobId, SubmissionJob completionPayload) {
+        Date now = new Date();
+        Query query = Query.query(Criteria.where("_id").is(jobId)
+            .and("status").is(SubmissionJob.JobStatus.RUNNING)
+            .and("lockedUntil").lte(now));
+        Update update = new Update()
+            .set("status", SubmissionJob.JobStatus.COMPLETED)
+            .set("finalResult", completionPayload.getFinalResult())
+            .set("totalRuntime", completionPayload.getTotalRuntime())
+            .set("totalMemory", completionPayload.getTotalMemory())
+            .set("completedTests", completionPayload.getCompletedTests())
+            .set("completedAt", completionPayload.getCompletedAt() == null ? now : completionPayload.getCompletedAt())
+            .set("metadata", completionPayload.getMetadata())
+            .set("submissionId", completionPayload.getSubmissionId())
+            .set("lockedBy", null)
+            .set("lockedUntil", null)
+            .set("heartbeatAt", null)
+            .set("nextRetryAt", null)
+            .set("lastError", null);
+        return mongoTemplate.updateFirst(query, update, SubmissionJob.class).getModifiedCount() == 1;
+    }
+
+    public boolean attachSubmissionIdIfCompleted(String jobId, String submissionId) {
+        Query query = Query.query(Criteria.where("_id").is(jobId)
+            .and("status").is(SubmissionJob.JobStatus.COMPLETED)
+            .and("submissionId").is(null));
+        Update update = new Update().set("submissionId", submissionId);
         return mongoTemplate.updateFirst(query, update, SubmissionJob.class).getModifiedCount() == 1;
     }
 

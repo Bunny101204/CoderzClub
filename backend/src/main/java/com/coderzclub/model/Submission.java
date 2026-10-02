@@ -1,16 +1,27 @@
 package com.coderzclub.model;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
 import java.util.Date;
 import java.util.Map;
 
 @Document(collection = "submissions")
+@CompoundIndex(
+    name = "submissionJobId_unique_sparse_idx",
+    def = "{'submissionJobId': 1}",
+    unique = true,
+    partialFilter = "{ 'submissionJobId': { $type: 'string' } }"
+)
 public class Submission {
     @Id
     private String id;
     private String userId;
     private String problemId;
+    /** Present on job-backed submissions. Absent on legacy rows so the unique index stays sparse/partial. */
+    @Field(write = Field.Write.NON_NULL)
+    private String submissionJobId;
     private String code;
     private String language;
     private String result;  // ACCEPTED, WRONG_ANSWER, TIME_LIMIT_EXCEEDED, RUNTIME_ERROR, COMPILATION_ERROR, MEMORY_LIMIT_EXCEEDED
@@ -52,6 +63,7 @@ public class Submission {
         private String id;
         private String userId;
         private String problemId;
+        private String submissionJobId;
         private String code;
         private String language;
         private String result;
@@ -78,6 +90,11 @@ public class Submission {
 
         public Builder problemId(String problemId) {
             this.problemId = problemId;
+            return this;
+        }
+
+        public Builder submissionJobId(String submissionJobId) {
+            this.submissionJobId = submissionJobId;
             return this;
         }
 
@@ -156,6 +173,7 @@ public class Submission {
             submission.setPassedTestCases(passedTestCases);
             submission.setTotalTestCases(totalTestCases);
             submission.setExecutionDetails(executionDetails);
+            submission.setSubmissionJobId(submissionJobId);
             return submission;
         }
     }
@@ -171,6 +189,9 @@ public class Submission {
 
     public String getProblemId() { return problemId; }
     public void setProblemId(String problemId) { this.problemId = problemId; }
+
+    public String getSubmissionJobId() { return submissionJobId; }
+    public void setSubmissionJobId(String submissionJobId) { this.submissionJobId = submissionJobId; }
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
