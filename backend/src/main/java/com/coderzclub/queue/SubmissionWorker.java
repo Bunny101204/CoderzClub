@@ -14,7 +14,9 @@ import com.coderzclub.service.SubmissionJobLeaseService;
 import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.OperationalMetrics;
+import com.coderzclub.service.ExecutionOutcome;
 import com.coderzclub.service.ExecutionVerdictMapper;
+import com.coderzclub.service.IncompatibleExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -147,9 +149,13 @@ public class SubmissionWorker {
                 .orElseThrow(() -> new IllegalStateException("Problem not found for submission job"));
             List<SubmissionJob.TestCase> publicTests = convert(problem.getPublicTestCases());
             List<SubmissionJob.TestCase> hiddenTests = convert(problem.getHiddenTestCases());
-            List<SubmissionJob.TestResult> results = executionService.executeTestCases(
+            ExecutionOutcome outcome = executionService.executeTestCases(
                 job.getCode(), job.getLanguageId(), publicTests, hiddenTests, job.getExecutionMode(),
                 job.getTestcaseVersion());
+            List<SubmissionJob.TestResult> results = outcome.getResults();
+            logger.info("job_execution_strategy jobId={} configured={} used={} logicalTestcases={} providerExecutions={} fallbackReason={}",
+                jobId, outcome.getConfiguredMode(), outcome.getExecutionModeUsed(),
+                outcome.getLogicalTestcases(), outcome.getProviderExecutions(), outcome.getFallbackReason());
 
             if (leaseLost.get() || !leaseService.isOwned(jobId, workerId)) {
                 operationalMetrics.leaseLoss();
@@ -172,6 +178,15 @@ public class SubmissionWorker {
             completionPayload.setTotalMemory(maxMemory);
             completionPayload.setCompletedTests(results.size());
             completionPayload.setCompletedAt(new Date());
+            java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("configuredExecutionMode", String.valueOf(outcome.getConfiguredMode()));
+            metadata.put("executionModeUsed", String.valueOf(outcome.getExecutionModeUsed()));
+            metadata.put("logicalTestcases", outcome.getLogicalTestcases());
+            metadata.put("providerExecutions", outcome.getProviderExecutions());
+            if (outcome.getFallbackReason() != null) {
+                metadata.put("fallbackReason", outcome.getFallbackReason());
+            }
+            completionPayload.setMetadata(metadata);
 
             if (!leaseService.completeIfOwned(jobId, workerId, completionPayload)) {
                 operationalMetrics.leaseLoss();
@@ -195,6 +210,14 @@ public class SubmissionWorker {
                 maxRuntime, maxMemory, job.getAttemptCount());
 
             return SubmissionQueueConsumer.MessageDisposition.ACK;
+        } catch (IncompatibleExecutionException incompatible) {
+            logger.warn("Job {} incompatible execution configuration: {}", jobId, incompatible.getMessage());
+            if (!leaseService.failIfOwned(jobId, workerId, incompatible.getMessage())) {
+                return SubmissionQueueConsumer.MessageDisposition.ACK;
+            }
+            job.setLastError(incompatible.getMessage());
+            eventService.publish(job, SubmissionJob.JobStatus.FAILED);
+            return SubmissionQueueConsumer.MessageDisposition.DEAD_LETTER;
         } catch (Exception e) {
             logger.error("Job {} failed during execution", jobId, e);
             if (leaseLost.get()) {

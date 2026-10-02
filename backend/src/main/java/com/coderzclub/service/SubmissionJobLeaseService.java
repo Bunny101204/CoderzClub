@@ -92,6 +92,7 @@ public class SubmissionJobLeaseService {
             .set("totalMemory", completionPayload.getTotalMemory())
             .set("completedTests", completionPayload.getCompletedTests())
             .set("completedAt", completionPayload.getCompletedAt())
+            .set("metadata", completionPayload.getMetadata())
             .set("lockedBy", null)
             .set("lockedUntil", null)
             .set("heartbeatAt", null)

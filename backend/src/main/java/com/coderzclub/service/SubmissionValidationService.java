@@ -2,6 +2,7 @@ package com.coderzclub.service;
 
 import com.coderzclub.model.Problem;
 import com.coderzclub.model.TestCase;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +35,9 @@ public class SubmissionValidationService {
 
     @Value("${app.submission.max-memory-kb:512000}")
     private int maxMemoryKb;
+
+    @Autowired(required = false)
+    private LanguageCapabilityCatalog languageCatalog;
 
     public void validateSubmissionRequest(String problemId, String code, Integer languageId) {
         if (problemId == null || problemId.isBlank()) {
@@ -125,7 +129,8 @@ public class SubmissionValidationService {
     }
 
     private boolean isSupportedLanguage(Integer languageId) {
-        return languageId != null && List.of(50, 51, 52, 53, 54, 55, 60, 62, 63, 64, 71, 72, 73, 74, 75, 76, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150).contains(languageId);
+        LanguageCapabilityCatalog catalog = languageCatalog != null ? languageCatalog : new LanguageCapabilityCatalog();
+        return catalog.isEnabled(languageId);
     }
 
     public int getMaxMemoryKb() {

@@ -21,6 +21,8 @@ import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.SubmissionQueueAdmissionService;
 import com.coderzclub.service.SubmissionJobAccessService;
 import com.coderzclub.service.SubmissionJobSseTicketService;
+import com.coderzclub.service.ExecutionCompatibilityService;
+import com.coderzclub.service.IncompatibleExecutionException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,6 +78,9 @@ public class SubmissionJobController {
 
     @Autowired
     private SubmissionJobSseTicketService sseTicketService;
+
+    @Autowired
+    private ExecutionCompatibilityService compatibilityService;
 
 
     /**
@@ -173,6 +178,18 @@ public class SubmissionJobController {
             // Step 6: Create job using server-side testcases
 
             validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), request.getLanguageId());
+
+            List<SubmissionJob.TestCase> publicTests = convertTests(problem.getPublicTestCases());
+            List<SubmissionJob.TestCase> hiddenTests = convertTests(problem.getHiddenTestCases());
+            try {
+                compatibilityService.validate(problem.getExecutionMode(), request.getLanguageId(),
+                    request.getCode(), publicTests, hiddenTests, problem.getTestcaseVersion());
+            } catch (IncompatibleExecutionException incompatible) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", incompatible.getMessage(),
+                    "reason", incompatible.getReason()
+                ));
+            }
 
             // Resolve problem test cases server-side so hidden data never travels in the public submission payload.
             SubmissionJob job = jobService.createJob(
@@ -374,6 +391,12 @@ public class SubmissionJobController {
             logger.error("Failed to get queue stats", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to get queue stats: " + e.getMessage()));
         }
+    }
+
+    private List<SubmissionJob.TestCase> convertTests(List<com.coderzclub.model.TestCase> testCases) {
+        return testCases == null ? List.of() : testCases.stream()
+            .map(test -> new SubmissionJob.TestCase(test.getInput(), test.getOutput(), test.getExplanation()))
+            .toList();
     }
 
     /**

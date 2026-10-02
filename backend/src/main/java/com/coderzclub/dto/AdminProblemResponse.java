@@ -17,6 +17,7 @@ public class AdminProblemResponse {
     private int points;
     private int estimatedTime;
     private String executionMode;
+    private String testcaseVersion;
     private List<TestCase> publicTestCases;
     private List<TestCase> hiddenTestCases;
 
@@ -33,6 +34,7 @@ public class AdminProblemResponse {
         this.points = problem.getPoints();
         this.estimatedTime = problem.getEstimatedTime();
         this.executionMode = problem.getExecutionMode() == null ? null : problem.getExecutionMode().name();
+        this.testcaseVersion = problem.getTestcaseVersion();
         this.publicTestCases = sanitize(problem.getPublicTestCases());
         this.hiddenTestCases = sanitize(problem.getHiddenTestCases());
     }
@@ -70,6 +72,8 @@ public class AdminProblemResponse {
     public void setEstimatedTime(int estimatedTime) { this.estimatedTime = estimatedTime; }
     public String getExecutionMode() { return executionMode; }
     public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
+    public String getTestcaseVersion() { return testcaseVersion; }
+    public void setTestcaseVersion(String testcaseVersion) { this.testcaseVersion = testcaseVersion; }
     public List<TestCase> getPublicTestCases() { return publicTestCases; }
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
     public List<TestCase> getHiddenTestCases() { return hiddenTestCases; }

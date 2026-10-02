@@ -98,7 +98,7 @@ const ProblemPageNew = ({ problems }) => {
     );
   }
 
-  const isStdinMode = problem.executionMode === "STDIN_STDOUT" || problem.publicTestCases;
+  const isStdinMode = problem.executionMode !== "FUNCTION_HARNESS_BATCH";
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">

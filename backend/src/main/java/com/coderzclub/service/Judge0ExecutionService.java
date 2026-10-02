@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -61,6 +60,9 @@ public class Judge0ExecutionService {
     private FunctionHarnessService harnessService;
 
     @Autowired
+    private ExecutionCompatibilityService compatibilityService;
+
+    @Autowired
     public Judge0ExecutionService(Judge0ProviderProperties providerProperties) {
         this.providerProperties = providerProperties;
     }
@@ -77,14 +79,26 @@ public class Judge0ExecutionService {
     /**
      * Execute all test cases for a submission
      */
-    public List<SubmissionJob.TestResult> executeTestCases(String code, Integer languageId,
+    public ExecutionOutcome executeTestCases(String code, Integer languageId,
                                                           List<SubmissionJob.TestCase> publicTestCases,
                                                           List<SubmissionJob.TestCase> hiddenTestCases,
                                                           ExecutionMode executionMode,
                                                           String testcaseVersion) {
-        if (executionMode == ExecutionMode.FUNCTION_HARNESS_BATCH
-            && harnessService.supports(languageId, code, publicTestCases, hiddenTestCases, testcaseVersion)) {
-            return executeHarnessBatch(code, languageId, publicTestCases, hiddenTestCases);
+        ExecutionMode configured = compatibilityService.configuredMode(executionMode);
+        compatibilityService.validate(executionMode, languageId, code, publicTestCases, hiddenTestCases, testcaseVersion);
+        ExecutionOutcome outcome = new ExecutionOutcome();
+        outcome.setConfiguredMode(configured);
+        outcome.setExecutionModeUsed(configured);
+        outcome.setFallbackReason(compatibilityService.fallbackReason(executionMode));
+        int logical = size(publicTestCases) + size(hiddenTestCases);
+        outcome.setLogicalTestcases(logical);
+
+        if (configured == ExecutionMode.FUNCTION_HARNESS_BATCH) {
+            List<SubmissionJob.TestResult> results = executeHarnessBatch(code, languageId, publicTestCases, hiddenTestCases);
+            outcome.setResults(results);
+            outcome.setProviderExecutions(1);
+            logStrategy(outcome);
+            return outcome;
         }
         List<SubmissionJob.TestResult> results = new ArrayList<>();
 
@@ -120,7 +134,14 @@ public class Judge0ExecutionService {
             }
         }
 
-        return results;
+        outcome.setResults(results);
+        outcome.setProviderExecutions(results.size());
+        logStrategy(outcome);
+        return outcome;
+    }
+
+    public Map<String, Object> executeCustomStdin(String code, Integer languageId, String stdin) {
+        return executeProviderGuarded(code, languageId, stdin, 1);
     }
 
     private List<SubmissionJob.TestResult> executeHarnessBatch(String code, Integer languageId,
@@ -131,8 +152,79 @@ public class Judge0ExecutionService {
         if (hiddenTestCases != null) all.addAll(hiddenTestCases);
         String wrapped = harnessService.wrap(languageId, code);
         String stdin = harnessService.buildInput(all);
-        Map<String, Object> response = executeProvider(wrapped, languageId, stdin, all.size());
-        return harnessService.mapResults(response, all);
+        Map<String, Object> response = executeProviderGuarded(wrapped, languageId, stdin, all.size());
+        List<SubmissionJob.TestResult> mapped = harnessService.mapResults(response, all);
+        applySharedResources(mapped, response);
+        return mapped;
+    }
+
+    private void applySharedResources(List<SubmissionJob.TestResult> results, Map<String, Object> response) {
+        Long runtime = null;
+        Long memory = null;
+        if (response.get("time") != null) {
+            try {
+                runtime = Math.round(Double.parseDouble(response.get("time").toString()) * 1000);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (response.get("memory") != null) {
+            try {
+                memory = Long.parseLong(response.get("memory").toString());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        for (SubmissionJob.TestResult result : results) {
+            if (result.getRuntime() == null) result.setRuntime(runtime);
+            if (result.getMemory() == null) result.setMemory(memory);
+        }
+    }
+
+    Map<String, Object> executeProviderGuarded(String code, Integer languageId, String stdin, int testcaseCount) {
+        io.micrometer.core.instrument.Timer.Sample timer = operationalMetrics.judge0Timer();
+        Semaphore global = globalPermits;
+        Semaphore language = languagePermits.computeIfAbsent(languageId == null ? 0 : languageId,
+            ignored -> new Semaphore(Math.max(1, workerProperties.getMaxPerLanguageJudge0Concurrency())));
+        boolean globalAcquired = false;
+        boolean languageAcquired = false;
+        try {
+            global.acquire();
+            globalAcquired = true;
+            language.acquire();
+            languageAcquired = true;
+            return executeProvider(code, languageId, stdin, testcaseCount);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return Map.of("status", Map.of("id", 13, "description", "Execution was cancelled"));
+        } finally {
+            operationalMetrics.stopJudge0Timer(timer);
+            if (languageAcquired) language.release();
+            if (globalAcquired) global.release();
+        }
+    }
+
+    private void logStrategy(ExecutionOutcome outcome) {
+        logger.info("execution_strategy configured={} used={} logicalTestcases={} providerExecutions={} fallbackReason={}",
+            outcome.getConfiguredMode(), outcome.getExecutionModeUsed(), outcome.getLogicalTestcases(),
+            outcome.getProviderExecutions(), outcome.getFallbackReason());
+        operationalMetrics.executionStrategy(
+            String.valueOf(outcome.getConfiguredMode()),
+            String.valueOf(outcome.getExecutionModeUsed()),
+            outcome.getFallbackReason() == null ? "none" : outcome.getFallbackReason());
+    }
+
+    private static int size(List<?> list) {
+        return list == null ? 0 : list.size();
+    }
+
+    void configureForTest(WorkerProperties workers, FunctionHarnessService harness,
+                          ExecutionCompatibilityService compatibility, OperationalMetrics metrics,
+                          SubmissionLimitsConfig limits) {
+        this.workerProperties = workers;
+        this.harnessService = harness;
+        this.compatibilityService = compatibility;
+        this.operationalMetrics = metrics;
+        this.limitsConfig = limits;
+        initializeConcurrency();
     }
 
     /**
@@ -287,7 +379,7 @@ public class Judge0ExecutionService {
         return result;
     }
 
-    Map<String, Object> executeProvider(String code, Integer languageId, String stdin, int testcaseCount) {
+    protected Map<String, Object> executeProvider(String code, Integer languageId, String stdin, int testcaseCount) {
         try {
             Map<String, Object> payload = buildPayload(code, languageId, stdin, testcaseCount, limitsConfig,
                 providerProperties);
@@ -371,7 +463,7 @@ public class Judge0ExecutionService {
     /**
      * Parse error type from Judge0 response
      */
-    static String parseErrorType(Map<String, Object> response) {
+    public static String parseErrorType(Map<String, Object> response) {
         if (response == null || response.isEmpty()) {
             return ExecutionVerdictMapper.INTERNAL_ERROR;
         }

@@ -10,6 +10,7 @@
     "test:polling": "node --test src/Components/submissionPolling.test.js",
     "test:bundle-progress": "node --test src/Components/bundleProgress.test.js",
     "test:editor-drafts": "node --test src/Components/editorLanguageDrafts.test.js",
+    "test:execution-modes": "node --test src/Components/executionModes.test.js",
     "preview": "vite preview",
     "render:uml": "node scripts/render-uml.cjs"
   },

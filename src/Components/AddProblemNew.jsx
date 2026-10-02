@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { selectableExecutionModes, helpForExecutionMode } from "./executionModes";
 
 const AddProblemNew = () => {
   const navigate = useNavigate();
@@ -31,6 +32,8 @@ const AddProblemNew = () => {
   const [isPremium, setIsPremium] = useState(false);
   const [points, setPoints] = useState(10);
   const [estimatedTime, setEstimatedTime] = useState(15);
+  const [executionMode, setExecutionMode] = useState("STANDARD_PER_CASE");
+  const [testcaseVersion, setTestcaseVersion] = useState("v1");
   
   // UI state
   const [error, setError] = useState("");
@@ -141,7 +144,8 @@ const AddProblemNew = () => {
         difficulty,
         category,
         tags: tags.split(",").map(t => t.trim()).filter(Boolean),
-        executionMode: "STDIN_STDOUT",
+        executionMode,
+        testcaseVersion: executionMode === "FUNCTION_HARNESS_BATCH" ? "line-v1" : testcaseVersion,
         
         // Stdin/stdout fields
         publicTestCases: publicTestCases.map(tc => ({
@@ -301,6 +305,40 @@ const AddProblemNew = () => {
                 required
               />
             </div>
+          </div>
+
+          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <h2 className="text-xl font-bold mb-4">Execution configuration</h2>
+            <label className="block text-sm font-semibold mb-2">Execution mode *</label>
+            <select
+              value={executionMode}
+              onChange={(e) => {
+                const next = e.target.value;
+                setExecutionMode(next);
+                if (next === "FUNCTION_HARNESS_BATCH") {
+                  setTestcaseVersion("line-v1");
+                }
+              }}
+              className="w-full p-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+            >
+              {selectableExecutionModes().map((mode) => (
+                <option key={mode.id} value={mode.id}>{mode.label}</option>
+              ))}
+            </select>
+            <p className="mt-3 text-sm text-gray-300">{helpForExecutionMode(executionMode)}</p>
+            <p className="mt-2 text-xs text-gray-500">
+              Batched stdin/stdout programs are not currently supported.
+            </p>
+            <label className="block text-sm font-semibold mt-4 mb-2">Testcase version</label>
+            <input
+              type="text"
+              value={testcaseVersion}
+              onChange={(e) => setTestcaseVersion(e.target.value)}
+              className="w-full p-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+            />
+            <p className="mt-2 text-xs text-gray-400">
+              Use line-v1 only for function-harness problems. Leave v1 for normal stdin/stdout problems.
+            </p>
           </div>
 
           {/* Input/Output Format */}

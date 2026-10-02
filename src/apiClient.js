@@ -187,7 +187,7 @@ export const api = {
     getAll: (params) => apiClient.get('/api/problems', { params }),
     getById: (id) => apiClient.get(`/api/problems/${id}`),
     create: (problem) => apiClient.post('/api/problems', problem),
-    update: (id, problem) => apiClient.put(`/api/problems/${id}`, problem),
+    updateExecution: (id, config) => apiClient.patch(`/api/problems/${id}/execution`, config),
     delete: (id) => apiClient.delete(`/api/problems/${id}`),
   },
 

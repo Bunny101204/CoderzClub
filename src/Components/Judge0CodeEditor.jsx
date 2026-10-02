@@ -354,7 +354,15 @@ const Judge0CodeEditor = ({
     
     const statusId = res.status?.id;
     const statusDescription = res.status?.description;
-    
+
+    if (statusId === 13 || res.errorType === "INTERNAL_ERROR") {
+      return {
+        type: "INTERNAL_ERROR",
+        message: res.message || statusDescription || "Judge0 provider error",
+        details: statusDescription
+      };
+    }
+
     // Compilation error
     if (statusId === 6 || res.compile_output) {
       return {
@@ -452,101 +460,41 @@ const Judge0CodeEditor = ({
     
     try {
       const allResults = [];
-      console.log(`Running ${testCases.length} test cases...`);
-      
-      for (let i = 0; i < testCases.length; i++) {
-        const tc = testCases[i];
-        console.log(`Test case ${i + 1}:`, { input: tc.input, expected: tc.output });
-        
-        // For STDIN_STDOUT mode, use source code directly (no main method required)
-        // Users write complete programs that read from stdin and write to stdout
-        let codeToRun = sourceCode;
-        
-        // Only wrap Java code if we have function-based problem (old mode, not STDIN_STDOUT)
-        if (languageId === 62 && functionName && parameters && parameters.length > 0 && executionMode !== "STDIN_STDOUT") {
-          codeToRun = generateJavaCode(
-            sourceCode,
-            functionName,
-            tc.input,
-            parameters
-          );
-        }
-        
-        const stdinInput = typeof tc.input === 'string' ? tc.input : (buildStdinForParams(tc.input) ?? "");
-        console.log(`Sending to Judge0 - stdin:`, stdinInput.substring(0, 100));
-        
-        const response = await postToJudge0({
+      const response = await axios.post(
+        `/api/problems/${problemId}/run-public`,
+        {
+          source_code: sourceCode,
           language_id: languageId,
-          source_code: codeToRun,
-          stdin: stdinInput + "\n",
-        });
-        
-        const res = response.data;
-        console.log(`Judge0 response ${i + 1}:`, {
-          status: res.status?.id,
-          stdout: res.stdout?.substring(0, 50),
-          stderr: res.stderr?.substring(0, 50),
-          time: res.time,
-          memory: res.memory,
-        });
-        
-        // Extract execution metrics
-        const runtime = res.time ? Math.round(parseFloat(res.time) * 1000) : null;
-        const memory = res.memory ? res.memory * 1024 : null;
-        
-        // Parse errors - check status first
-        const error = parseError(res);
-        
-        // Determine actual output - prioritize stdout, then stderr, then compile_output
-        let actual = "";
-        let hasOutput = false;
-        if (res.stdout && res.stdout.trim()) {
-          actual = res.stdout.trim();
-          hasOutput = true;
-        } else if (res.stderr && res.stderr.trim()) {
-          actual = res.stderr.trim();
-          hasOutput = true;
-        } else if (res.compile_output && res.compile_output.trim()) {
-          actual = res.compile_output.trim();
-          hasOutput = true;
-        } else {
-          actual = "No Output";
-        }
-        
-        const expected = String(tc.output || "").trim();
-        // Only pass if no error AND output matches
-        const noOutputExpected = expected === "" || expected.toUpperCase() === "N/A";
-        const passed = !error && ((noOutputExpected && !hasOutput) || actual === expected);
-        
-        console.log(`Test ${i + 1} result:`, { actual, expected, passed, runtime, memory, error });
-        
-        allResults.push({ 
-          input: tc.input || "", 
-          expected: expected || "", 
-          actual: actual || "No Output", 
-          passed,
-          runtime,
-          memory,
+        },
+        auth.getAuthConfig()
+      );
+      const payload = response.data || {};
+      const remoteResults = payload.results || [];
+      console.log(`Run All used ${payload.executionModeUsed} with ${payload.providerExecutions} provider executions`);
+      for (let i = 0; i < remoteResults.length; i++) {
+        const r = remoteResults[i];
+        const errorType = r.errorType;
+        const error = errorType && errorType !== "WRONG_ANSWER"
+          ? { type: errorType, message: r.errorMessage || errorType }
+          : null;
+        allResults.push({
+          input: r.input || "",
+          expected: r.expectedOutput || "",
+          actual: r.actualOutput || "No Output",
+          passed: !!r.passed,
+          runtime: r.runtime,
+          memory: r.memory,
           error,
-          statusId: res.status?.id,
-          statusDescription: res.status?.description
         });
-        
-        // Update execution metrics (use max values)
-        if (runtime && (!executionTime || runtime > executionTime)) {
-          setExecutionTime(runtime);
+        if (r.runtime && (!executionTime || r.runtime > executionTime)) {
+          setExecutionTime(r.runtime);
         }
-        if (memory && (!executionMemory || memory > executionMemory)) {
-          setExecutionMemory(memory);
+        if (r.memory && (!executionMemory || r.memory > executionMemory)) {
+          setExecutionMemory(r.memory);
         }
-        
-        // Set error details if any
         if (error) {
           setErrorDetails(error);
         }
-        
-        // small delay between calls to reduce 429
-        await sleep(600);
       }
       
       console.log("All results:", allResults);

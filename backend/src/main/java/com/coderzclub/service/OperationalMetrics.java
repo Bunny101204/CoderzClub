@@ -23,6 +23,14 @@ public class OperationalMetrics {
     public void dependencyError(String dependency) { Counter.builder("dependency.errors").tag("dependency", dependency).register(registry).increment(); }
     public Timer.Sample judge0Timer() { return Timer.start(registry); }
     public void stopJudge0Timer(Timer.Sample sample) { sample.stop(Timer.builder("judge0.latency").publishPercentiles(0.5, 0.95, 0.99).register(registry)); }
+    public void executionStrategy(String configured, String used, String fallback) {
+        Counter.builder("execution.strategy")
+            .tag("configured", configured)
+            .tag("used", used)
+            .tag("fallback", fallback)
+            .register(registry)
+            .increment();
+    }
     public void workerStarted() { activeWorkers.incrementAndGet(); }
     public void workerStopped() { activeWorkers.decrementAndGet(); }
 }
