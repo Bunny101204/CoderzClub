@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import {
+  SEARCH_DEBOUNCE_MS,
+  displayProblemId,
+  internalProblemId,
+  editProblemPath,
+  nextPageForFilterChange
+} from "../admin/adminProblems";
 
 const AdminDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -22,12 +29,7 @@ const AdminDashboard = () => {
   const safeProblemList = Array.isArray(problemList) ? problemList : [];
   const safeBundles = Array.isArray(bundles) ? bundles : [];
   
-  const compareById = (a, b) => {
-    const idA = String(a.id || "");
-    const idB = String(b.id || "");
-    return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
-  };
-  const paginatedProblems = [...safeProblemList].sort(compareById);
+  const paginatedProblems = safeProblemList;
   const totalPages = totalProblemPages;
   const filteredBundles = safeBundles.filter((bundle) => {
     if (!bundleSearch || bundleSearch.trim() === "") return true;
@@ -43,16 +45,16 @@ const AdminDashboard = () => {
   );
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedProblemSearch(problemSearch), 400);
+    const timer = setTimeout(() => setDebouncedProblemSearch(problemSearch), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [problemSearch]);
 
   useEffect(() => {
-    fetchProblems();
+    fetchProblems({ silent: false });
     fetchBundles();
     
     const interval = setInterval(() => {
-      fetchProblems();
+      fetchProblems({ silent: true });
       fetchBundles();
     }, 30000);
     
@@ -60,10 +62,12 @@ const AdminDashboard = () => {
   }, [currentPage, problemsPerPage, debouncedProblemSearch, problemTopic]);
   // Note: AdminDashboard fetches paginated problems directly from API; props are not used.
 
-  const fetchProblems = async () => {
+  const fetchProblems = async ({ silent = false } = {}) => {
     const seq = ++problemFetchSeq.current;
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       const respPage = Math.max(0, currentPage - 1);
       const params = new URLSearchParams({ page: respPage.toString(), size: problemsPerPage.toString() });
       if (debouncedProblemSearch && debouncedProblemSearch.trim() !== '') {
@@ -81,7 +85,6 @@ const AdminDashboard = () => {
         if (seq !== problemFetchSeq.current) {
           return;
         }
-        // Handle paginated response
         let problemsArray = [];
         if (data.problems && Array.isArray(data.problems)) {
           problemsArray = data.problems;
@@ -92,20 +95,24 @@ const AdminDashboard = () => {
           if (problemTopic && problemTopic !== '') {
             problemsArray = problemsArray.filter(p => (p.tags || []).map(String).map(t => t.toLowerCase()).includes(problemTopic.toLowerCase()));
           }
-          // no pagination info available
           setTotalProblemPages(Math.ceil(problemsArray.length / problemsPerPage));
           setTotalProblemItems(problemsArray.length);
         }
         setProblemList(problemsArray);
-      } else {
+      } else if (seq === problemFetchSeq.current) {
         console.error("Failed to fetch problems:", response.status);
         setProblemList([]);
       }
     } catch (error) {
+      if (seq !== problemFetchSeq.current) {
+        return;
+      }
       console.error("Error fetching problems:", error);
       setProblemList([]);
     } finally {
-      setLoading(false);
+      if (seq === problemFetchSeq.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -137,7 +144,7 @@ const AdminDashboard = () => {
       const res = await fetch(`/api/problems/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete problem");
       // Refresh the list after deletion
-      fetchProblems();
+      fetchProblems({ silent: true });
     } catch (err) {
       alert("Error deleting problem.");
     }
@@ -209,19 +216,9 @@ const AdminDashboard = () => {
     }
   };
 
-  console.log("[AdminDashboard] Rendering with:", { loading, problemList: safeProblemList.length, bundles: safeBundles.length });
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-xl">Loading admin dashboard...</div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
           <div className="flex gap-4">
@@ -269,51 +266,61 @@ const AdminDashboard = () => {
         </div>
 
         {activeTab === "problems" && (
-          <>
-            <h2 className="text-xl font-semibold mb-4">All Problems</h2>
-        <div className="flex flex-col lg:flex-row items-center justify-between mb-4 gap-4">
-          <div className="text-sm text-gray-300">Showing page {currentPage} of {totalPages}</div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="text-sm text-gray-400">Topic:</label>
-            <select
-              value={problemTopic}
-              onChange={(e) => { setProblemTopic(e.target.value); setCurrentPage(1); }}
-              className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white"
-            >
-              <option value="">All Topics</option>
-              <option value="arrays">Arrays</option>
-              <option value="strings">Strings</option>
-              <option value="dynamic-programming">Dynamic Programming</option>
-              <option value="graphs">Graphs</option>
-              <option value="trees">Trees</option>
-              <option value="greedy">Greedy</option>
-              <option value="math">Math</option>
-              <option value="bit-manipulation">Bit Manipulation</option>
-              <option value="two-pointers">Two Pointers</option>
-              <option value="sliding-window">Sliding Window</option>
-              <option value="backtracking">Backtracking</option>
-              <option value="sorting">Sorting</option>
-            </select>
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-gray-400">Items:</label>
-              <select value={problemsPerPage} onChange={(e) => { setProblemsPerPage(Number(e.target.value)); setCurrentPage(1); }} className="px-3 py-1 bg-gray-800 rounded border border-gray-600">
+          <div className="flex flex-col lg:flex-row gap-6 items-start">
+            <aside className="w-full lg:w-60 shrink-0 bg-gray-800 rounded-lg shadow p-4">
+              <h2 className="text-lg font-semibold mb-4">Filters</h2>
+              <label className="block text-sm text-gray-400 mb-2" htmlFor="admin-problem-topic">Topic</label>
+              <select
+                id="admin-problem-topic"
+                value={problemTopic}
+                onChange={(e) => { setProblemTopic(e.target.value); setCurrentPage(nextPageForFilterChange()); }}
+                className="w-full mb-4 px-3 py-2 bg-gray-900 rounded border border-gray-600 text-white"
+              >
+                <option value="">All Topics</option>
+                <option value="arrays">Arrays</option>
+                <option value="strings">Strings</option>
+                <option value="dynamic-programming">Dynamic Programming</option>
+                <option value="graphs">Graphs</option>
+                <option value="trees">Trees</option>
+                <option value="greedy">Greedy</option>
+                <option value="math">Math</option>
+                <option value="bit-manipulation">Bit Manipulation</option>
+                <option value="two-pointers">Two Pointers</option>
+                <option value="sliding-window">Sliding Window</option>
+                <option value="backtracking">Backtracking</option>
+                <option value="sorting">Sorting</option>
+              </select>
+              <label className="block text-sm text-gray-400 mb-2" htmlFor="admin-problem-items">Items</label>
+              <select
+                id="admin-problem-items"
+                value={problemsPerPage}
+                onChange={(e) => { setProblemsPerPage(Number(e.target.value)); setCurrentPage(nextPageForFilterChange()); }}
+                className="w-full px-3 py-2 bg-gray-900 rounded border border-gray-600 text-white"
+              >
                 <option value={10}>10</option>
                 <option value={20}>20</option>
                 <option value={50}>50</option>
                 <option value={100}>100</option>
               </select>
+            </aside>
+            <div className="min-w-0 flex-1 w-full">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+              <div>
+                <h2 className="text-xl font-semibold">All Problems</h2>
+                <div className="text-sm text-gray-300">Showing page {currentPage} of {totalPages || 1}</div>
+              </div>
+              <input
+                type="search"
+                placeholder="Search problems by ID or title prefix..."
+                value={problemSearch}
+                onChange={(e) => { setProblemSearch(e.target.value); setCurrentPage(nextPageForFilterChange()); }}
+                className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white w-full sm:w-80"
+              />
             </div>
-          </div>
-          <input
-            type="text"
-            placeholder="Search problems by ID or title prefix..."
-            value={problemSearch}
-            onChange={(e) => { setProblemSearch(e.target.value); setCurrentPage(1); }}
-            className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white w-full lg:w-80"
-          />
-        </div>
-        <div className="bg-gray-800 rounded-lg shadow p-4">
-          {paginatedProblems.length === 0 ? (
+        <div className="bg-gray-800 rounded-lg shadow p-4 overflow-x-auto">
+          {loading && paginatedProblems.length === 0 ? (
+            <div className="text-gray-400">Loading problems...</div>
+          ) : paginatedProblems.length === 0 ? (
             <div className="text-gray-400">No problems found.</div>
           ) : (
             <table className="w-full text-left">
@@ -328,8 +335,8 @@ const AdminDashboard = () => {
               </thead>
               <tbody>
                 {paginatedProblems.map((problem) => (
-                  <tr key={problem.id} className="border-t border-gray-700">
-                    <td className="py-2 px-3 font-mono">{problem.id}</td>
+                  <tr key={internalProblemId(problem)} className="border-t border-gray-700">
+                    <td className="py-2 px-3 font-mono">{displayProblemId(problem)}</td>
                     <td className="py-2 px-3">{problem.title}</td>
                     <td className="py-2 px-3">{problem.difficulty || "N/A"}</td>
                     <td className="py-2 px-3">
@@ -337,14 +344,14 @@ const AdminDashboard = () => {
                     </td>
                     <td className="py-2 px-3">
                       <Link
-                        to={`/admin/edit-problem/${problem.id}`}
+                        to={editProblemPath(problem)}
                         className="text-blue-400 hover:underline mr-4"
                       >
                         Edit
                       </Link>
                       <button
                         className="text-red-400 hover:underline"
-                        onClick={() => handleDeleteProblem(problem.id)}
+                        onClick={() => handleDeleteProblem(internalProblemId(problem))}
                       >
                         Delete
                       </button>
@@ -383,7 +390,8 @@ const AdminDashboard = () => {
             </button>
           </div>
         )}
-          </>
+            </div>
+          </div>
         )}
 
         {activeTab === "bundles" && (

@@ -35,7 +35,6 @@ import java.util.Optional;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -103,11 +102,7 @@ public class ProblemController {
                 query.addCriteria(Criteria.where("tags").in(tags));
             }
             if (search != null) {
-                String escapedSearch = Pattern.quote(search);
-                query.addCriteria(new Criteria().orOperator(
-                    Criteria.where("title").regex("^" + escapedSearch, "i"),
-                    Criteria.where("_id").regex("^" + escapedSearch, "i")
-                ));
+                query.addCriteria(ProblemSearchCriteria.forTerm(search));
             }
             boolean cursorMode = cursor != null && !cursor.trim().isEmpty();
             long totalItems = 0;
