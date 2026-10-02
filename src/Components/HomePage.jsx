@@ -280,22 +280,21 @@ const HomePage = ({ problems: propsProblems }) => {
         <table className="w-full text-left bg-gray-800 rounded-lg shadow">
           <thead>
             <tr>
-              <th className="py-2 px-3">Status</th>
+              <th className="py-2 px-3" aria-label="Status"></th>
               <th className="py-2 px-3">ID</th>
               <th className="py-2 px-3">Title</th>
               <th className="py-2 px-3">Difficulty</th>
               <th className="py-2 px-3">Tags</th>
-              <th className="py-2 px-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="text-gray-400 text-center py-4">Loading...</td>
+                <td colSpan={5} className="text-gray-400 text-center py-4">Loading...</td>
               </tr>
             ) : problems.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-gray-400 text-center py-4">No problems found.</td>
+                <td colSpan={5} className="text-gray-400 text-center py-4">No problems found.</td>
               </tr>
             ) : (
               problems.map((problem) => {
@@ -320,14 +319,6 @@ const HomePage = ({ problems: propsProblems }) => {
                       </span>
                     </td>
                     <td className="py-2 px-3 text-gray-300">{(problem.tags || []).join(', ')}</td>
-                    <td className="py-2 px-3" onClick={(event) => event.stopPropagation()}>
-                      <Link
-                        to={`/problem/${problem.id}`}
-                        className="text-blue-400 hover:underline"
-                      >
-                        Solve
-                      </Link>
-                    </td>
                   </tr>
                 );
               })
