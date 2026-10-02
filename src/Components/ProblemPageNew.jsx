@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import Judge0CodeEditor from "./Judge0CodeEditor";
+import ProblemSubmissionHistory from "./ProblemSubmissionHistory";
 
 const ProblemPageNew = ({ problems }) => {
   const { id } = useParams();
@@ -289,6 +290,8 @@ const ProblemPageNew = ({ problems }) => {
                 )}
               </div>
             )}
+
+            <ProblemSubmissionHistory problemId={problem.id} numericId={problem.numericId} />
           </div>
         </div>
 

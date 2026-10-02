@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 
 const AdminDashboard = () => {
@@ -10,11 +10,13 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [problemsPerPage, setProblemsPerPage] = useState(10);
   const [problemSearch, setProblemSearch] = useState("");
+  const [debouncedProblemSearch, setDebouncedProblemSearch] = useState("");
   const [problemTopic, setProblemTopic] = useState("");
   const [bundlesPerPage, setBundlesPerPage] = useState(10);
   const [bundleSearch, setBundleSearch] = useState("");
   const [totalProblemPages, setTotalProblemPages] = useState(0);
   const [totalProblemItems, setTotalProblemItems] = useState(0);
+  const problemFetchSeq = useRef(0);
   
   // Ensure problemList and bundles are always arrays
   const safeProblemList = Array.isArray(problemList) ? problemList : [];
@@ -41,33 +43,44 @@ const AdminDashboard = () => {
   );
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedProblemSearch(problemSearch), 400);
+    return () => clearTimeout(timer);
+  }, [problemSearch]);
+
+  useEffect(() => {
     fetchProblems();
     fetchBundles();
     
-    // Refresh data periodically (every 30 seconds)
     const interval = setInterval(() => {
       fetchProblems();
       fetchBundles();
     }, 30000);
     
     return () => clearInterval(interval);
-  }, [currentPage, problemsPerPage, problemSearch, problemTopic]);
+  }, [currentPage, problemsPerPage, debouncedProblemSearch, problemTopic]);
   // Note: AdminDashboard fetches paginated problems directly from API; props are not used.
 
   const fetchProblems = async () => {
+    const seq = ++problemFetchSeq.current;
     try {
       setLoading(true);
       const respPage = Math.max(0, currentPage - 1);
       const params = new URLSearchParams({ page: respPage.toString(), size: problemsPerPage.toString() });
-      if (problemSearch && problemSearch.trim() !== '') {
-        params.append('search', problemSearch.trim());
+      if (debouncedProblemSearch && debouncedProblemSearch.trim() !== '') {
+        params.append('search', debouncedProblemSearch.trim());
       }
       if (problemTopic && problemTopic !== '') {
         params.append('tags', problemTopic);
       }
       const response = await fetch(`/api/problems?${params}`);
+      if (seq !== problemFetchSeq.current) {
+        return;
+      }
       if (response.ok) {
         const data = await response.json();
+        if (seq !== problemFetchSeq.current) {
+          return;
+        }
         // Handle paginated response
         let problemsArray = [];
         if (data.problems && Array.isArray(data.problems)) {

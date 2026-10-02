@@ -339,9 +339,11 @@ public class SubmissionJobController {
     ) {
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-
-            List<SubmissionJob> jobs = jobService.getUserJobs(username);
+            Optional<User> userOpt = userRepository.findByUsername(auth.getName());
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "User not found"));
+            }
+            List<SubmissionJob> jobs = jobService.getUserJobs(userOpt.get().getId());
             // Limit results
             if (jobs.size() > limit) {
                 jobs = jobs.subList(0, limit);

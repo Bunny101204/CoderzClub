@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { buildProblemIdAliases, buildProblemStatus, getBundleProgress } from "./bundleProgress";
+import { indexFromProgressEntries, getBundleProgress } from "./bundleProgress";
 
 const BundleDashboard = () => {
   const { user } = useAuth();
@@ -68,23 +68,13 @@ const BundleDashboard = () => {
     }
     try {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-      const [submissionResponse, problemResponse] = await Promise.all([
-        fetch("/api/submissions/my-submissions?size=1000", {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        }),
-        fetch("/api/problems?page=0&size=1000")
-      ]);
-      if (!submissionResponse.ok) return;
-      const problemData = await problemResponse.json();
-      const problems = Array.isArray(problemData)
-        ? problemData
-        : (problemData.problems || []);
-      const idAliases = buildProblemIdAliases(problems);
-      setProblemIdAliases(idAliases);
-      const response = submissionResponse;
+      const response = await fetch("/api/submissions/my-progress", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!response.ok) return;
       const data = await response.json();
-      const submissions = Array.isArray(data) ? data : (data.submissions || []);
-      setProblemStatus(buildProblemStatus(submissions, idAliases));
+      setProblemStatus(indexFromProgressEntries(data.progress || []));
+      setProblemIdAliases({});
     } catch (error) {
       console.error("Error fetching bundle progress:", error);
     }

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { selectableExecutionModes, helpForExecutionMode } from "./executionModes";
 
 const AddProblemNew = () => {
   const navigate = useNavigate();
+  const { id: editId } = useParams();
+  const isEdit = Boolean(editId);
   
   // Basic problem details
   const [title, setTitle] = useState("");
@@ -46,6 +48,43 @@ const AddProblemNew = () => {
   useEffect(() => {
     fetchBundles();
   }, []);
+
+  useEffect(() => {
+    if (!isEdit) return;
+    const load = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const response = await fetch(`/api/problems/${editId}/admin`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!response.ok) {
+          setError("Failed to load problem for editing.");
+          return;
+        }
+        const problem = await response.json();
+        setTitle(problem.title || "");
+        setDescription(problem.statement || "");
+        setDifficulty(problem.difficulty || "EASY");
+        setTags((problem.tags || []).join(", "));
+        setCategory(problem.category || "ALGORITHMS");
+        setInputFormat(problem.inputFormat || "");
+        setOutputFormat(problem.outputFormat || "");
+        setConstraints(problem.constraints || "");
+        setPublicTestCases(problem.publicTestCases?.length ? problem.publicTestCases : [{ input: "", output: "", explanation: "" }]);
+        setHiddenTestCases(problem.hiddenTestCases?.length ? problem.hiddenTestCases : [{ input: "", output: "" }]);
+        setSelectedBundle(problem.bundleId || "");
+        setProblemType(problem.bundleId ? "bundle" : "standalone");
+        setIsPremium(Boolean(problem.premium));
+        setPoints(problem.points || 10);
+        setEstimatedTime(problem.estimatedTime || 15);
+        setExecutionMode(problem.executionMode || "STANDARD_PER_CASE");
+        setTestcaseVersion(problem.testcaseVersion || "v1");
+      } catch (err) {
+        setError(err.message || "Failed to load problem.");
+      }
+    };
+    load();
+  }, [editId, isEdit]);
 
   const fetchBundles = async () => {
     try {
@@ -168,8 +207,10 @@ const AddProblemNew = () => {
         estimatedTime,
       };
 
-      const response = await fetch("/api/problems", {
-        method: "POST",
+      const url = isEdit ? `/api/problems/${editId}/content` : "/api/problems";
+      const method = isEdit ? "PATCH" : "POST";
+      const response = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
@@ -178,16 +219,15 @@ const AddProblemNew = () => {
       });
 
       if (response.ok) {
-        const createdProblem = await response.json();
-        setSuccess("Problem created successfully!");
+        const savedProblem = await response.json();
+        setSuccess(isEdit ? "Problem updated successfully!" : "Problem created successfully!");
         
-        // If problem was added to a bundle, update the bundle's problemIds
-        if (problemType === "bundle" && selectedBundle && createdProblem.id) {
+        if (!isEdit && problemType === "bundle" && selectedBundle && savedProblem.id) {
           try {
             const bundleResponse = await fetch(`/api/bundles/${selectedBundle}`);
             if (bundleResponse.ok) {
               const bundle = await bundleResponse.json();
-              const updatedProblemIds = [...(bundle.problemIds || []), createdProblem.id];
+              const updatedProblemIds = [...(bundle.problemIds || []), savedProblem.id];
               
               const updateBundleResponse = await fetch(`/api/bundles/${selectedBundle}`, {
                 method: "PUT",
@@ -229,7 +269,7 @@ const AddProblemNew = () => {
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">Add New Problem (Stdin/Stdout Mode)</h1>
+            <h1 className="text-3xl font-bold">{isEdit ? "Edit Problem" : "Add New Problem (Stdin/Stdout Mode)"}</h1>
           <button
             onClick={() => navigate("/admin")}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"

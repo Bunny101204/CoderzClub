@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useProblemStatus } from "../hooks/useProblemStatus";
 
 const HomePage = ({ problems: propsProblems }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("");
@@ -58,7 +59,7 @@ const HomePage = ({ problems: propsProblems }) => {
     if (status === 'ATTEMPTED') {
       return <span className="inline-flex items-center text-yellow-400 text-lg leading-none" title="Attempted" aria-label="Attempted"><span aria-hidden="true">●</span></span>;
     }
-    return null;
+    return <span className="inline-flex items-center text-gray-600 text-lg leading-none" title="Unsolved" aria-label="Unsolved"><span aria-hidden="true">–</span></span>;
   };
 
   const compareById = (a, b) => {
@@ -298,13 +299,18 @@ const HomePage = ({ problems: propsProblems }) => {
               </tr>
             ) : (
               problems.map((problem) => {
-                const status = problemStatus[String(problem.id)] || problemStatus[problem.id] || 'NOT_STARTED';
+                const status = problemStatus[String(problem.id)] || problemStatus[String(problem.numericId)] || 'UNSOLVED';
+                const displayId = problem.numericId != null ? problem.numericId : problem.id;
                 return (
-                  <tr key={problem.id} className="border-t border-gray-700">
+                  <tr
+                    key={problem.id}
+                    className="border-t border-gray-700 cursor-pointer hover:bg-gray-700/40"
+                    onClick={() => navigate(`/problem/${problem.id}`)}
+                  >
                     <td className="py-2 px-3 align-top">
                       {getStatusIcon(status)}
                     </td>
-                    <td className="py-2 px-3 font-mono">{problem.id}</td>
+                    <td className="py-2 px-3 font-mono">{displayId}</td>
                     <td className="py-2 px-3">
                       <div className="font-semibold text-white">{problem.title}</div>
                     </td>
@@ -314,7 +320,7 @@ const HomePage = ({ problems: propsProblems }) => {
                       </span>
                     </td>
                     <td className="py-2 px-3 text-gray-300">{(problem.tags || []).join(', ')}</td>
-                    <td className="py-2 px-3">
+                    <td className="py-2 px-3" onClick={(event) => event.stopPropagation()}>
                       <Link
                         to={`/problem/${problem.id}`}
                         className="text-blue-400 hover:underline"

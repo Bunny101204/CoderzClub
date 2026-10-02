@@ -22,6 +22,15 @@ class ExecutionEndpointAuthorizationPatternTest {
         assertFalse(adminPatch.matches(request("/api/problems/p1/run-public", "POST")));
     }
 
+    @Test
+    void contentPatchAndAdminGetAreAdminProblemPaths() {
+        AntPathRequestMatcher contentPatch = new AntPathRequestMatcher("/api/problems/*/content", "PATCH");
+        AntPathRequestMatcher adminGet = new AntPathRequestMatcher("/api/problems/*/admin", "GET");
+        assertTrue(contentPatch.matches(request("/api/problems/p1/content", "PATCH")));
+        assertTrue(adminGet.matches(request("/api/problems/p1/admin", "GET")));
+        assertFalse(contentPatch.matches(request("/api/problems/p1/execution", "PATCH")));
+    }
+
     private static org.springframework.mock.web.MockHttpServletRequest request(String uri, String method) {
         org.springframework.mock.web.MockHttpServletRequest request =
             new org.springframework.mock.web.MockHttpServletRequest(method, uri);

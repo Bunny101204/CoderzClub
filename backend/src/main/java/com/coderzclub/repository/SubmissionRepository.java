@@ -23,4 +23,5 @@ public interface SubmissionRepository extends MongoRepository<Submission, String
     Page<Submission> findByUserIdAndProblemId(String userId, String problemId, Pageable pageable);
     Page<Submission> findByUserIdAndResult(String userId, String result, Pageable pageable);
     Page<Submission> findByUserIdAndProblemIdAndResult(String userId, String problemId, String result, Pageable pageable);
+    Page<Submission> findByUserIdAndProblemIdIn(String userId, java.util.Collection<String> problemIds, Pageable pageable);
 }

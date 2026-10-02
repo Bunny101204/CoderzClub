@@ -26,6 +26,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -56,6 +57,42 @@ class ProblemControllerSecurityTest {
         problem.setHiddenTestCases(List.of(new TestCase("9", "10", "secret")));
 
         when(problemRepository.findById("p1")).thenReturn(Optional.of(problem));
+        when(problemRepository.save(any(Problem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void userCannotReadAdminProblemPayload() throws Exception {
+        mockMvc.perform(get("/api/problems/p1/admin"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminCanReadHiddenTestsForEditing() throws Exception {
+        mockMvc.perform(get("/api/problems/p1/admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hiddenTestCases[0].input").value("9"));
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void userCannotPatchProblemContent() throws Exception {
+        mockMvc.perform(patch("/api/problems/p1/content")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Hacked\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminContentPatchPreservesOmittedHiddenTests() throws Exception {
+        mockMvc.perform(patch("/api/problems/p1/content")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Renamed\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Renamed"))
+                .andExpect(jsonPath("$.hiddenTestCases[0].input").value("9"));
     }
 
     @Test

@@ -108,7 +108,7 @@ const BundleProblems = () => {
         
         // Fetch user progress if authenticated
         if (user) {
-          await fetchUserProgress(idsArray);
+          await fetchUserProgress();
         }
       } else {
         console.error("Failed to fetch problems:", response.status);
@@ -120,40 +120,25 @@ const BundleProblems = () => {
     }
   };
 
-  const fetchUserProgress = async (problemIds) => {
+  const fetchUserProgress = async () => {
     try {
       const token = localStorage.getItem('jwtToken');
       if (!token) return;
-
-      // Fetch submissions for each problem
-      const progress = {};
-      for (const problemId of problemIds) {
-        try {
-          const response = await fetch(`/api/submissions/problem/${problemId}`, {
-            headers: {
-              "Authorization": `Bearer ${token}`
-            }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            // Handle both paginated and non-paginated responses
-            const submissions = Array.isArray(data) ? data : (data.submissions || []);
-            const hasAccepted = submissions.some(s => 
-              s.result === "ACCEPTED" || s.status === "ACCEPTED" || s.verdict === "ACCEPTED"
-            );
-            progress[problemId] = {
-              attempted: submissions.length > 0,
-              solved: hasAccepted,
-              submissions: submissions.length
-            };
-          }
-        } catch (err) {
-          console.error(`Error fetching progress for problem ${problemId}:`, err);
-          // Continue with other problems even if one fails
-        }
-      }
-      setUserProgress(progress);
+      const response = await fetch("/api/submissions/my-progress", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const index = {};
+      (data.progress || []).forEach((entry) => {
+        const solved = entry.status === "SOLVED";
+        const attempted = entry.status === "SOLVED" || entry.status === "ATTEMPTED";
+        [entry.problemId, entry.numericId, ...(entry.aliases || [])].forEach((id) => {
+          if (id == null) return;
+          index[String(id)] = { attempted, solved };
+        });
+      });
+      setUserProgress(index);
     } catch (error) {
       console.error("Error fetching user progress:", error);
     }

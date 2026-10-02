@@ -156,6 +156,16 @@ function AppContent() {
           element={<Suspense fallback={<LoadingFallback />}><AdminRoute user={user} /></Suspense>}
         />
         <Route
+          path="/admin/edit-problem/:id"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><AddProblemNew /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
           path="/admin/add-problem"
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (

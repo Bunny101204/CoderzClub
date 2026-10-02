@@ -2,6 +2,8 @@ package com.coderzclub.controller;
 
 import com.coderzclub.dto.ProblemListResponse;
 import com.coderzclub.dto.ProblemDetailResponse;
+import com.coderzclub.dto.AdminProblemResponse;
+import com.coderzclub.dto.ProblemContentUpdate;
 import com.coderzclub.dto.ProblemExecutionConfigUpdate;
 import com.coderzclub.model.Problem;
 import com.coderzclub.model.User;
@@ -13,6 +15,7 @@ import com.coderzclub.service.SubmissionValidator;
 import com.coderzclub.service.ExecutionOutcome;
 import com.coderzclub.service.IncompatibleExecutionException;
 import com.coderzclub.service.ProblemExecutionConfigService;
+import com.coderzclub.service.ProblemContentService;
 import com.coderzclub.service.ProblemRunService;
 import com.coderzclub.service.RunLimitExceededException;
 import com.coderzclub.model.ExecutionMode;
@@ -56,6 +59,9 @@ public class ProblemController {
 
     @Autowired
     private ProblemRunService problemRunService;
+
+    @Autowired
+    private ProblemContentService problemContentService;
 
     @Autowired
     private ProblemExecutionConfigService executionConfigService;
@@ -196,6 +202,21 @@ public class ProblemController {
         }
     }
 
+    @GetMapping("/{id}/admin")
+    public ResponseEntity<?> getAdminProblem(@PathVariable String id) {
+        Optional<Problem> problem = problemRepository.findById(id);
+        if (problem.isEmpty()) {
+            try {
+                problem = problemRepository.findByNumericId(Integer.valueOf(id));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (problem.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(new AdminProblemResponse(problem.get()));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<?> getProblemById(@PathVariable String id) {
         Optional<Problem> problem = problemRepository.findById(id);
@@ -247,6 +268,22 @@ public class ProblemController {
         } catch (DuplicateKeyException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("error", "A problem with this numericId already exists"));
+        }
+    }
+
+    @PatchMapping("/{id}/content")
+    public ResponseEntity<?> updateProblemContent(@PathVariable String id,
+                                                  @RequestBody ProblemContentUpdate update) {
+        Optional<Problem> existingOpt = problemRepository.findById(id);
+        if (existingOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            Problem existing = existingOpt.get();
+            problemContentService.apply(existing, update);
+            return ResponseEntity.ok(new AdminProblemResponse(problemRepository.save(existing)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 

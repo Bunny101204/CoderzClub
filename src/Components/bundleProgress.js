@@ -1,10 +1,15 @@
-const SOLVED_RESULTS = new Set([
-  "ACCEPTED",
-  "SOLVED",
-  "PASSED",
-  "SUCCESS",
-  "COMPLETED"
+const SOLVED_RESULTS = new Set(["ACCEPTED"]);
+const STUDENT_RESULTS = new Set([
+  "WRONG_ANSWER",
+  "COMPILATION_ERROR",
+  "RUNTIME_ERROR",
+  "TIME_LIMIT_EXCEEDED",
+  "MEMORY_LIMIT_EXCEEDED",
 ]);
+
+function isStudentResult(result) {
+  return STUDENT_RESULTS.has(result) || result.startsWith("RUNTIME_ERROR");
+}
 
 export function normalizeId(value) {
   return value == null ? "" : String(value).trim();
@@ -22,13 +27,23 @@ export function buildProblemIdAliases(problems) {
   return aliases;
 }
 
+export function indexFromProgressEntries(entries) {
+  const status = {};
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    if (!entry?.status) return;
+    const ids = [entry.problemId, entry.numericId, ...(entry.aliases || [])];
+    ids.forEach((id) => {
+      const key = normalizeId(id);
+      if (key) status[key] = entry.status;
+    });
+  });
+  return status;
+}
+
 function submissionResultValues(submission) {
   return [
     submission?.result,
     submission?.verdict,
-    submission?.status,
-    submission?.finalResult,
-    submission?.jobStatus
   ]
     .map(value => normalizeId(value).toUpperCase())
     .filter(Boolean);
@@ -44,7 +59,7 @@ export function buildProblemStatus(submissions, aliases = {}) {
     const results = submissionResultValues(submission);
     if (results.some(result => SOLVED_RESULTS.has(result))) {
       status[problemId] = "SOLVED";
-    } else if (status[problemId] !== "SOLVED") {
+    } else if (results.some(isStudentResult) && status[problemId] !== "SOLVED") {
       status[problemId] = "ATTEMPTED";
     }
   });
@@ -57,7 +72,7 @@ export function getBundleProgress(bundle, status, aliases = {}) {
     .map(id => aliases[id] || id)
     .filter(Boolean))];
   const solved = problemIds.filter(id => status[id] === "SOLVED").length;
-  const attempted = problemIds.filter(id => status[id]).length;
+  const attempted = problemIds.filter(id => status[id] === "SOLVED" || status[id] === "ATTEMPTED").length;
 
   return {
     total: problemIds.length,

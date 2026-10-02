@@ -186,7 +186,9 @@ export const api = {
   problems: {
     getAll: (params) => apiClient.get('/api/problems', { params }),
     getById: (id) => apiClient.get(`/api/problems/${id}`),
+    getAdminById: (id) => apiClient.get(`/api/problems/${id}/admin`),
     create: (problem) => apiClient.post('/api/problems', problem),
+    updateContent: (id, problem) => apiClient.patch(`/api/problems/${id}/content`, problem),
     updateExecution: (id, config) => apiClient.patch(`/api/problems/${id}/execution`, config),
     delete: (id) => apiClient.delete(`/api/problems/${id}`),
   },
@@ -204,6 +206,7 @@ export const api = {
   submissions: {
     create: (submission) => apiClient.post('/api/submissions', submission),
     getMySubmissions: (params) => apiClient.get('/api/submissions/my-submissions', { params }),
+    getMyProgress: () => apiClient.get('/api/submissions/my-progress'),
     getLimits: (problemId) => apiClient.get('/api/submissions/limits', { params: { problemId } }),
     getProblemSubmissions: (problemId, params) => apiClient.get(`/api/submissions/problem/${problemId}`, { params }),
   },

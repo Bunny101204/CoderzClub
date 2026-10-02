@@ -2,11 +2,10 @@ package com.coderzclub.controller;
 
 import com.coderzclub.model.User;
 import com.coderzclub.repository.UserRepository;
-import com.coderzclub.repository.SubmissionRepository;
-import com.coderzclub.repository.UserStatsRepository;
-import com.coderzclub.model.UserStats;
 import com.coderzclub.dto.LeaderboardEntry;
+import com.coderzclub.dto.UserProfileStatsResponse;
 import com.coderzclub.service.LeaderboardService;
+import com.coderzclub.service.UserProgressService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,10 +26,7 @@ public class UserController {
     private UserRepository userRepository;
     
     @Autowired
-    private SubmissionRepository submissionRepository;
-
-    @Autowired
-    private UserStatsRepository userStatsRepository;
+    private UserProgressService userProgressService;
 
     @Autowired
     private LeaderboardService leaderboardService;
@@ -68,21 +64,23 @@ public class UserController {
             }
             
             User user = userOpt.get();
-            
-            UserStats stored = userStatsRepository.findById(user.getId()).orElse(null);
-            long totalSubmissions = stored == null ? 0 : stored.getTotalSubmissions();
-            long acceptedSubmissions = stored == null ? 0 : stored.getAcceptedSubmissions();
-            
-            Map<String, Object> stats = new HashMap<>();
-            stats.put("totalProblemsSolved", stored == null ? user.getProblemsSolved() : stored.getProblemsSolved());
-            stats.put("totalPoints", stored == null ? user.getTotalPoints() : stored.getTotalPoints());
-            stats.put("currentStreak", stored == null ? user.getCurrentStreak() : stored.getCurrentStreak());
-            stats.put("longestStreak", stored == null ? user.getLongestStreak() : stored.getLongestStreak());
-            stats.put("totalSubmissions", totalSubmissions);
-            stats.put("acceptedSubmissions", acceptedSubmissions);
-            stats.put("successRate", totalSubmissions > 0 ? (double)acceptedSubmissions / totalSubmissions : 0.0);
-            
-            return ResponseEntity.ok(stats);
+            UserProfileStatsResponse stats = userProgressService.profileStats(user);
+            Map<String, Object> body = new HashMap<>();
+            body.put("totalProblemsSolved", stats.getUniqueProblemsSolved());
+            body.put("uniqueProblemsSolved", stats.getUniqueProblemsSolved());
+            body.put("totalPoints", stats.getTotalPoints());
+            body.put("currentStreak", stats.getCurrentStreak());
+            body.put("longestStreak", stats.getLongestStreak());
+            body.put("totalSubmissions", stats.getCompletedStudentSubmissions());
+            body.put("acceptedSubmissions", stats.getAcceptedJudgedSubmissions());
+            body.put("acceptedJudgedSubmissions", stats.getAcceptedJudgedSubmissions());
+            body.put("completedStudentSubmissions", stats.getCompletedStudentSubmissions());
+            body.put("successRate", stats.getSuccessRate());
+            body.put("successRateDefinition", stats.getSuccessRateDefinition());
+            body.put("difficultySolved", stats.getDifficultySolved());
+            body.put("activity", stats.getActivity());
+            body.put("activityTimezone", stats.getActivityTimezone());
+            return ResponseEntity.ok(body);
             
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error fetching stats: " + e.getMessage());

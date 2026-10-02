@@ -47,6 +47,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/validate-token").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/languages").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/problems").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/problems/{id}/admin").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/problems/{id}").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/problems/test").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/problems").hasRole("ADMIN")

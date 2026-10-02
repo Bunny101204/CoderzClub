@@ -371,8 +371,6 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
   const navigate = useNavigate();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [stats, setStats] = useState(null);
-  const [submissions, setSubmissions] = useState([]);
-  const [problems, setProblems] = useState([]);
   const [loadingStats, setLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState(null);
 
@@ -386,24 +384,16 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
       try {
         setLoadingStats(true);
         setStatsError(null);
-        const [statsRes, subsRes, probsRes] = await Promise.all([
+        const [statsRes] = await Promise.all([
           axios
             .get("/api/users/stats", { headers })
             .catch(() => ({ data: null })),
-          axios
-            .get("/api/submissions/my-submissions", { headers })
-            .catch(() => ({ data: [] })),
-          axios.get("/api/problems").catch(() => ({ data: [] })),
         ]);
         setStats(statsRes.data);
-        setSubmissions(Array.isArray(subsRes.data) ? subsRes.data : []);
-        setProblems(Array.isArray(probsRes.data) ? probsRes.data : []);
       } catch (e) {
         console.error("Error fetching profile data:", e);
         setStatsError("Failed to load stats");
         setStats(null);
-        setSubmissions([]);
-        setProblems([]);
       } finally {
         setLoadingStats(false);
       }
@@ -427,68 +417,27 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     setIsLoggingOut(false);
   };
 
-  if (!asPage && !isOpen) return null;
-
   // Build maps and aggregates
-  const problemMap = useMemo(() => {
-    const map = new Map();
-    (problems || []).forEach((p) => map.set(String(p.id), p));
-    return map;
-  }, [problems]);
-
-  const normalizeDifficulty = (difficulty) => {
-    if (!difficulty) return "UNKNOWN";
-    const diff = String(difficulty).trim().toUpperCase();
-    if (diff === "BASIC" || diff === "EASY") return "EASY";
-    if (diff === "INTERMEDIATE" || diff === "MEDIUM") return "MEDIUM";
-    if (diff === "ADVANCED" || diff === "HARD") return "HARD";
-    return "UNKNOWN";
-  };
-
   const difficultyCounts = useMemo(() => {
-    const counts = {
-      EASY: 0,
-      MEDIUM: 0,
-      HARD: 0,
-      UNKNOWN: 0,
-    };
-    if (!submissions || !Array.isArray(submissions)) return counts;
-    const accepted = submissions.filter(
-      (s) =>
-        s &&
-        (s.result === "ACCEPTED" ||
-          s.status === "ACCEPTED" ||
-          s.verdict === "ACCEPTED")
-    );
-    accepted.forEach((s) => {
-      if (!s || !s.problemId) return;
-      const p = problemMap.get(String(s.problemId));
-      const diff = normalizeDifficulty(p?.difficulty);
-      counts[diff] = (counts[diff] || 0) + 1;
-    });
+    const counts = { EASY: 0, MEDIUM: 0, HARD: 0, UNKNOWN: 0 };
+    const fromApi = stats?.difficultySolved;
+    if (fromApi && typeof fromApi === "object") {
+      counts.EASY = fromApi.EASY || 0;
+      counts.MEDIUM = fromApi.MEDIUM || 0;
+      counts.HARD = fromApi.HARD || 0;
+    }
     return counts;
-  }, [submissions, problemMap]);
+  }, [stats]);
 
   const activityByDay = useMemo(() => {
     const counts = new Map();
-    if (!submissions || !Array.isArray(submissions)) return counts;
-    submissions.forEach((s) => {
-      if (!s || !s.createdAt) return;
-      try {
-        const d = new Date(s.createdAt);
-        if (isNaN(d.getTime())) return;
-        const key = new Date(
-          Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-        )
-          .toISOString()
-          .slice(0, 10);
-        counts.set(key, (counts.get(key) || 0) + 1);
-      } catch (e) {
-        console.warn("Invalid date in submission:", s.createdAt);
-      }
+    const rows = Array.isArray(stats?.activity) ? stats.activity : [];
+    rows.forEach((row) => {
+      if (!row?.date) return;
+      counts.set(String(row.date), Number(row.count) || 0);
     });
     return counts;
-  }, [submissions]);
+  }, [stats]);
 
   // New heatmap logic: build weeks (columns) x 7 days (rows) for the last 365 days
   const heatmap = useMemo(() => {
@@ -554,6 +503,8 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
 
     return { weeks, monthLabels, max };
   }, [activityByDay]);
+
+  if (!asPage && !isOpen) return null;
 
   // heatColor: scale counts relative to max (4 intensity buckets)
   const heatColor = (count, max) => {
@@ -632,7 +583,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
                     <div className="text-gray-400">Solved</div>
                     <div className="text-blue-400 text-xl font-bold">
-                      {stats.totalProblemsSolved}
+                      {stats.uniqueProblemsSolved ?? stats.totalProblemsSolved}
                     </div>
                   </div>
                   <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
@@ -661,7 +612,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
               <div className="flex items-center justify-between">
                 <h3 className="text-white font-semibold">Problems Solved</h3>
                 <div className="text-4xl font-extrabold text-blue-400">
-                  {stats?.totalProblemsSolved ?? 0}
+                  {stats?.uniqueProblemsSolved ?? stats?.totalProblemsSolved ?? 0}
                 </div>
               </div>
             </div>
@@ -707,7 +658,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   Active Days (Last 12 months)
                 </h3>
                 <div className="text-sm text-gray-400">
-                  A day is active if it has ≥1 submission
+                  A day is active if it has ≥1 submission (UTC dates)
                 </div>
               </div>
 
