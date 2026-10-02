@@ -68,16 +68,6 @@ const Header = () => {
                   Leaderboard
                 </Link>
                 {/* Removed My Stats link; stats will be shown in profile page */}
-                <Link
-                  to="/subscription"
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/subscription') 
-                      ? 'text-white bg-gray-700' 
-                      : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  Plans
-                </Link>
                 {(user?.role === "ADMIN" || user?.role === "admin" || user?.role === "Admin") && (
                   <Link
                     to="/admin"

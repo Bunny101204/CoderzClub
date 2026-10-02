@@ -407,19 +407,6 @@ const BundleDashboard = () => {
                     >
                       <span className="text-xl">+</span>
                     </Link>
-                  ) : bundle.isPremium && !user?.isPremium ? (
-                    <div className="flex items-center space-x-2">
-                      <span className="text-yellow-400 font-semibold">${bundle.price}</span>
-                      <button 
-                        className="px-4 py-2 bg-yellow-500 text-black rounded-lg font-semibold hover:bg-yellow-400 transition-colors"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Handle upgrade logic
-                        }}
-                      >
-                        Upgrade
-                      </button>
-                    </div>
                   ) : null}
                 </div>
                 
