@@ -4,6 +4,7 @@ import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
 import { getTemplate } from "./LanguageTemplates";
+import { editorStorageKey, resolveEditorSource } from "./editorLanguageDrafts";
 import { auth } from "./AuthHelper";
 import {
   getJobStatusMessage,
@@ -63,6 +64,10 @@ const Judge0CodeEditor = ({
   const activeJobIdRef = useRef(null);
   const submissionGenerationRef = useRef(0);
   const eventSourceRef = useRef(null);
+  const previousLanguageRef = useRef(languageId);
+  const skipNextPersistRef = useRef(false);
+  const sourceCodeRef = useRef(sourceCode);
+  sourceCodeRef.current = sourceCode;
 
   const languageNames = {
     50: "C",
@@ -135,32 +140,43 @@ const Judge0CodeEditor = ({
     }
   };
 
-  // Store code in localStorage when it changes
   useEffect(() => {
-    if (problemId && sourceCode) {
-      localStorage.setItem(`code_${problemId}_${languageId}`, sourceCode);
-    }
-  }, [sourceCode, problemId, languageId]);
-
-  // Load stored code when component mounts or problemId changes
-  useEffect(() => {
-    if (problemId) {
-      const storedCode = localStorage.getItem(
-        `code_${problemId}_${languageId}`
-      );
-      if (storedCode && !propSetEditorCode) {
-        setInternalSourceCode(storedCode);
-      } else if (!storedCode && !propSetEditorCode) {
-        // Only load template if no stored code exists
-        if (!initialCode || initialCode.trim() === "") {
-          const template = getTemplate(languageId);
-          setInternalSourceCode(template);
-        } else {
-          setInternalSourceCode(initialCode);
-        }
+    if (propSetEditorCode) return;
+    const previousLanguageId = previousLanguageRef.current;
+    if (previousLanguageId !== languageId) {
+      if (problemId) {
+        localStorage.setItem(
+          editorStorageKey(problemId, previousLanguageId),
+          sourceCodeRef.current ?? ""
+        );
       }
+      previousLanguageRef.current = languageId;
+      skipNextPersistRef.current = true;
     }
-  }, [problemId, languageId]);
+    if (!problemId) {
+      if (previousLanguageId !== languageId) {
+        setInternalSourceCode(getTemplate(languageId));
+      }
+      return;
+    }
+    const storedDraft = localStorage.getItem(editorStorageKey(problemId, languageId));
+    setInternalSourceCode(
+      resolveEditorSource({
+        storedDraft,
+        languageTemplate: getTemplate(languageId),
+      })
+    );
+    skipNextPersistRef.current = true;
+  }, [problemId, languageId, propSetEditorCode]);
+
+  useEffect(() => {
+    if (!problemId || propSetEditorCode) return;
+    if (skipNextPersistRef.current) {
+      skipNextPersistRef.current = false;
+      return;
+    }
+    localStorage.setItem(editorStorageKey(problemId, languageId), sourceCode ?? "");
+  }, [sourceCode, problemId, languageId, propSetEditorCode]);
 
   // UtilityFunctions.jsx
   let downloadCode = (sourceCode, languageId) => {

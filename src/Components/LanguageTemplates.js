@@ -109,7 +109,10 @@ class Program {
 
 // Helper function to get template for a language
 export const getTemplate = (languageId) => {
-  return LANGUAGE_TEMPLATES[languageId] || LANGUAGE_TEMPLATES[62]; // Default to Java
+  if (Object.prototype.hasOwnProperty.call(LANGUAGE_TEMPLATES, languageId)) {
+    return LANGUAGE_TEMPLATES[languageId];
+  }
+  return "";
 };
 
 // Language names mapping

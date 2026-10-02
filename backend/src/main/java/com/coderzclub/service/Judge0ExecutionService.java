@@ -249,31 +249,28 @@ public class Judge0ExecutionService {
                 actualOutputSummary = actualOutputSummary.substring(0, 200) + "...";
             }
 
-            // Mark as OUTPUT_LIMIT_EXCEEDED if outputs were truncated
-            if (outputTruncated) {
+            String errorType = parseErrorType(responseMap);
+            if (ExecutionVerdictMapper.isInfrastructureFailure(errorType)) {
+                result.setPassed(false);
+                result.setErrorType(ExecutionVerdictMapper.INTERNAL_ERROR);
+                result.setErrorMessage(parseErrorMessage(responseMap));
+                logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
+                    languageId, ExecutionVerdictMapper.INTERNAL_ERROR, runtime, memory, actualOutputSummary);
+            } else if (outputTruncated) {
                 result.setErrorType("OUTPUT_LIMIT_EXCEEDED");
                 result.setPassed(false);
                 logger.warn("output_limit_exceeded_on_testcase languageId={} runtimeMs={} memoryBytes={} outputLength={}",
                     languageId, runtime, memory, actualOutput.length());
-            }
-
-            // Check for errors
-            String errorType = parseErrorType(responseMap);
-            if (errorType != null && !outputTruncated) {
+            } else if (errorType != null) {
                 result.setPassed(false);
                 result.setErrorType(errorType);
                 result.setErrorMessage(parseErrorMessage(responseMap));
-
-                // Observability: Log execution error
                 logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
                     languageId, errorType, runtime, memory, actualOutputSummary);
-            } else if (errorType == null && !outputTruncated) {
-                // Check if output matches expected
+            } else {
                 String expected = testCase.getExpectedOutput() != null ? testCase.getExpectedOutput().trim() : "";
                 boolean passed = outputsMatch(actualOutput, expected, hasOutput);
                 result.setPassed(passed);
-
-                // Observability: Log execution result
                 logger.info("judge0_execution_result languageId={} passed={} runtimeMs={} memoryBytes={} expectedSummary={} actualOutputSummary={}",
                     languageId, passed, runtime, memory,
                     expected.length() > 200 ? expected.substring(0, 200) + "..." : expected,
@@ -283,7 +280,7 @@ public class Judge0ExecutionService {
         } catch (Exception e) {
             logger.error("Failed to execute test case", e);
             result.setPassed(false);
-            result.setErrorType("Execution Error");
+            result.setErrorType(ExecutionVerdictMapper.INTERNAL_ERROR);
             result.setErrorMessage("Failed to execute code: " + e.getMessage());
         }
 
@@ -374,12 +371,14 @@ public class Judge0ExecutionService {
     /**
      * Parse error type from Judge0 response
      */
-    private String parseErrorType(Map<String, Object> response) {
-        if (response == null) return null;
+    static String parseErrorType(Map<String, Object> response) {
+        if (response == null || response.isEmpty()) {
+            return ExecutionVerdictMapper.INTERNAL_ERROR;
+        }
 
         Object status = response.get("status");
         if (status instanceof Map<?, ?> statusMap) {
-            Integer id = (Integer) statusMap.get("id");
+            Integer id = statusId(statusMap.get("id"));
             if (id != null) {
                 switch (id) {
                     case 6: return "Compilation Error";
@@ -392,16 +391,34 @@ public class Judge0ExecutionService {
                     case 12: return "Runtime Error";
                     case 5: return "Time Limit Exceeded";
                     case 4: return "Memory Limit Exceeded";
+                    case 13: return ExecutionVerdictMapper.INTERNAL_ERROR;
                 }
+            } else if (statusMap.containsKey("id")) {
+                return ExecutionVerdictMapper.INTERNAL_ERROR;
             }
+        } else if (status != null) {
+            return ExecutionVerdictMapper.INTERNAL_ERROR;
         }
 
-        // Check for compile output as alternative indicator
         if (response.get("compile_output") != null && !response.get("compile_output").toString().trim().isEmpty()) {
             return "Compilation Error";
         }
 
         return null;
+    }
+
+    private static Integer statusId(Object rawId) {
+        if (rawId instanceof Number number) {
+            return number.intValue();
+        }
+        if (rawId == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(rawId.toString());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     /**

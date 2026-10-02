@@ -55,10 +55,18 @@ public class FunctionHarnessService {
 
     public List<SubmissionJob.TestResult> mapResults(Map<String, Object> response,
                                                        List<SubmissionJob.TestCase> testCases) {
+        if (response == null || response.isEmpty() || !(response.get("status") instanceof Map<?, ?>)) {
+            return errorResults(testCases, ExecutionVerdictMapper.INTERNAL_ERROR,
+                "Missing or invalid Judge0 provider response");
+        }
         Object statusObject = response.get("status");
+        String classified = errorType(statusObject);
+        if (ExecutionVerdictMapper.INTERNAL_ERROR.equals(classified)) {
+            return errorResults(testCases, ExecutionVerdictMapper.INTERNAL_ERROR, statusDescription(statusObject));
+        }
         String executionError = statusDescription(statusObject);
         if (executionError != null && !"Accepted".equalsIgnoreCase(executionError)) {
-            return errorResults(testCases, errorType(statusObject), executionError);
+            return errorResults(testCases, classified, executionError);
         }
         String stdout = response.get("stdout") == null ? "" : response.get("stdout").toString();
         String[] lines = stdout.replace("\r", "").split("\n", -1);
@@ -115,6 +123,7 @@ public class FunctionHarnessService {
             if (id == 6) return "COMPILATION_ERROR";
             if (id == 5) return "TIME_LIMIT_EXCEEDED";
             if (id == 4) return "MEMORY_LIMIT_EXCEEDED";
+            if (id == 13) return ExecutionVerdictMapper.INTERNAL_ERROR;
             if (id >= 7 && id <= 12) return "RUNTIME_ERROR";
         }
         return "EXECUTION_ERROR";

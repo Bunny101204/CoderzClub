@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -42,5 +43,34 @@ class Judge0ExecutionServiceTest {
         assertEquals(512, payload.get("memory_limit"));
         assertEquals(30, payload.get("cpu_time_limit"));
         assertEquals(30, payload.get("compile_time_limit"));
+    }
+
+    @Test
+    void status13IsInternalErrorAndIsNotComparedAsWrongAnswer() {
+        Map<String, Object> response = Map.of(
+            "status", Map.of("id", 13, "description", "Internal Error"),
+            "stdout", "1"
+        );
+
+        String errorType = Judge0ExecutionService.parseErrorType(response);
+
+        assertEquals("INTERNAL_ERROR", errorType);
+        assertTrue(ExecutionVerdictMapper.isInfrastructureFailure(errorType));
+
+        SubmissionJob.TestResult result = new SubmissionJob.TestResult();
+        result.setPassed(false);
+        result.setErrorType(errorType);
+        result.setActualOutput("1");
+        result.setExpectedOutput("1");
+
+        assertFalse(result.isPassed());
+        assertEquals("INTERNAL_ERROR", ExecutionVerdictMapper.fromTestResults(List.of(result)));
+        assertNotEquals("WRONG_ANSWER", ExecutionVerdictMapper.fromTestResults(List.of(result)));
+    }
+
+    @Test
+    void missingProviderResponseIsInternalError() {
+        assertEquals("INTERNAL_ERROR", Judge0ExecutionService.parseErrorType(null));
+        assertEquals("INTERNAL_ERROR", Judge0ExecutionService.parseErrorType(Map.of()));
     }
 }

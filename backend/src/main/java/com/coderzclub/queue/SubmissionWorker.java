@@ -14,6 +14,7 @@ import com.coderzclub.service.SubmissionJobLeaseService;
 import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.OperationalMetrics;
+import com.coderzclub.service.ExecutionVerdictMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -294,25 +295,7 @@ public class SubmissionWorker {
     }
 
 
-    private String analyzeResults(List<SubmissionJob.TestResult> results) {
-        boolean allPassed = results.stream().allMatch(SubmissionJob.TestResult::isPassed);
-        if (allPassed) {
-            return "ACCEPTED";
-        }
-        for (SubmissionJob.TestResult result : results) {
-            if (!result.isPassed() && result.getErrorType() != null) {
-                switch (result.getErrorType()) {
-                    case "Compilation Error":
-                        return "COMPILATION_ERROR";
-                    case "Runtime Error":
-                        return "RUNTIME_ERROR";
-                    case "Time Limit Exceeded":
-                        return "TIME_LIMIT_EXCEEDED";
-                    case "Memory Limit Exceeded":
-                        return "MEMORY_LIMIT_EXCEEDED";
-                }
-            }
-        }
-        return "WRONG_ANSWER";
+    String analyzeResults(List<SubmissionJob.TestResult> results) {
+        return ExecutionVerdictMapper.fromTestResults(results);
     }
 }
