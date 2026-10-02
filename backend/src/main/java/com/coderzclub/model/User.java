@@ -45,6 +45,8 @@ public class User {
     private String passwordResetToken;
     private Date passwordResetTokenExpiry;
     private boolean profileComplete; // Whether profile is complete
+    private String accountStatus = "ACTIVE"; // ACTIVE or DELETED
+    private Date deletedAt;
     
     // Default constructor
     public User() {}
@@ -58,6 +60,7 @@ public class User {
         this.role = role;
         this.createdAt = createdAt;
         this.emailVerified = false;
+        this.accountStatus = "ACTIVE";
     }
     
     // Getters
@@ -92,6 +95,9 @@ public class User {
     public String getPasswordResetToken() { return passwordResetToken; }
     public Date getPasswordResetTokenExpiry() { return passwordResetTokenExpiry; }
     public boolean isProfileComplete() { return profileComplete; }
+    public String getAccountStatus() { return accountStatus; }
+    public Date getDeletedAt() { return deletedAt; }
+    public boolean isDeleted() { return "DELETED".equals(accountStatus); }
     
     // Setters
     public void setId(String id) { this.id = id; }
@@ -125,4 +131,6 @@ public class User {
     public void setWebsite(String website) { this.website = website; }
     public void setSocialLinks(List<String> socialLinks) { this.socialLinks = socialLinks; }
     public void setProfileComplete(boolean profileComplete) { this.profileComplete = profileComplete; }
+    public void setAccountStatus(String accountStatus) { this.accountStatus = accountStatus; }
+    public void setDeletedAt(Date deletedAt) { this.deletedAt = deletedAt; }
 } 

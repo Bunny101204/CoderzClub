@@ -19,13 +19,11 @@ import org.springframework.web.cors.CorsConfiguration;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, JwtFilter jwtFilter) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtFilter jwtFilter, CorsOrigins corsOrigins) throws Exception {
         http
             .cors(cors -> cors.configurationSource(request -> {
                 CorsConfiguration configuration = new CorsConfiguration();
-                configuration.setAllowedOrigins(java.util.Arrays.stream(System.getenv()
-                    .getOrDefault("APP_CORS_ALLOWED_ORIGINS", "http://localhost:5173")
-                    .split(",")).map(String::trim).filter(value -> !value.isBlank()).toList());
+                configuration.setAllowedOrigins(corsOrigins.allowed());
                 configuration.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
                 configuration.setAllowedHeaders(java.util.List.of("*"));
                 configuration.setExposedHeaders(java.util.List.of("Authorization"));
@@ -33,6 +31,11 @@ public class SecurityConfig {
                 configuration.setMaxAge(3600L);
                 return configuration;
             }))
+            .headers(headers -> headers
+                .contentTypeOptions(content -> {})
+                .frameOptions(frame -> frame.deny())
+                .referrerPolicy(referrer -> referrer.policy(
+                    org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN)))
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth

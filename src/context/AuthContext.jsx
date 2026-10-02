@@ -161,6 +161,11 @@ export function AuthProvider({ children }) {
     setIsAuthenticated(false);
     setUser(null);
     localStorage.removeItem("jwtToken");
+    localStorage.removeItem("token");
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("jwtToken");
+      sessionStorage.removeItem("token");
+    }
   };
 
   return (

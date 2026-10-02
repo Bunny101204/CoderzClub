@@ -52,6 +52,23 @@ class BatchServiceTest {
     }
 
     @Test
+    void addMemberRejectsDeletedUser() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        Batch batch = new Batch();
+        batch.setId("b1");
+        User user = new User();
+        user.setId("u1");
+        user.setAccountStatus("DELETED");
+        when(mongo.findById("b1", Batch.class)).thenReturn(batch);
+        when(mongo.findById("u1", User.class)).thenReturn(user);
+        BatchService service = new BatchService(mongo);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.addMembers("b1", java.util.List.of("u1")));
+        assertTrue(ex.getMessage().contains("User not found"));
+        verify(mongo, never()).save(any(BatchMember.class));
+    }
+
+    @Test
     void duplicateMemberAddIsIdempotent() {
         MongoTemplate mongo = mock(MongoTemplate.class);
         Batch batch = new Batch();

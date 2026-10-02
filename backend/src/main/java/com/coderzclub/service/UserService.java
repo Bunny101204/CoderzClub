@@ -58,6 +58,7 @@ public class UserService implements UserDetailsService {
 
         User user = new User(null, username, email, passwordEncoder.encode(password), role, new Date());
         user.setEmailVerified(false);
+        user.setAccountStatus("ACTIVE");
         user.setEmailVerificationToken(generateToken());
         user.setEmailVerificationTokenExpiry(new Date(System.currentTimeMillis() + verificationTokenExpirationMs));
         return userRepository.save(user);
@@ -100,17 +101,20 @@ public class UserService implements UserDetailsService {
         return userRepository.save(user);
     }
 
-    public User createPasswordResetToken(String email) {
-        User user = findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
-
+    public Optional<User> createPasswordResetToken(String email) {
+        Optional<User> userOpt = findByEmail(email).filter(candidate -> !candidate.isDeleted());
+        if (userOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        User user = userOpt.get();
         user.setPasswordResetToken(generateToken());
         user.setPasswordResetTokenExpiry(new Date(System.currentTimeMillis() + resetTokenExpirationMs));
-        return userRepository.save(user);
+        return Optional.of(userRepository.save(user));
     }
 
     public User resetPassword(String token, String newPassword) {
         User user = findByPasswordResetToken(token)
+                .filter(candidate -> !candidate.isDeleted())
                 .orElseThrow(() -> new RuntimeException("Invalid reset token"));
         if (user.getPasswordResetTokenExpiry() == null || user.getPasswordResetTokenExpiry().before(new Date())) {
             throw new RuntimeException("Password reset token has expired");
@@ -125,14 +129,18 @@ public class UserService implements UserDetailsService {
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        if (user.isDeleted()) {
+            throw new UsernameNotFoundException("User not found");
+        }
         String normalizedRole = (user.getRole() == null ? "USER" : user.getRole().trim().toUpperCase());
         String roleAuthority = "ROLE_" + normalizedRole;
+        String password = user.getPasswordHash() == null ? "" : user.getPasswordHash();
 
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getUsername())
-                .password(user.getPasswordHash())
-                .disabled(!user.isEmailVerified())
+                .password(password)
+                .disabled(!user.isEmailVerified() || user.isDeleted())
                 .authorities(roleAuthority)
                 .accountExpired(false)
                 .credentialsExpired(false)
@@ -141,17 +149,15 @@ public class UserService implements UserDetailsService {
     }
 
     public boolean checkPassword(String rawPassword, String encodedPassword) {
-        System.out.println("=== PASSWORD CHECK DEBUG ===");
-        System.out.println("Raw password: " + rawPassword);
-        System.out.println("Stored encoded password: " + encodedPassword);
-        
-        boolean matches = passwordEncoder.matches(rawPassword, encodedPassword);
-        System.out.println("Password matches: " + matches);
-        return matches;
+        if (rawPassword == null || encodedPassword == null) {
+            return false;
+        }
+        return passwordEncoder.matches(rawPassword, encodedPassword);
     }
 
     public User resendVerificationEmail(String usernameOrEmail) {
         User user = findByUsernameOrEmail(usernameOrEmail)
+                .filter(candidate -> !candidate.isDeleted())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (user.isEmailVerified()) {

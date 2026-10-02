@@ -8,6 +8,7 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.service.BatchReportService;
 import com.coderzclub.service.BatchService;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -42,11 +44,10 @@ public class BatchController {
 
     @PostMapping
     public ResponseEntity<?> create(@RequestBody BatchWriteRequest body, Authentication authentication) {
-        String createdBy = currentUserId(authentication);
         Batch batch = batchService.create(
             body == null ? null : body.getName(),
             body == null ? null : body.getDescription(),
-            createdBy);
+            requireCurrentUserId(authentication));
         return ResponseEntity.ok(batchService.detail(batch.getId()));
     }
 
@@ -155,10 +156,17 @@ public class BatchController {
             .body(csv.getBytes(StandardCharsets.UTF_8));
     }
 
-    private String currentUserId(Authentication authentication) {
+    /**
+     * New batches store Mongo user id in createdBy. Historical rows may still contain a username
+     * from an older fallback and are not migrated here.
+     */
+    private String requireCurrentUserId(Authentication authentication) {
         if (authentication == null || authentication.getName() == null) {
-            return null;
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
         }
-        return userRepository.findByUsername(authentication.getName()).map(User::getId).orElse(authentication.getName());
+        return userRepository.findByUsername(authentication.getName())
+            .filter(user -> !user.isDeleted())
+            .map(User::getId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated"));
     }
 }

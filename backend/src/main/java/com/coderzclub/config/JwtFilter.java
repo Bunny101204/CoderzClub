@@ -11,6 +11,7 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -34,9 +35,7 @@ public class JwtFilter extends OncePerRequestFilter {
         String requestURI = request.getRequestURI();
         logger.debug("JWT Filter processing: {}", requestURI);
         
-        // Skip JWT processing for authentication endpoints
-        if (requestURI.equals("/api/login") || requestURI.equals("/api/register") || requestURI.equals("/api/resend-verification") || requestURI.equals("/api/test-password") || requestURI.equals("/api/test")) {
-            logger.debug("Skipping JWT processing for: {}", requestURI);
+        if (requestURI.equals("/api/login") || requestURI.equals("/api/register") || requestURI.equals("/api/resend-verification") || requestURI.equals("/api/test") || requestURI.equals("/api/test-password")) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -56,50 +55,23 @@ public class JwtFilter extends OncePerRequestFilter {
             }
         }
 
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            logger.debug("JWT Filter: Processing request for username: {}", username);
-            UserDetails userDetails = userService.loadUserByUsername(username);
-            logger.debug("JWT Filter: User authorities: {}", userDetails.getAuthorities());
-            
-            if (jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
-                logger.debug("JWT Filter: Token is valid, setting authentication");
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities());
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
-                logger.debug("JWT Filter: Authentication set successfully");
-            } else {
-                logger.debug("JWT Filter: Token is invalid");
-            }
-        } else if (username == null) {
-            logger.debug("JWT Filter: No username extracted from token");
-        } else {
-            logger.debug("JWT Filter: Authentication already exists");
-        }
         if (username != null) {
             var existingAuthentication = SecurityContextHolder.getContext().getAuthentication();
             boolean shouldReplaceAuthentication = existingAuthentication == null || existingAuthentication instanceof AnonymousAuthenticationToken;
 
             if (shouldReplaceAuthentication) {
-                System.out.println("JWT Filter: Processing request for username: " + username);
-                UserDetails userDetails = userService.loadUserByUsername(username);
-                System.out.println("JWT Filter: User authorities: " + userDetails.getAuthorities());
-                
-                if (jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
-                    System.out.println("JWT Filter: Token is valid, setting authentication");
-                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities());
-                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authToken);
-                    System.out.println("JWT Filter: Authentication set successfully");
-                } else {
-                    System.out.println("JWT Filter: Token is invalid");
+                try {
+                    UserDetails userDetails = userService.loadUserByUsername(username);
+                    if (userDetails.isEnabled() && jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
+                        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(authToken);
+                    }
+                } catch (UsernameNotFoundException ignored) {
+                    logger.debug("JWT Filter: user no longer authenticable");
                 }
-            } else {
-                System.out.println("JWT Filter: Authentication already exists");
             }
-        } else {
-            System.out.println("JWT Filter: No username extracted from token");
         }
         filterChain.doFilter(request, response);
     }

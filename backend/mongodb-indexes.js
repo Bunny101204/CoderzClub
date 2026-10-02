@@ -145,7 +145,10 @@ ensureIndex(db.problem_bundles, { "createdAt": -1 }, { name: "createdAt_desc_idx
 // ===== SUBSCRIPTIONS COLLECTION INDEXES =====
 ensureIndex(db.subscriptions, { "userId": 1 }, { name: "userId_idx" });
 ensureIndex(db.subscriptions, { "status": 1 }, { name: "status_idx" });
-ensureIndex(db.subscriptions, { "expiryDate": 1 }, { name: "expiryDate_idx" });
+ensureIndex(db.subscriptions, { "endDate": 1 }, { name: "endDate_idx" });
+dropIndexIfPresent(db.subscriptions, "expiryDate_idx");
+// Batch member picker GET /api/admin/batches/users excludes DELETED accounts.
+ensureIndex(db.users, { "accountStatus": 1 }, { name: "accountStatus_idx" });
 
 // ===== BATCH / CLASSROOM INDEXES =====
 // List batches by recency and optional active filter.

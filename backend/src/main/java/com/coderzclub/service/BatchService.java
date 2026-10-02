@@ -141,6 +141,9 @@ public class BatchService {
             if (user == null) {
                 throw new IllegalArgumentException("User not found: " + userId);
             }
+            if (user.isDeleted()) {
+                throw new IllegalArgumentException("User not found: " + userId);
+            }
             BatchMember member = new BatchMember();
             member.setBatchId(batchId);
             member.setUserId(user.getId());
@@ -281,6 +284,10 @@ public class BatchService {
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
         Query query = new Query();
+        query.addCriteria(new Criteria().orOperator(
+            Criteria.where("accountStatus").exists(false),
+            Criteria.where("accountStatus").ne("DELETED")
+        ));
         if (search != null && !search.trim().isEmpty()) {
             String escaped = Pattern.quote(search.trim());
             query.addCriteria(new Criteria().orOperator(

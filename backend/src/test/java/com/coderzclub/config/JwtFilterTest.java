@@ -17,6 +17,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
 import java.util.List;
 
@@ -105,5 +106,44 @@ class JwtFilterTest {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         assertThat(authentication).isNotNull();
         assertThat(authentication.getPrincipal()).isSameAs(userDetails);
+    }
+
+    @Test
+    void missingUserDoesNotLeaveAuthentication() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/users/profile");
+        request.addHeader("Authorization", "Bearer test-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        when(jwtUtil.extractUsername("test-token")).thenReturn("alice");
+        when(userService.loadUserByUsername("alice")).thenThrow(new UsernameNotFoundException("gone"));
+        jwtFilter.doFilterInternal(request, response, (req, res) -> {});
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void tokenForDeletedUserDoesNotAuthenticate() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/users/me/export");
+        request.addHeader("Authorization", "Bearer test-token");
+        when(jwtUtil.extractUsername("test-token")).thenReturn("alice");
+        when(userService.loadUserByUsername("alice")).thenThrow(new UsernameNotFoundException("deleted"));
+        jwtFilter.doFilterInternal(request, new MockHttpServletResponse(), (req, res) -> {});
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void disabledUserDetailsAreNotAuthenticated() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/users/profile");
+        request.addHeader("Authorization", "Bearer test-token");
+        when(jwtUtil.extractUsername("test-token")).thenReturn("alice");
+        UserDetails disabled = User.withUsername("alice")
+                .password("password")
+                .authorities("ROLE_USER")
+                .disabled(true)
+                .build();
+        when(userService.loadUserByUsername("alice")).thenReturn(disabled);
+        jwtFilter.doFilterInternal(request, new MockHttpServletResponse(), (req, res) -> {});
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 }

@@ -12,11 +12,16 @@ import java.util.Arrays;
 
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
+    private final CorsOrigins corsOrigins;
+
+    public CorsConfig(CorsOrigins corsOrigins) {
+        this.corsOrigins = corsOrigins;
+    }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOrigins(allowedOrigins().toArray(String[]::new))
+                .allowedOrigins(corsOrigins.allowed().toArray(String[]::new))
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD")
                 .allowedHeaders("*")
                 .allowCredentials(true)
@@ -27,7 +32,7 @@ public class CorsConfig implements WebMvcConfigurer {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(allowedOrigins());
+        configuration.setAllowedOrigins(corsOrigins.allowed());
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setExposedHeaders(Arrays.asList("Authorization", "X-Custom-Header", "Content-Type"));
@@ -37,10 +42,5 @@ public class CorsConfig implements WebMvcConfigurer {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
-    }
-
-    private java.util.List<String> allowedOrigins() {
-        return Arrays.stream(System.getenv().getOrDefault("APP_CORS_ALLOWED_ORIGINS", "http://localhost:5173")
-            .split(",")).map(String::trim).filter(value -> !value.isBlank()).toList();
     }
 } 

@@ -1,14 +1,19 @@
 package com.coderzclub.controller;
 
-import com.coderzclub.model.User;
-import com.coderzclub.repository.UserRepository;
+import com.coderzclub.dto.AccountDeletionRequest;
 import com.coderzclub.dto.LeaderboardEntry;
 import com.coderzclub.dto.UserProfileStatsResponse;
+import com.coderzclub.dto.UserProfileResponse;
+import com.coderzclub.model.User;
+import com.coderzclub.repository.UserRepository;
+import com.coderzclub.service.AccountDeletionService;
 import com.coderzclub.service.LeaderboardService;
+import com.coderzclub.service.UserDataExportService;
 import com.coderzclub.service.UserProgressService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,6 +36,12 @@ public class UserController {
     @Autowired
     private LeaderboardService leaderboardService;
 
+    @Autowired
+    private AccountDeletionService accountDeletionService;
+
+    @Autowired
+    private UserDataExportService userDataExportService;
+
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile() {
         try {
@@ -43,12 +54,13 @@ public class UserController {
             }
             
             User user = userOpt.get();
-            // Don't expose password hash
-            user.setPasswordHash(null);
-            return ResponseEntity.ok(user);
+            if (user.isDeleted()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Account is no longer available"));
+            }
+            return ResponseEntity.ok(UserProfileResponse.from(user));
             
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error fetching profile: " + e.getMessage());
+            return ResponseEntity.badRequest().body("Error fetching profile");
         }
     }
     
@@ -124,13 +136,40 @@ public class UserController {
             if (request.getWebsite() != null) user.setWebsite(request.getWebsite());
             
             userRepository.save(user);
-            user.setPasswordHash(null);
-            
-            return ResponseEntity.ok(user);
+            return ResponseEntity.ok(UserProfileResponse.from(user));
             
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error updating profile: " + e.getMessage());
+            return ResponseEntity.badRequest().body("Error updating profile");
         }
+    }
+
+    @GetMapping("/me/export")
+    public ResponseEntity<?> exportMyData() {
+        User user = currentUser();
+        if (user == null || user.isDeleted()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
+        }
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"coderzclub-data-export.json\"")
+            .body(userDataExportService.export(user));
+    }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<?> deleteMyAccount(@RequestBody(required = false) AccountDeletionRequest body) {
+        User user = currentUser();
+        if (user == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
+        }
+        String confirmation = body == null ? null : body.getConfirmation();
+        return ResponseEntity.ok(accountDeletionService.deleteSelf(user, confirmation));
+    }
+
+    private User currentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null) {
+            return null;
+        }
+        return userRepository.findByUsername(auth.getName()).orElse(null);
     }
     
     // DTO for profile update request

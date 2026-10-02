@@ -39,10 +39,8 @@ public class AuthController {
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
                                       @RequestHeader(value = "X-Client-Origin", required = false) String clientOrigin) {
         try {
-            System.out.println("Registration attempt for username: " + req.getUsername() + ", email: " + req.getEmail());
             String role = req.getRole() != null ? req.getRole() : "user";
             User user = userService.registerUser(req.getUsername(), req.getEmail(), req.getPassword(), role);
-            System.out.println("User registered successfully: " + user.getUsername() + ", email verified: " + user.isEmailVerified());
 
             try {
                 emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken(), clientOrigin);
@@ -51,15 +49,12 @@ public class AuthController {
                     "emailSent", true
                 ));
             } catch (Exception emailEx) {
-                System.out.println("Email send failed after registration: " + emailEx.getMessage());
                 return ResponseEntity.ok(Map.of(
                     "message", "Registration successful, but the verification email could not be sent. Please contact support or try again later.",
-                    "emailSent", false,
-                    "warning", emailEx.getMessage()
+                    "emailSent", false
                 ));
             }
         } catch (Exception e) {
-            System.out.println("Registration failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -95,8 +90,7 @@ public class AuthController {
                 System.out.println("Resend verification email failed: " + emailEx.getMessage());
                 return ResponseEntity.ok(Map.of(
                     "message", "User found, but the verification email could not be sent. Please contact support or try again later.",
-                    "emailSent", false,
-                    "warning", emailEx.getMessage()
+                    "emailSent", false
                 ));
             }
         } catch (Exception e) {
@@ -107,26 +101,23 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest req) {
-        System.out.println("=== LOGIN DEBUG ===");
-        System.out.println("Login attempt for identifier: " + req.getUsername());
         Optional<User> userOpt = userService.findByUsernameOrEmail(req.getUsername());
         
         if (userOpt.isPresent()) {
             User user = userOpt.get();
-            System.out.println("User found: " + user.getUsername());
+            if (user.isDeleted()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+            }
             if (!user.isEmailVerified()) {
-                System.out.println("Login blocked: email not verified for " + user.getUsername());
                 return ResponseEntity.status(401).body(Map.of("error", "Email is not verified. Please verify your email before logging in."));
             }
             
             boolean passwordMatch = userService.checkPassword(req.getPassword(), user.getPasswordHash());
             if (passwordMatch) {
                 String token = jwtUtil.generateToken(user.getUsername(), user.getRole());
-                System.out.println("Generated token successfully");
                 return ResponseEntity.ok(new JwtResponse(token, user.getRole()));
-            } else {
-                return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
             }
+            return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
         } else {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
         }
@@ -134,13 +125,16 @@ public class AuthController {
 
     @PostMapping("/password-reset-request")
     public ResponseEntity<?> passwordResetRequest(@RequestBody PasswordResetRequest request) {
-        try {
-            User user = userService.createPasswordResetToken(request.getEmail());
-            emailService.sendPasswordResetEmail(user.getEmail(), user.getPasswordResetToken());
-            return ResponseEntity.ok(Map.of("message", "Password reset instructions have been sent if the email exists."));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        String email = request == null ? null : request.getEmail();
+        Optional<User> user = userService.createPasswordResetToken(email);
+        if (user.isPresent()) {
+            try {
+                emailService.sendPasswordResetEmail(user.get().getEmail(), user.get().getPasswordResetToken());
+            } catch (Exception ignored) {
+            }
         }
+        return ResponseEntity.ok(Map.of(
+            "message", "If an eligible account exists for that email, reset instructions have been sent."));
     }
 
     @PostMapping("/password-reset-confirm")
@@ -164,7 +158,7 @@ public class AuthController {
             String token = authHeader.substring(7);
             String username = jwtUtil.extractUsername(token);
             Optional<User> userOpt = userService.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            if (!userOpt.isPresent() || userOpt.get().isDeleted()) {
                 return ResponseEntity.status(401).body(Map.of("error", "User not found"));
             }
             
@@ -185,17 +179,7 @@ public class AuthController {
     }
 
     @PostMapping("/test-password")
-    public ResponseEntity<?> testPassword(@RequestBody LoginRequest req) {
-        String encoded = userService.getPasswordEncoder().encode(req.getPassword());
-        boolean matches = userService.checkPassword(req.getPassword(), encoded);
-        String encoded2 = userService.getPasswordEncoder().encode(req.getPassword());
-        boolean matches2 = userService.checkPassword(req.getPassword(), encoded2);
-        return ResponseEntity.ok(Map.of(
-            "original", req.getPassword(),
-            "encoded", encoded,
-            "matches", matches,
-            "encoded2", encoded2,
-            "matches2", matches2
-        ));
+    public ResponseEntity<?> testPassword() {
+        return ResponseEntity.status(404).body(Map.of("error", "Not found"));
     }
 }

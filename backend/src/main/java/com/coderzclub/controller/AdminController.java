@@ -6,12 +6,15 @@ import com.coderzclub.model.Submission;
 import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.SubmissionRepository;
+import com.coderzclub.service.AccountDeletionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,9 @@ public class AdminController {
     
     @Autowired
     private SubmissionRepository submissionRepository;
+
+    @Autowired
+    private AccountDeletionService accountDeletionService;
 
     @GetMapping("/dashboard")
     public ResponseEntity<?> getDashboardStats() {
@@ -74,7 +80,16 @@ public class AdminController {
             
             Map<String, Object> response = new HashMap<>();
             response.put("users", usersPage.getContent().stream()
-                .peek(user -> user.setPasswordHash(null))  // Remove sensitive data
+                .map(user -> {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("id", user.getId());
+                    row.put("username", user.getUsername());
+                    row.put("email", user.getEmail());
+                    row.put("role", user.getRole());
+                    row.put("createdAt", user.getCreatedAt());
+                    row.put("accountStatus", user.getAccountStatus() == null ? "ACTIVE" : user.getAccountStatus());
+                    return row;
+                })
                 .collect(Collectors.toList()));
             response.put("currentPage", page);
             response.put("totalPages", usersPage.getTotalPages());
@@ -111,8 +126,19 @@ public class AdminController {
     @DeleteMapping("/users/{userId}")
     public ResponseEntity<?> deleteUser(@PathVariable String userId) {
         try {
-            userRepository.deleteById(userId);
-            return ResponseEntity.ok("User deleted successfully");
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return ResponseEntity.badRequest().body("User not found");
+            }
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getName() != null) {
+                User actor = userRepository.findByUsername(auth.getName()).orElse(null);
+                if (actor != null && userId.equals(actor.getId())) {
+                    return ResponseEntity.badRequest().body(Map.of("error", "Admins cannot delete their own account from this endpoint"));
+                }
+            }
+            accountDeletionService.delete(user);
+            return ResponseEntity.ok(Map.of("deleted", true));
             
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error deleting user: " + e.getMessage());

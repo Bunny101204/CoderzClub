@@ -365,6 +365,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { canConfirmAccountDeletion, clearLocalAuthState, DELETE_CONFIRMATION_PHRASE } from "../privacy/accountDeletion";
 
 const Profile = ({ isOpen, onClose, asPage = false }) => {
   const { user, logout } = useAuth();
@@ -373,6 +374,9 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
   const [stats, setStats] = useState(null);
   const [loadingStats, setLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState(null);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!asPage && !isOpen) return;
@@ -415,6 +419,45 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     if (onClose) onClose();
     navigate("/auth");
     setIsLoggingOut(false);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!canConfirmAccountDeletion(deletePhrase) || deleting) return;
+    if (!window.confirm("This permanently disables your account and anonymizes your identity. Continue?")) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      const response = await axios.delete("/api/users/me", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        data: { confirmation: DELETE_CONFIRMATION_PHRASE }
+      });
+      if (response.status >= 400) {
+        throw new Error(response.data?.error || "Deletion failed");
+      }
+      clearLocalAuthState();
+      logout();
+      if (onClose) onClose();
+      navigate("/auth", { replace: true });
+    } catch (error) {
+      setDeleteError(error.response?.data?.error || error.message || "Could not delete account");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+    const response = await axios.get("/api/users/me/export", {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "coderzclub-data-export.json";
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // Build maps and aggregates
@@ -563,6 +606,32 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   {isLoggingOut ? "Logging Out..." : "Logout"}
                 </button>
               </div>
+            </div>
+
+            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 space-y-3">
+              <h3 className="text-white font-semibold">Your data</h3>
+              <button onClick={handleExportData} className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg">
+                Download my data
+              </button>
+              <p className="text-sm text-gray-400">
+                Deleting your account disables login and anonymizes your username and email. Judged submissions may remain for system integrity and will not show your original identity. This cannot be undone in the app.
+              </p>
+              <label className="block text-sm text-gray-300">
+                Type {DELETE_CONFIRMATION_PHRASE} to confirm
+                <input
+                  value={deletePhrase}
+                  onChange={(e) => setDeletePhrase(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded"
+                />
+              </label>
+              {deleteError && <p className="text-red-400 text-sm">{deleteError}</p>}
+              <button
+                onClick={handleDeleteAccount}
+                disabled={!canConfirmAccountDeletion(deletePhrase) || deleting}
+                className="w-full bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {deleting ? "Deleting..." : "Delete account"}
+              </button>
             </div>
 
             {/* Quick stats card */}

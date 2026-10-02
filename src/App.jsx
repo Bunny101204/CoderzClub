@@ -15,6 +15,7 @@ import LandingPage from "./Components/LandingPage";
 import Header from "./Components/Header";
 import AuthPage from "./Components/AuthPage";
 import ErrorBoundary from "./Components/ErrorBoundary";
+import SiteFooter from "./Components/SiteFooter";
 import { useAuth, AuthProvider } from "./context/AuthContext";
 import { api } from "./apiClient";
 
@@ -35,6 +36,8 @@ const SubscriptionPlans = lazy(() => import("./Components/SubscriptionPlans"));
 const Leaderboard = lazy(() => import("./Components/Leaderboard"));
 const UserStats = lazy(() => import("./Components/UserStats"));
 const Profile = lazy(() => import("./Components/Profile"));
+const PrivacyPage = lazy(() => import("./Components/PrivacyPage"));
+const TermsPage = lazy(() => import("./Components/TermsPage"));
 
 // Fallback component for Suspense
 function LoadingFallback() {
@@ -226,9 +229,18 @@ function AppContent() {
             )
           }
         />
+        <Route
+          path="/privacy"
+          element={<Suspense fallback={<LoadingFallback />}><PrivacyPage /></Suspense>}
+        />
+        <Route
+          path="/terms"
+          element={<Suspense fallback={<LoadingFallback />}><TermsPage /></Suspense>}
+        />
         {/* Catch-all for unknown routes */}
         <Route path="*" element={<Navigate to={isAuthenticated ? "/home" : "/"} replace />} />
       </Routes>
+      <SiteFooter />
     </div>
   );
 }
