@@ -12,6 +12,7 @@
     "test:editor-drafts": "node --test src/Components/editorLanguageDrafts.test.js",
     "test:execution-modes": "node --test src/Components/executionModes.test.js",
     "test:admin-problems": "node --test src/admin/adminProblems.test.js",
+    "test:batch": "node --test src/admin/batchProgress.test.js",
     "test:progress": "node --test src/progress/userProgress.test.js src/Components/bundleProgress.test.js",
     "preview": "vite preview",
     "render:uml": "node scripts/render-uml.cjs"

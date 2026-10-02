@@ -23,6 +23,12 @@ const AdminDashboard = () => {
   const [bundleSearch, setBundleSearch] = useState("");
   const [totalProblemPages, setTotalProblemPages] = useState(0);
   const [totalProblemItems, setTotalProblemItems] = useState(0);
+  const [batches, setBatches] = useState([]);
+  const [batchSearch, setBatchSearch] = useState("");
+  const [newBatchName, setNewBatchName] = useState("");
+  const [newBatchDescription, setNewBatchDescription] = useState("");
+  const [batchError, setBatchError] = useState("");
+  const [creatingBatch, setCreatingBatch] = useState(false);
   const problemFetchSeq = useRef(0);
   
   // Ensure problemList and bundles are always arrays
@@ -137,6 +143,61 @@ const AdminDashboard = () => {
     }
   };
 
+  const fetchAdminBatches = async () => {
+    try {
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      const params = new URLSearchParams({ page: "0", size: "20" });
+      if (batchSearch.trim()) params.set("search", batchSearch.trim());
+      const response = await fetch(`/api/admin/batches?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setBatches(Array.isArray(data.batches) ? data.batches : []);
+      }
+    } catch (error) {
+      console.error("Error fetching batches:", error);
+    }
+  };
+
+  const createBatch = async (event) => {
+    event.preventDefault();
+    setBatchError("");
+    if (!newBatchName.trim()) {
+      setBatchError("name is required");
+      return;
+    }
+    if (creatingBatch) return;
+    setCreatingBatch(true);
+    try {
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      const response = await fetch("/api/admin/batches", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ name: newBatchName, description: newBatchDescription })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setBatchError(data.error || "Could not create batch");
+        return;
+      }
+      setNewBatchName("");
+      setNewBatchDescription("");
+      fetchAdminBatches();
+    } finally {
+      setCreatingBatch(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "batches") {
+      fetchAdminBatches();
+    }
+  }, [activeTab, batchSearch]);
+
   // Delete problem handler
   const handleDeleteProblem = async (id) => {
     if (!window.confirm("Are you sure you want to delete this problem?")) return;
@@ -222,7 +283,7 @@ const AdminDashboard = () => {
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
           <div className="flex gap-4">
-            {activeTab === "problems" && (
+          {activeTab === "problems" && (
               <Link
                 to="/admin/add-problem"
                 className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg transition-all"
@@ -262,6 +323,16 @@ const AdminDashboard = () => {
             }`}
           >
             Bundles ({safeBundles.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("batches")}
+            className={`px-6 py-3 font-semibold ${
+              activeTab === "batches"
+                ? "text-blue-400 border-b-2 border-blue-400"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            Batches ({batches.length})
           </button>
         </div>
 
@@ -525,6 +596,66 @@ const AdminDashboard = () => {
                 </button>
               </div>
             )}
+          </>
+        )}
+
+        {activeTab === "batches" && (
+          <>
+            <h2 className="text-xl font-semibold mb-4">Batches</h2>
+            <form onSubmit={createBatch} className="bg-gray-800 rounded-lg p-4 mb-4 grid gap-3 sm:grid-cols-2">
+              <input
+                value={newBatchName}
+                onChange={(e) => setNewBatchName(e.target.value)}
+                placeholder="Batch name"
+                className="px-3 py-2 bg-gray-900 border border-gray-600 rounded"
+              />
+              <input
+                value={newBatchDescription}
+                onChange={(e) => setNewBatchDescription(e.target.value)}
+                placeholder="Optional description"
+                className="px-3 py-2 bg-gray-900 border border-gray-600 rounded"
+              />
+              <div className="sm:col-span-2 flex items-center gap-3">
+                <button type="submit" disabled={creatingBatch} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded disabled:opacity-50">Create Batch</button>
+                {batchError && <span className="text-red-400 text-sm">{batchError}</span>}
+              </div>
+            </form>
+            <input
+              value={batchSearch}
+              onChange={(e) => setBatchSearch(e.target.value)}
+              placeholder="Search batches by name"
+              className="px-3 py-2 bg-gray-800 border border-gray-600 rounded mb-4 w-full sm:w-80"
+            />
+            <div className="bg-gray-800 rounded-lg shadow p-4 overflow-x-auto">
+              {batches.length === 0 ? (
+                <div className="text-gray-400">No batches found.</div>
+              ) : (
+                <table className="w-full text-left">
+                  <thead>
+                    <tr>
+                      <th className="py-2 px-3">Name</th>
+                      <th className="py-2 px-3">Status</th>
+                      <th className="py-2 px-3">Students</th>
+                      <th className="py-2 px-3">Problems</th>
+                      <th className="py-2 px-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batches.map((batch) => (
+                      <tr key={batch.id} className="border-t border-gray-700">
+                        <td className="py-2 px-3">{batch.name}</td>
+                        <td className="py-2 px-3">{batch.active ? "Active" : "Archived"}</td>
+                        <td className="py-2 px-3">{batch.memberCount}</td>
+                        <td className="py-2 px-3">{batch.assignmentCount}</td>
+                        <td className="py-2 px-3">
+                          <Link to={`/admin/batches/${batch.id}`} className="text-blue-400 hover:underline">Open</Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </>
         )}
       </div>

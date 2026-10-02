@@ -24,6 +24,7 @@ const HomePage = lazy(() => import("./Components/HomePage"));
 const ProblemPage = lazy(() => import("./Components/ProblemPage"));
 const ProblemPageNew = lazy(() => import("./Components/ProblemPageNew"));
 const AdminDashboard = lazy(() => import("./Components/AdminDashboard"));
+const AdminBatchPage = lazy(() => import("./Components/AdminBatchPage"));
 const AddProblem = lazy(() => import("./Components/AddProblem"));
 const AddProblemNew = lazy(() => import("./Components/AddProblemNew"));
 const AddBundle = lazy(() => import("./Components/AddBundle"));
@@ -154,6 +155,16 @@ function AppContent() {
         <Route
           path="/admin"
           element={<Suspense fallback={<LoadingFallback />}><AdminRoute user={user} /></Suspense>}
+        />
+        <Route
+          path="/admin/batches/:id"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><AdminBatchPage /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/edit-problem/:id"

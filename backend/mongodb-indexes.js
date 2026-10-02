@@ -147,6 +147,20 @@ ensureIndex(db.subscriptions, { "userId": 1 }, { name: "userId_idx" });
 ensureIndex(db.subscriptions, { "status": 1 }, { name: "status_idx" });
 ensureIndex(db.subscriptions, { "expiryDate": 1 }, { name: "expiryDate_idx" });
 
+// ===== BATCH / CLASSROOM INDEXES =====
+// List batches by recency and optional active filter.
+ensureIndex(db.batches, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
+ensureIndex(db.batches, { "active": 1, "createdAt": -1 }, { name: "active_createdAt_desc_idx" });
+ensureIndex(db.batches, { "name": 1 }, { name: "name_idx" });
+// Membership uniqueness and per-batch member scans / counts.
+ensureIndex(db.batch_members, { "batchId": 1, "userId": 1 }, { unique: true, name: "batchId_userId_unique_idx" });
+ensureIndex(db.batch_members, { "batchId": 1, "addedAt": 1 }, { name: "batchId_addedAt_idx" });
+// Assignment uniqueness and per-batch assignment scans / counts.
+ensureIndex(db.batch_assignments, { "batchId": 1, "problemId": 1 }, { unique: true, name: "batchId_problemId_unique_idx" });
+ensureIndex(db.batch_assignments, { "batchId": 1, "assignedAt": 1 }, { name: "batchId_assignedAt_idx" });
+// Batch reports query submissions with userId $in page-or-all members AND problemId $in assigned IDs/aliases.
+// Existing submissions.userId_problemId_createdAt_desc_idx already covers that compound lookup.
+
 print('Index creation script completed. Verify indexes with db.collection.getIndexes().');
 
 // Fail migration/deployment validation if critical query indexes are absent or unsafe.
@@ -166,3 +180,9 @@ assertIndex(db.submission_outbox, "aggregate_event_unique_idx", function(idx) {
   return idx.unique === true;
 });
 assertIndex(db.submission_outbox, "status_nextAttempt_locked_idx");
+assertIndex(db.batch_members, "batchId_userId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.batch_assignments, "batchId_problemId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
