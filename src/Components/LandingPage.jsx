@@ -15,7 +15,7 @@ const LandingPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 text-gray-900 dark:from-gray-900 dark:via-blue-900 dark:to-gray-900 dark:text-white">
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />

@@ -98,7 +98,7 @@ class AccountDeletionServiceTest {
         new AccountDeletionService(users, mongo, encoder, leaderboard).delete(user);
         var inOrder = org.mockito.Mockito.inOrder(users, leaderboard, mongo);
         inOrder.verify(users).save(user);
-        inOrder.verify(leaderboard).invalidate();
+        inOrder.verify(leaderboard).removeParticipant("u1");
         inOrder.verify(mongo).remove(any(Query.class), eq(BatchMember.class));
     }
 

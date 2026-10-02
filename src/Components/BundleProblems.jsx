@@ -173,7 +173,7 @@ const BundleProblems = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-white text-xl">Loading bundle...</div>
       </div>
     );
@@ -181,7 +181,7 @@ const BundleProblems = () => {
 
   if (!bundle) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-center">
           <div className="text-white text-xl mb-4">Bundle not found</div>
           <Link to="/bundles" className="text-blue-400 hover:text-blue-300">
@@ -195,7 +195,7 @@ const BundleProblems = () => {
   const stats = getProgressStats();
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="app-shell">
       {/* Bundle Header */}
       <div className="bg-gradient-to-r from-blue-900 to-purple-900 py-12 px-8">
         <div className="max-w-6xl mx-auto">

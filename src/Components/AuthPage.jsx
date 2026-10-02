@@ -112,20 +112,20 @@ const AuthPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900">
-      <div className="bg-white/10 backdrop-blur-lg p-8 rounded-2xl shadow-2xl w-full max-w-md border border-white/20">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-100 to-slate-100 dark:from-gray-900 dark:via-blue-900 dark:to-gray-900">
+      <div className="app-surface p-8 rounded-2xl shadow-2xl w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">
+          <h1 className="text-3xl font-bold mb-2">
             {isLogin ? 'Welcome Back' : 'Join CoderzClub'}
           </h1>
-          <p className="text-gray-300">
+          <p className="app-muted">
             {isLogin ? 'Sign in to your account' : 'Create your account'}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium mb-2">
               Username
             </label>
             <input
@@ -133,14 +133,14 @@ const AuthPage = () => {
               name="username"
               value={formData.username}
               onChange={handleInputChange}
-              className="w-full px-4 py-3 rounded-lg bg-gray-800/50 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
               placeholder="Enter your username"
             />
           </div>
 
           {!isLogin && (
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium mb-2">
                 Email
               </label>
               <input
@@ -148,14 +148,14 @@ const AuthPage = () => {
                 name="email"
                 value={formData.email}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 rounded-lg bg-gray-800/50 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
                 placeholder="Enter your email"
               />
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium mb-2">
               Password
             </label>
             <input
@@ -163,14 +163,14 @@ const AuthPage = () => {
               name="password"
               value={formData.password}
               onChange={handleInputChange}
-              className="w-full px-4 py-3 rounded-lg bg-gray-800/50 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
               placeholder="Enter your password"
             />
           </div>
 
           {!isLogin && (
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium mb-2">
                 Confirm Password
               </label>
               <input
@@ -178,7 +178,7 @@ const AuthPage = () => {
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 rounded-lg bg-gray-800/50 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
                 placeholder="Confirm your password"
               />
             </div>

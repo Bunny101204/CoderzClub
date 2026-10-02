@@ -187,14 +187,14 @@ const BundleDashboard = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-white text-xl">Loading bundles...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="app-shell p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">

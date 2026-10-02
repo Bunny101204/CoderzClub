@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:polling": "node --test src/Components/submissionPolling.test.js",
+    "test:theme": "node --test src/theme/theme.test.js",
     "test:privacy": "node --test src/privacy/accountDeletion.test.js src/privacy/legalRoutes.test.js",
     "test:bundle-progress": "node --test src/Components/bundleProgress.test.js",
     "test:editor-drafts": "node --test src/Components/editorLanguageDrafts.test.js",

@@ -212,7 +212,7 @@ const HomePage = ({ problems: propsProblems }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="app-shell p-8">
       <div className="max-w-3xl mx-auto">
         <h1 className="text-3xl font-bold mb-6">Problem List</h1>
         <div className="flex flex-col lg:flex-row gap-4 mb-6">
@@ -223,7 +223,7 @@ const HomePage = ({ problems: propsProblems }) => {
                 setDifficulty(e.target.value);
                 setCurrentPage(0);
               }}
-              className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+              className="px-4 py-2 app-input rounded focus:outline-none"
             >
               <option value="">All Difficulties</option>
               <option value="EASY">Easy</option>
@@ -236,7 +236,7 @@ const HomePage = ({ problems: propsProblems }) => {
                 setTopic(e.target.value);
                 setCurrentPage(0);
               }}
-              className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+              className="px-4 py-2 app-input rounded focus:outline-none"
             >
               <option value="">All Topics</option>
               <option value="arrays">Arrays</option>
@@ -257,7 +257,7 @@ const HomePage = ({ problems: propsProblems }) => {
               <select
                 value={itemsPerPage}
                 onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(0); }}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+                className="px-3 py-2 app-input rounded focus:outline-none"
               >
                 <option value={10}>10</option>
                 <option value={20}>20</option>
@@ -274,10 +274,10 @@ const HomePage = ({ problems: propsProblems }) => {
               setSearch(e.target.value);
               setCurrentPage(0);
             }}
-            className="flex-1 p-3 rounded bg-gray-800 text-white border border-gray-600 focus:outline-none"
+            className="flex-1 p-3 rounded app-input focus:outline-none"
           />
         </div>
-        <table className="w-full text-left bg-gray-800 rounded-lg shadow">
+        <table className="w-full text-left app-surface rounded-lg shadow">
           <thead>
             <tr>
               <th className="py-2 px-3" aria-label="Status"></th>

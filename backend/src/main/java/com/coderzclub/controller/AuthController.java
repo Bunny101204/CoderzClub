@@ -87,14 +87,12 @@ public class AuthController {
                     "emailSent", true
                 ));
             } catch (Exception emailEx) {
-                System.out.println("Resend verification email failed: " + emailEx.getMessage());
                 return ResponseEntity.ok(Map.of(
                     "message", "User found, but the verification email could not be sent. Please contact support or try again later.",
                     "emailSent", false
                 ));
             }
         } catch (Exception e) {
-            System.out.println("Resend verification failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }

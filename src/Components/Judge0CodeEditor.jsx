@@ -14,6 +14,8 @@ import {
   normalizeJobResult,
   isHiddenResult,
 } from "./submissionPolling";
+import { editorSurfaceClasses } from "../theme/theme";
+import { useTheme } from "../context/ThemeContext";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -27,14 +29,8 @@ const Judge0CodeEditor = ({
   executionMode = "STDIN_STDOUT",
   onSubmissionSuccess,
 }) => {
-  // Debug: Log props on mount
-  React.useEffect(() => {
-    console.log("=== Judge0CodeEditor mounted ===");
-    console.log("testCases:", testCases);
-    console.log("testCases.length:", testCases?.length);
-    console.log("problemId:", problemId);
-    console.log("executionMode:", executionMode);
-  }, []);
+  const { theme } = useTheme();
+  const editorChrome = editorSurfaceClasses(theme);
   // Use controlled or internal state for languageId
   const [internalLanguageId, setInternalLanguageId] = useState(62);
   const languageId =
@@ -59,7 +55,6 @@ const Judge0CodeEditor = ({
   const [executionMemory, setExecutionMemory] = useState(null); // Execution memory in bytes
   const [errorDetails, setErrorDetails] = useState(null); // Detailed error info
   const [copySuccess, setCopySuccess] = useState(false); // Copy to clipboard success
-  const [isDarkTheme, setIsDarkTheme] = useState(true); // Theme state
   const pollingControllerRef = useRef(null);
   const activeJobIdRef = useRef(null);
   const submissionGenerationRef = useRef(0);
@@ -434,13 +429,6 @@ const Judge0CodeEditor = ({
   }
 
   const handleRunAll = async () => {
-    console.log("=== handleRunAll called ===");
-    console.log("testCases:", testCases);
-    console.log("testCases length:", testCases?.length);
-    console.log("languageId:", languageId);
-    console.log("sourceCode length:", sourceCode?.length);
-    
-    // Check if we have test cases
     if (!testCases || testCases.length === 0) {
       console.warn("No test cases available!");
       setOutput("No test cases available for this problem.");
@@ -470,7 +458,6 @@ const Judge0CodeEditor = ({
       );
       const payload = response.data || {};
       const remoteResults = payload.results || [];
-      console.log(`Run All used ${payload.executionModeUsed} with ${payload.providerExecutions} provider executions`);
       for (let i = 0; i < remoteResults.length; i++) {
         const r = remoteResults[i];
         const errorType = r.errorType;
@@ -497,12 +484,8 @@ const Judge0CodeEditor = ({
         }
       }
       
-      console.log("All results:", allResults);
       setResults(allResults);
       setOutput(""); // Clear output since we're showing results instead
-      
-      // Force a re-render check
-      console.log("Results state set, length:", allResults.length);
       
     } catch (error) {
       console.error("Error in handleRunAll:", error);
@@ -522,7 +505,6 @@ const Judge0CodeEditor = ({
       setResults([]); // Clear results on error
     } finally {
       setIsLoading(false);
-      console.log("handleRunAll completed, isLoading set to false");
     }
   };
 
@@ -682,12 +664,10 @@ const Judge0CodeEditor = ({
         languageId: languageId
       };
 
-      console.log("Submitting job request to backend:", jobRequest);
       const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
       if (submissionGeneration !== submissionGenerationRef.current) return;
       const { jobId } = jobResponse.data;
       activeJobIdRef.current = jobId;
-      console.log("Received submission job ID:", jobId, "response:", jobResponse.data);
 
       await subscribeToJobEvents(jobId);
 
@@ -781,7 +761,6 @@ const Judge0CodeEditor = ({
 
         if (isTerminalJobState(job.status)) {
           setOutput("");
-          console.log("Submission job completed:", job);
           setIsLoading(false);
 
           if (job.status === 'TIMEOUT') {
@@ -929,7 +908,6 @@ const Judge0CodeEditor = ({
     try {
       const token = auth.getToken();
       if (!token) {
-        console.log("No token found, skipping submission save");
         return;
       }
 
@@ -955,7 +933,6 @@ const Judge0CodeEditor = ({
 
       const response = await axios.post("/api/submissions", submissionData, auth.getAuthConfig());
 
-      console.log("Submission saved with details:", response.data);
       setSubmissionStatus("saved");
     } catch (error) {
       console.error("Error saving submission:", error);
@@ -1055,15 +1032,6 @@ const Judge0CodeEditor = ({
         >
           Reset
         </button>
-        
-        {/* Theme Toggle */}
-        <button
-          onClick={() => setIsDarkTheme(!isDarkTheme)}
-          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 shadow-md hover:shadow-lg"
-          title="Toggle theme"
-        >
-          {isDarkTheme ? 'Light' : 'Dark'}
-        </button>
       </div>
     </div>
   );
@@ -1090,7 +1058,7 @@ const Judge0CodeEditor = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto mt-8 p-6 bg-gray-900 text-white rounded-lg shadow-lg">
+    <div className={`max-w-4xl mx-auto mt-8 p-6 rounded-lg shadow-lg ${theme === "light" ? "bg-white text-gray-900" : "bg-gray-900 text-white"}`}>
       {/* REMOVED: Main method warning modal - no longer needed as users can submit full programs */}
       <EditorContextAPI.Provider
         value={{
@@ -1104,11 +1072,11 @@ const Judge0CodeEditor = ({
         {/* Show language selector and download in test case mode, UtilBar otherwise */}
         {isTestCaseMode ? utilBarRow : <UtilBar />}
       </EditorContextAPI.Provider>
-      <div className="relative flex mb-4 border border-gray-700 rounded-lg overflow-hidden">
+      <div className={`relative flex mb-4 border rounded-lg overflow-hidden ${theme === "light" ? "border-gray-300" : "border-gray-700"}`}>
         {/* Line Numbers */}
         <div
           ref={lineRef}
-          className="bg-gray-800 text-gray-400 text-sm font-mono px-3 py-4 select-none overflow-hidden"
+          className={`${theme === "light" ? "bg-gray-100 text-gray-500" : "bg-gray-800 text-gray-400"} text-sm font-mono px-3 py-4 select-none overflow-hidden`}
           style={{ minWidth: "48px" }}
         >
           {Array.from({ length: lineCount }, (_, i) => (
@@ -1120,7 +1088,7 @@ const Judge0CodeEditor = ({
         <textarea
           rows={isTestCaseMode ? 18 : 12}
           id="codeArea"
-          className="w-full p-4 mb-4 rounded-lg bg-gray-800 border border-gray-700 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-green-400"
+          className={`w-full p-4 mb-4 rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-green-400 ${editorChrome}`}
           placeholder="Type your code here..."
           value={sourceCode}
           onChange={(e) => setSourceCode(e.target.value)}
@@ -1340,17 +1308,9 @@ const Judge0CodeEditor = ({
           <div className="flex gap-2 mt-4">
             <button
               onClick={() => {
-                console.log("=== Run button clicked ===");
-                console.log("useCustomInput:", useCustomInput);
-                console.log("testCases:", testCases);
-                console.log("testCases.length:", testCases?.length);
-                console.log("current results.length:", results.length);
-                
                 if (useCustomInput) {
-                  console.log("Using handleSingleRun (custom input)");
                   handleSingleRun();
                 } else if (testCases && testCases.length > 0) {
-                  console.log("Using handleRunAll");
                   handleRunAll();
                 } else {
                   console.warn("No test cases available, using handleSingleRun");

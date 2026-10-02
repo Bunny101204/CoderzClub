@@ -80,7 +80,7 @@ const ProblemPageNew = ({ problems }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-white text-xl">Loading problem...</div>
       </div>
     );
@@ -88,7 +88,7 @@ const ProblemPageNew = ({ problems }) => {
 
   if (!problem) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-center">
           <div className="text-white text-xl mb-4">Problem not found</div>
           <Link to="/home" className="text-blue-400 hover:text-blue-300">
@@ -102,7 +102,7 @@ const ProblemPageNew = ({ problems }) => {
   const isStdinMode = problem.executionMode !== "FUNCTION_HARNESS_BATCH";
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="app-shell">
       <div className="flex h-screen">
         {/* Left Panel - Problem Description */}
         <div 

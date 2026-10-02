@@ -101,19 +101,33 @@ public class UserController {
     
     @GetMapping("/leaderboard")
     public ResponseEntity<?> getLeaderboard(
-        @RequestParam(defaultValue = "50") int limit,
-        @RequestParam(defaultValue = "false") boolean includeRank) {
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size,
+        @RequestParam(required = false) Integer limit) {
         try {
-            List<LeaderboardEntry> topUsers = leaderboardService.top(limit);
-            if (!includeRank) return ResponseEntity.ok(topUsers);
+            int requestedSize = limit == null ? size : limit;
+            Map<String, Object> body = new java.util.LinkedHashMap<>(leaderboardService.page(page, requestedSize));
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth == null ? null : auth.getName();
-            Long rank = username == null ? null : userRepository.findByUsername(username)
-                .map(user -> leaderboardService.rank(user.getId())).orElse(null);
-            return ResponseEntity.ok(Map.of("users", topUsers, "rank", rank == null ? 0 : rank));
-            
+            if (auth != null && auth.isAuthenticated()
+                && !(auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
+                && auth.getName() != null) {
+                userRepository.findByUsername(auth.getName())
+                    .filter(user -> !user.isDeleted())
+                    .ifPresent(user -> {
+                        java.util.Map<String, Object> viewer = new java.util.LinkedHashMap<>();
+                        viewer.put("username", user.getUsername());
+                        viewer.put("rank", leaderboardService.rank(user.getId()));
+                        viewer.put("totalPoints", user.getTotalPoints());
+                        viewer.put("problemsSolved", user.getProblemsSolved());
+                        @SuppressWarnings("unchecked")
+                        java.util.List<LeaderboardEntry> users = (java.util.List<LeaderboardEntry>) body.get("users");
+                        viewer.put("onPage", users != null && users.stream().anyMatch(entry -> user.getId().equals(entry.getId())));
+                        body.put("viewer", viewer);
+                    });
+            }
+            return ResponseEntity.ok(body);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(null);
+            return ResponseEntity.status(503).body(Map.of("error", "Leaderboard is temporarily unavailable"));
         }
     }
     

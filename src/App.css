@@ -1,1 +1,36 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white;
+  }
+  .app-surface {
+    @apply bg-white border border-gray-200 text-gray-900 dark:bg-gray-800 dark:border-gray-700 dark:text-white;
+  }
+  .app-muted {
+    @apply text-gray-600 dark:text-gray-400;
+  }
+  .app-input {
+    @apply bg-white text-gray-900 border border-gray-300 dark:bg-gray-800 dark:text-white dark:border-gray-600;
+  }
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+html.dark body {
+  background-color: #111827;
+  color: #f9fafb;
+}
+
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}

@@ -62,7 +62,7 @@ const UserStats = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="app-shell p-6">
         <div className="max-w-6xl mx-auto">
           <h1 className="text-3xl font-bold mb-6">📊 My Statistics</h1>
           <div className="flex justify-center items-center h-64">
@@ -75,7 +75,7 @@ const UserStats = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="app-shell p-6">
         <div className="max-w-6xl mx-auto">
           <h1 className="text-3xl font-bold mb-6">📊 My Statistics</h1>
           <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 text-red-300">
@@ -87,7 +87,7 @@ const UserStats = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
+    <div className="app-shell p-6">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold mb-6">📊 My Statistics</h1>
         

@@ -71,9 +71,9 @@ public class AccountDeletionService {
             user.setAccountStatus("DELETED");
             user.setDeletedAt(new Date());
             userRepository.save(user);
-            if (leaderboardService != null) {
-                leaderboardService.invalidate();
-            }
+        }
+        if (leaderboardService != null) {
+            leaderboardService.removeParticipant(user.getId());
         }
         String id = user.getId();
         mongoTemplate.remove(Query.query(Criteria.where("userId").is(id)), BatchMember.class);

@@ -159,7 +159,7 @@
 
 //   const Wrapper = ({ children }) =>
 //     asPage ? (
-//       <div className="min-h-screen bg-gray-900 text-white p-6">{children}</div>
+//       <div className="app-shell p-6">{children}</div>
 //     ) : (
 //       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
 //         {children}
@@ -562,7 +562,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
 
   const Wrapper = ({ children }) =>
     asPage ? (
-      <div className="min-h-screen bg-gray-900 text-white p-6">{children}</div>
+      <div className="app-shell p-6">{children}</div>
     ) : (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         {children}

@@ -171,16 +171,16 @@ const AddProblem = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+    <div className="app-shell flex items-center justify-center">
       <form
         onSubmit={handleSubmit}
-        className="bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-lg"
+        className="app-surface p-8 rounded-lg shadow-lg w-full max-w-lg"
       >
-        <h2 className="text-2xl font-bold mb-6 text-white text-center">Add New Problem</h2>
+        <h2 className="text-2xl font-bold mb-6 text-center">Add New Problem</h2>
         
         {/* Problem Type Selection */}
         <div className="mb-6">
-          <label className="block text-white mb-2">Problem Type*</label>
+            <label className="block mb-2">Problem Type*</label>
           <div className="flex gap-4">
             <label className="flex items-center">
               <input
@@ -191,7 +191,7 @@ const AddProblem = () => {
                 onChange={(e) => setProblemType(e.target.value)}
                 className="mr-2"
               />
-              <span className="text-white">Standalone Problem</span>
+              <span>Standalone Problem</span>
             </label>
             <label className="flex items-center">
               <input
@@ -202,7 +202,7 @@ const AddProblem = () => {
                 onChange={(e) => setProblemType(e.target.value)}
                 className="mr-2"
               />
-              <span className="text-white">Bundle Problem</span>
+              <span>Bundle Problem</span>
             </label>
           </div>
         </div>
@@ -210,11 +210,11 @@ const AddProblem = () => {
         {/* Bundle Selection */}
         {problemType === "bundle" && (
           <div className="mb-4">
-            <label className="block text-white mb-2">Select Bundle*</label>
+            <label className="block mb-2">Select Bundle*</label>
             <select
               value={selectedBundle}
               onChange={(e) => setSelectedBundle(e.target.value)}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+              className="w-full p-3 rounded app-input focus:outline-none"
             >
               <option value="">Select a bundle</option>
               {bundles.map(bundle => (
@@ -226,48 +226,48 @@ const AddProblem = () => {
           </div>
         )}
 
-        <label className="block text-white mb-2">Title*</label>
+        <label className="block mb-2">Title*</label>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
         />
-        <label className="block text-white mb-2">Description*</label>
+        <label className="block mb-2">Description*</label>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none min-h-[100px]"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none min-h-[100px]"
         />
-        <label className="block text-white mb-2">Difficulty*</label>
+        <label className="block mb-2">Difficulty*</label>
         <select
           value={difficulty}
           onChange={(e) => setDifficulty(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
         >
           <option value="">Select difficulty</option>
           <option value="Easy">Easy</option>
           <option value="Medium">Medium</option>
           <option value="Hard">Hard</option>
         </select>
-        <label className="block text-white mb-2">Tags (comma separated)</label>
+        <label className="block mb-2">Tags (comma separated)</label>
         <input
           type="text"
           value={tags}
           onChange={(e) => setTags(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
         />
-        <label className="block text-white mb-2">Function Name*</label>
+        <label className="block mb-2">Function Name*</label>
         <input
           type="text"
           value={functionName}
           onChange={e => setFunctionName(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
           placeholder="e.g. miracleSum"
           required
         />
-        <label className="block text-white mb-2">Function Parameters</label>
-        <div className="mb-4 bg-gray-700 p-3 rounded">
+        <label className="block mb-2">Function Parameters</label>
+        <div className="mb-4 bg-gray-100 dark:bg-gray-700 p-3 rounded">
           {parameters.map((param, idx) => (
             <div key={idx} className="flex items-center mb-2 gap-2">
               <input
@@ -275,30 +275,30 @@ const AddProblem = () => {
                 value={param.name}
                 onChange={e => handleParameterChange(idx, "name", e.target.value)}
                 placeholder="Parameter name"
-                className="p-2 rounded bg-gray-800 text-white border border-gray-600 focus:outline-none w-1/2"
+                className="p-2 rounded app-input focus:outline-none w-1/2"
                 required
               />
               <select
                 value={param.type}
                 onChange={e => handleParameterChange(idx, "type", e.target.value)}
-                className="p-2 rounded bg-gray-800 text-white border border-gray-600 focus:outline-none w-1/2"
+                className="p-2 rounded app-input focus:outline-none w-1/2"
               >
                 {PARAMETER_TYPES.map(type => (
                   <option key={type} value={type}>{type}</option>
                 ))}
               </select>
               {parameters.length > 1 && (
-                <button type="button" onClick={() => handleRemoveParameter(idx)} className="text-red-400 ml-2">Remove</button>
+                <button type="button" onClick={() => handleRemoveParameter(idx)} className="text-red-600 dark:text-red-400 ml-2">Remove</button>
               )}
             </div>
           ))}
           <button type="button" onClick={handleAddParameter} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm mt-2">+ Add Parameter</button>
         </div>
-        <label className="block text-white mb-2">Return Type</label>
+        <label className="block mb-2">Return Type</label>
         <select
           value={returnType}
           onChange={e => setReturnType(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
         >
           {PARAMETER_TYPES.map(type => (
             <option key={type} value={type}>{type}</option>
@@ -308,40 +308,40 @@ const AddProblem = () => {
         {/* Template Code - Only for bundle problems */}
         {problemType === "bundle" && (
           <div className="mb-4">
-            <label className="block text-white mb-2">Template Code</label>
-            <div className="text-gray-400 text-xs mb-2">
+            <label className="block mb-2">Template Code</label>
+            <div className="app-muted text-xs mb-2">
               This template is shared across all problems in the selected bundle. You can modify it if needed.
             </div>
             <textarea
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none min-h-[120px] font-mono text-sm"
+              className="w-full p-3 rounded app-input focus:outline-none min-h-[120px] font-mono text-sm"
               placeholder="Template code will be loaded from the selected bundle..."
             />
           </div>
         )}
-        <label className="block text-white mb-2">Public Test Cases (JSON array)</label>
-        <div className="text-gray-400 text-xs mb-2">
+        <label className="block mb-2">Public Test Cases (JSON array)</label>
+        <div className="app-muted text-xs mb-2">
           <b>Example:</b> <code>[{'{'}"input": [2,3], "output": 5{'}'}]</code> for a function with 2 parameters.<br/>
           <b>Input must be a JSON array/object matching the parameter list.</b>
         </div>
         <textarea
           value={publicTestCases}
           onChange={(e) => setPublicTestCases(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none min-h-[80px]"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none min-h-[80px]"
           placeholder='[{"input": [2,3], "output": 5}]'
         />
-        <label className="block text-white mb-2 mt-4">Hidden Test Cases (JSON array)</label>
-        <div className="text-gray-400 text-xs mb-2">
+        <label className="block mb-2 mt-4">Hidden Test Cases (JSON array)</label>
+        <div className="app-muted text-xs mb-2">
           <b>Example:</b> <code>[{'{'}"input": [2,3], "output": 5{'}'}]</code> for a function with 2 parameters.
         </div>
         <textarea
           value={hiddenTestCases}
           onChange={(e) => setHiddenTestCases(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none min-h-[80px]"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none min-h-[80px]"
           placeholder='[{"input": [2,3], "output": 5}]'
         />
-        {error && <div className="text-red-400 mb-4 text-center">{error}</div>}
+        {error && <div className="text-red-600 dark:text-red-400 mb-4 text-center">{error}</div>}
         {success && <div className="text-green-400 mb-4 text-center">{success}</div>}
         <button
           type="submit"

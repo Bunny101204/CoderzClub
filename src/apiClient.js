@@ -222,7 +222,7 @@ export const api = {
   // Users
   users: {
     getStats: () => apiClient.get('/api/users/stats'),
-    getLeaderboard: () => apiClient.get('/api/users/leaderboard'),
+    getLeaderboard: (params) => apiClient.get('/api/users/leaderboard', { params }),
   },
 
   // Judge0 execution

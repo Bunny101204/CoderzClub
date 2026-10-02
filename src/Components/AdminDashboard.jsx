@@ -278,7 +278,7 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="app-shell p-8">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
@@ -303,13 +303,13 @@ const AdminDashboard = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex mb-6 border-b border-gray-700">
+        <div className="flex mb-6 border-b border-gray-200 dark:border-gray-700">
           <button
             onClick={() => setActiveTab("problems")}
             className={`px-6 py-3 font-semibold ${
               activeTab === "problems"
-                ? "text-blue-400 border-b-2 border-blue-400"
-                : "text-gray-400 hover:text-white"
+                ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                : "app-muted hover:text-gray-900 dark:hover:text-white"
             }`}
           >
             Problems ({totalProblemItems})
@@ -318,8 +318,8 @@ const AdminDashboard = () => {
             onClick={() => setActiveTab("bundles")}
             className={`px-6 py-3 font-semibold ${
               activeTab === "bundles"
-                ? "text-blue-400 border-b-2 border-blue-400"
-                : "text-gray-400 hover:text-white"
+                ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                : "app-muted hover:text-gray-900 dark:hover:text-white"
             }`}
           >
             Bundles ({safeBundles.length})
@@ -328,8 +328,8 @@ const AdminDashboard = () => {
             onClick={() => setActiveTab("batches")}
             className={`px-6 py-3 font-semibold ${
               activeTab === "batches"
-                ? "text-blue-400 border-b-2 border-blue-400"
-                : "text-gray-400 hover:text-white"
+                ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                : "app-muted hover:text-gray-900 dark:hover:text-white"
             }`}
           >
             Batches ({batches.length})
@@ -338,14 +338,14 @@ const AdminDashboard = () => {
 
         {activeTab === "problems" && (
           <div className="flex flex-col lg:flex-row gap-6 items-start">
-            <aside className="w-full lg:w-60 shrink-0 bg-gray-800 rounded-lg shadow p-4">
+            <aside className="w-full lg:w-60 shrink-0 app-surface rounded-lg shadow p-4">
               <h2 className="text-lg font-semibold mb-4">Filters</h2>
-              <label className="block text-sm text-gray-400 mb-2" htmlFor="admin-problem-topic">Topic</label>
+              <label className="block text-sm app-muted mb-2" htmlFor="admin-problem-topic">Topic</label>
               <select
                 id="admin-problem-topic"
                 value={problemTopic}
                 onChange={(e) => { setProblemTopic(e.target.value); setCurrentPage(nextPageForFilterChange()); }}
-                className="w-full mb-4 px-3 py-2 bg-gray-900 rounded border border-gray-600 text-white"
+                className="w-full mb-4 px-3 py-2 app-input rounded"
               >
                 <option value="">All Topics</option>
                 <option value="arrays">Arrays</option>
@@ -361,12 +361,12 @@ const AdminDashboard = () => {
                 <option value="backtracking">Backtracking</option>
                 <option value="sorting">Sorting</option>
               </select>
-              <label className="block text-sm text-gray-400 mb-2" htmlFor="admin-problem-items">Items</label>
+              <label className="block text-sm app-muted mb-2" htmlFor="admin-problem-items">Items</label>
               <select
                 id="admin-problem-items"
                 value={problemsPerPage}
                 onChange={(e) => { setProblemsPerPage(Number(e.target.value)); setCurrentPage(nextPageForFilterChange()); }}
-                className="w-full px-3 py-2 bg-gray-900 rounded border border-gray-600 text-white"
+                className="w-full px-3 py-2 app-input rounded"
               >
                 <option value={10}>10</option>
                 <option value={20}>20</option>
@@ -378,21 +378,21 @@ const AdminDashboard = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
               <div>
                 <h2 className="text-xl font-semibold">All Problems</h2>
-                <div className="text-sm text-gray-300">Showing page {currentPage} of {totalPages || 1}</div>
+                <div className="text-sm app-muted">Showing page {currentPage} of {totalPages || 1}</div>
               </div>
               <input
                 type="search"
                 placeholder="Search problems by ID or title prefix..."
                 value={problemSearch}
                 onChange={(e) => { setProblemSearch(e.target.value); setCurrentPage(nextPageForFilterChange()); }}
-                className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white w-full sm:w-80"
+                className="px-3 py-2 app-input rounded w-full sm:w-80"
               />
             </div>
-        <div className="bg-gray-800 rounded-lg shadow p-4 overflow-x-auto">
+        <div className="app-surface rounded-lg shadow p-4 overflow-x-auto">
           {loading && paginatedProblems.length === 0 ? (
-            <div className="text-gray-400">Loading problems...</div>
+            <div className="app-muted">Loading problems...</div>
           ) : paginatedProblems.length === 0 ? (
-            <div className="text-gray-400">No problems found.</div>
+            <div className="app-muted">No problems found.</div>
           ) : (
             <table className="w-full text-left">
               <thead>
@@ -406,7 +406,7 @@ const AdminDashboard = () => {
               </thead>
               <tbody>
                 {paginatedProblems.map((problem) => (
-                  <tr key={internalProblemId(problem)} className="border-t border-gray-700">
+                  <tr key={internalProblemId(problem)} className="border-t border-gray-200 dark:border-gray-700">
                     <td className="py-2 px-3 font-mono">{displayProblemId(problem)}</td>
                     <td className="py-2 px-3">{problem.title}</td>
                     <td className="py-2 px-3">{problem.difficulty || "N/A"}</td>
@@ -416,12 +416,12 @@ const AdminDashboard = () => {
                     <td className="py-2 px-3">
                       <Link
                         to={editProblemPath(problem)}
-                        className="text-blue-400 hover:underline mr-4"
+                        className="text-blue-600 dark:text-blue-400 hover:underline mr-4"
                       >
                         Edit
                       </Link>
                       <button
-                        className="text-red-400 hover:underline"
+                        className="text-red-600 dark:text-red-400 hover:underline"
                         onClick={() => handleDeleteProblem(internalProblemId(problem))}
                       >
                         Delete
@@ -439,7 +439,7 @@ const AdminDashboard = () => {
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+              className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50"
             >
               Prev
             </button>
@@ -447,7 +447,7 @@ const AdminDashboard = () => {
               <button
                 key={i + 1}
                 onClick={() => setCurrentPage(i + 1)}
-                className={`px-3 py-1 rounded ${currentPage === i + 1 ? 'bg-blue-500' : 'bg-gray-700'} text-white`}
+                className={`px-3 py-1 rounded ${currentPage === i + 1 ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'}`}
               >
                 {i + 1}
               </button>
@@ -455,7 +455,7 @@ const AdminDashboard = () => {
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+              className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50"
             >
               Next
             </button>
@@ -469,11 +469,11 @@ const AdminDashboard = () => {
           <>
             <h2 className="text-xl font-semibold mb-4">All Bundles</h2>
             <div className="flex items-center justify-between mb-4">
-              <div className="text-sm text-gray-300">Bundles: {safeBundles.length}</div>
+              <div className="text-sm app-muted">Bundles: {safeBundles.length}</div>
               <div className="flex flex-col lg:flex-row items-center gap-3">
                 <div className="flex items-center gap-3">
-                  <label className="text-sm text-gray-400">Items:</label>
-                  <select value={bundlesPerPage} onChange={(e) => { setBundlesPerPage(Number(e.target.value)); setBundlePage(1); }} className="px-3 py-1 bg-gray-800 rounded border border-gray-600">
+                  <label className="text-sm app-muted">Items:</label>
+                  <select value={bundlesPerPage} onChange={(e) => { setBundlesPerPage(Number(e.target.value)); setBundlePage(1); }} className="px-3 py-1 app-input rounded">
                     <option value={10}>10</option>
                     <option value={20}>20</option>
                     <option value={50}>50</option>
@@ -485,13 +485,13 @@ const AdminDashboard = () => {
                   placeholder="Search bundles by ID or name..."
                   value={bundleSearch}
                   onChange={(e) => { setBundleSearch(e.target.value); setBundlePage(1); }}
-                  className="px-3 py-2 bg-gray-800 rounded border border-gray-600 text-white w-full lg:w-80"
+                  className="px-3 py-2 app-input rounded w-full lg:w-80"
                 />
               </div>
             </div>
-            <div className="bg-gray-800 rounded-lg shadow p-4">
+            <div className="app-surface rounded-lg shadow p-4">
               {paginatedBundles.length === 0 ? (
-                <div className="text-gray-400">No bundles found.</div>
+                <div className="app-muted">No bundles found.</div>
               ) : (
                 <table className="w-full text-left">
                   <thead>
@@ -507,7 +507,7 @@ const AdminDashboard = () => {
                   </thead>
                   <tbody>
                     {paginatedBundles.map((bundle) => (
-                      <tr key={bundle.id} className="border-t border-gray-700">
+                      <tr key={bundle.id} className="border-t border-gray-200 dark:border-gray-700">
                         <td className="py-2 px-3">{bundle.name}</td>
                         <td className="py-2 px-3">
                           <span className={`px-2 py-1 rounded text-xs ${
@@ -545,18 +545,18 @@ const AdminDashboard = () => {
                         <td className="py-2 px-3">
                           <Link
                             to={`/admin/edit-bundle/${bundle.id}`}
-                            className="text-blue-400 hover:underline mr-4"
+                            className="text-blue-600 dark:text-blue-400 hover:underline mr-4"
                           >
                             Edit
                           </Link>
                           <Link
                             to={`/admin/manage-bundle/${bundle.id}`}
-                            className="text-purple-400 hover:underline mr-4"
+                            className="text-purple-600 dark:text-purple-400 hover:underline mr-4"
                           >
                             Manage
                           </Link>
                           <button
-                            className="text-red-400 hover:underline"
+                            className="text-red-600 dark:text-red-400 hover:underline"
                             onClick={() => handleDeleteBundle(bundle.id)}
                           >
                             Delete
@@ -574,7 +574,7 @@ const AdminDashboard = () => {
                 <button
                   onClick={() => setBundlePage((p) => Math.max(1, p - 1))}
                   disabled={bundlePage === 1}
-                  className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50"
                 >
                   Prev
                 </button>
@@ -582,7 +582,7 @@ const AdminDashboard = () => {
                   <button
                     key={i + 1}
                     onClick={() => setBundlePage(i + 1)}
-                    className={`px-3 py-1 rounded ${bundlePage === i + 1 ? 'bg-blue-500' : 'bg-gray-700'} text-white`}
+                    className={`px-3 py-1 rounded ${bundlePage === i + 1 ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'}`}
                   >
                     {i + 1}
                   </button>
@@ -590,7 +590,7 @@ const AdminDashboard = () => {
                 <button
                   onClick={() => setBundlePage((p) => Math.min(totalBundlePages, p + 1))}
                   disabled={bundlePage === totalBundlePages}
-                  className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50"
                 >
                   Next
                 </button>
@@ -602,33 +602,33 @@ const AdminDashboard = () => {
         {activeTab === "batches" && (
           <>
             <h2 className="text-xl font-semibold mb-4">Batches</h2>
-            <form onSubmit={createBatch} className="bg-gray-800 rounded-lg p-4 mb-4 grid gap-3 sm:grid-cols-2">
+            <form onSubmit={createBatch} className="app-surface rounded-lg p-4 mb-4 grid gap-3 sm:grid-cols-2">
               <input
                 value={newBatchName}
                 onChange={(e) => setNewBatchName(e.target.value)}
                 placeholder="Batch name"
-                className="px-3 py-2 bg-gray-900 border border-gray-600 rounded"
+                className="px-3 py-2 app-input rounded"
               />
               <input
                 value={newBatchDescription}
                 onChange={(e) => setNewBatchDescription(e.target.value)}
                 placeholder="Optional description"
-                className="px-3 py-2 bg-gray-900 border border-gray-600 rounded"
+                className="px-3 py-2 app-input rounded"
               />
               <div className="sm:col-span-2 flex items-center gap-3">
-                <button type="submit" disabled={creatingBatch} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded disabled:opacity-50">Create Batch</button>
-                {batchError && <span className="text-red-400 text-sm">{batchError}</span>}
+                <button type="submit" disabled={creatingBatch} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">Create Batch</button>
+                {batchError && <span className="text-red-600 dark:text-red-400 text-sm">{batchError}</span>}
               </div>
             </form>
             <input
               value={batchSearch}
               onChange={(e) => setBatchSearch(e.target.value)}
               placeholder="Search batches by name"
-              className="px-3 py-2 bg-gray-800 border border-gray-600 rounded mb-4 w-full sm:w-80"
+              className="px-3 py-2 app-input rounded mb-4 w-full sm:w-80"
             />
-            <div className="bg-gray-800 rounded-lg shadow p-4 overflow-x-auto">
+            <div className="app-surface rounded-lg shadow p-4 overflow-x-auto">
               {batches.length === 0 ? (
-                <div className="text-gray-400">No batches found.</div>
+                <div className="app-muted">No batches found.</div>
               ) : (
                 <table className="w-full text-left">
                   <thead>
@@ -642,13 +642,13 @@ const AdminDashboard = () => {
                   </thead>
                   <tbody>
                     {batches.map((batch) => (
-                      <tr key={batch.id} className="border-t border-gray-700">
+                      <tr key={batch.id} className="border-t border-gray-200 dark:border-gray-700">
                         <td className="py-2 px-3">{batch.name}</td>
                         <td className="py-2 px-3">{batch.active ? "Active" : "Archived"}</td>
                         <td className="py-2 px-3">{batch.memberCount}</td>
                         <td className="py-2 px-3">{batch.assignmentCount}</td>
                         <td className="py-2 px-3">
-                          <Link to={`/admin/batches/${batch.id}`} className="text-blue-400 hover:underline">Open</Link>
+                          <Link to={`/admin/batches/${batch.id}`} className="text-blue-600 dark:text-blue-400 hover:underline">Open</Link>
                         </td>
                       </tr>
                     ))}

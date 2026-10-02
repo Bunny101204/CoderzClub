@@ -123,7 +123,7 @@ const ProblemPage = ({ problems }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col md:flex-row gap-6">
+    <div className="app-shell p-4 flex flex-col md:flex-row gap-6">
       {/* Left: Problem details */}
       <div className="md:w-1/2 w-full bg-gray-800 rounded-lg p-6 shadow-lg mb-4 md:mb-0">
         <h2 className="text-2xl font-bold mb-4">🧩 {problem.title}</h2>

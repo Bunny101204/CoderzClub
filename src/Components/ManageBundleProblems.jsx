@@ -227,16 +227,16 @@ const ManageBundleProblems = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="app-shell flex items-center justify-center">
+        <div className="text-xl">Loading...</div>
       </div>
     );
   }
 
   if (!bundle) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Bundle not found</div>
+      <div className="app-shell flex items-center justify-center">
+        <div className="text-xl">Bundle not found</div>
       </div>
     );
   }
@@ -247,14 +247,14 @@ const ManageBundleProblems = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="app-shell p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-3xl font-bold mb-2">Manage Bundle Problems</h1>
-              <h2 className="text-xl text-gray-400">{bundle.name}</h2>
+              <h2 className="text-xl app-muted">{bundle.name}</h2>
             </div>
             <div className="flex space-x-3">
               <Link
@@ -265,30 +265,30 @@ const ManageBundleProblems = () => {
               </Link>
               <Link
                 to="/bundles"
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                className="px-4 py-2 rounded-lg transition-colors bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-600 dark:text-white dark:hover:bg-gray-700"
               >
                 Back to Bundles
               </Link>
             </div>
           </div>
-          <p className="text-gray-400">{bundle.description}</p>
+          <p className="app-muted">{bundle.description}</p>
         </div>
 
         {/* Messages */}
         {error && (
-          <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded mb-6">
+          <div className="bg-red-50 border border-red-400 text-red-800 dark:bg-red-900/50 dark:border-red-500 dark:text-red-200 px-4 py-3 rounded mb-6">
             {error}
           </div>
         )}
         {success && (
-          <div className="bg-green-900/50 border border-green-500 text-green-200 px-4 py-3 rounded mb-6">
+          <div className="bg-green-50 border border-green-400 text-green-800 dark:bg-green-900/50 dark:border-green-500 dark:text-green-200 px-4 py-3 rounded mb-6">
             {success}
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Add Problem Section */}
-          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+          <div className="app-surface rounded-xl p-6">
             <h3 className="text-xl font-bold mb-4">Add Problem to Bundle</h3>
             <div className="space-y-4">
               <select
@@ -297,7 +297,7 @@ const ManageBundleProblems = () => {
                   setSelectedProblem(e.target.value);
                   setError("");
                 }}
-                className="w-full p-3 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+                className="w-full p-3 app-input rounded-lg focus:outline-none focus:border-blue-500"
               >
                 <option value="">Select a problem...</option>
                 {problemsToAdd.map(problem => (
@@ -313,49 +313,49 @@ const ManageBundleProblems = () => {
               >
                 + Add Problem
               </button>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm app-muted">
                 {problemsToAdd.length} problem(s) available to add
               </p>
             </div>
           </div>
 
           {/* Bundle Stats */}
-          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+          <div className="app-surface rounded-xl p-6">
             <h3 className="text-xl font-bold mb-4">Bundle Statistics</h3>
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-700 rounded-lg p-4">
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4">
                 <div className="text-3xl font-bold text-blue-400">{bundleProblems.length}</div>
-                <div className="text-sm text-gray-400">Total Problems</div>
+                <div className="text-sm app-muted">Total Problems</div>
               </div>
-              <div className="bg-gray-700 rounded-lg p-4">
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4">
                 <div className="text-3xl font-bold text-green-400">
                   {bundle.totalPoints || 0}
                 </div>
-                <div className="text-sm text-gray-400">Total Points</div>
+                <div className="text-sm app-muted">Total Points</div>
               </div>
-              <div className="bg-gray-700 rounded-lg p-4">
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4">
                 <div className="text-3xl font-bold text-purple-400">
                   {bundle.estimatedTotalTime || 0}
                 </div>
-                <div className="text-sm text-gray-400">Total Minutes</div>
+                <div className="text-sm app-muted">Total Minutes</div>
               </div>
-              <div className="bg-gray-700 rounded-lg p-4">
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4">
                 <div className="text-3xl font-bold text-yellow-400">
                   {bundle.difficulty}
                 </div>
-                <div className="text-sm text-gray-400">Difficulty</div>
+                <div className="text-sm app-muted">Difficulty</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* Problems in Bundle */}
-        <div className="mt-8 bg-gray-800 rounded-xl p-6 border border-gray-700">
+        <div className="mt-8 app-surface rounded-xl p-6">
           <h3 className="text-xl font-bold mb-6">Problems in Bundle ({bundleProblems.length})</h3>
           
           {bundleProblems.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-400 text-lg">No problems in this bundle yet</p>
+              <p className="app-muted text-lg">No problems in this bundle yet</p>
               <p className="text-gray-500 text-sm mt-2">Add problems using the form above</p>
             </div>
           ) : (
@@ -363,21 +363,21 @@ const ManageBundleProblems = () => {
               {bundleProblems.map((problem, index) => (
                 <div
                   key={problem.id}
-                  className="bg-gray-700 rounded-lg p-4 flex items-center justify-between hover:bg-gray-600 transition-colors"
+                  className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4 flex items-center justify-between hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 >
                   <div className="flex items-center space-x-4 flex-1">
                     <div className="flex flex-col space-y-1">
                       <button
                         onClick={() => reorderProblem(problem.id, "up")}
                         disabled={index === 0}
-                        className={`text-xs ${index === 0 ? 'text-gray-600 cursor-not-allowed' : 'text-blue-400 hover:text-blue-300'}`}
+                        className={`text-xs ${index === 0 ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed' : 'text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300'}`}
                       >
                         ▲
                       </button>
                       <button
                         onClick={() => reorderProblem(problem.id, "down")}
                         disabled={index === bundleProblems.length - 1}
-                        className={`text-xs ${index === bundleProblems.length - 1 ? 'text-gray-600 cursor-not-allowed' : 'text-blue-400 hover:text-blue-300'}`}
+                        className={`text-xs ${index === bundleProblems.length - 1 ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed' : 'text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300'}`}
                       >
                         ▼
                       </button>
@@ -386,7 +386,7 @@ const ManageBundleProblems = () => {
                       #{index + 1}
                     </div>
                     <div className="flex-1">
-                      <h4 className="text-lg font-semibold text-white">{problem.title}</h4>
+                      <h4 className="text-lg font-semibold">{problem.title}</h4>
                       <div className="flex items-center space-x-3 mt-1">
                         <span className={`text-sm font-semibold ${getDifficultyColor(problem.difficulty)}`}>
                           {problem.difficulty}
@@ -394,7 +394,7 @@ const ManageBundleProblems = () => {
                         {problem.tags && problem.tags.length > 0 && (
                           <div className="flex space-x-2">
                             {problem.tags.slice(0, 3).map((tag, i) => (
-                              <span key={i} className="text-xs bg-gray-600 px-2 py-1 rounded">
+                              <span key={i} className="text-xs bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">
                                 {tag}
                               </span>
                             ))}

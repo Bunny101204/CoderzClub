@@ -17,6 +17,7 @@ import AuthPage from "./Components/AuthPage";
 import ErrorBoundary from "./Components/ErrorBoundary";
 import SiteFooter from "./Components/SiteFooter";
 import { useAuth, AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import { api } from "./apiClient";
 
 // Lazy load route-specific components
@@ -42,8 +43,8 @@ const TermsPage = lazy(() => import("./Components/TermsPage"));
 // Fallback component for Suspense
 function LoadingFallback() {
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-      <div className="text-white text-lg">Loading...</div>
+    <div className="app-shell flex items-center justify-center">
+      <div className="text-lg">Loading...</div>
     </div>
   );
 }
@@ -53,7 +54,7 @@ function AdminRoute({ user }) {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="app-shell text-center flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-4">Access Denied</h2>
           <p className="text-gray-400 mb-4">You need admin privileges to access this page.</p>
@@ -72,8 +73,8 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="app-shell flex items-center justify-center">
+        <div className="text-xl">Loading...</div>
       </div>
     );
   }
@@ -81,8 +82,8 @@ function AppContent() {
   // App no longer fetches the full problem list globally; individual pages fetch as needed.
 
   return (
-    <div className="min-h-screen bg-gray-900">
-      {isAuthenticated && <Header />}
+    <div className="app-shell">
+      <Header />
       <Routes>
         <Route
           path="/about"
@@ -249,9 +250,11 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
+        <ThemeProvider>
         <Router>
           <AppContent />
         </Router>
+        </ThemeProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

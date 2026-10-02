@@ -180,35 +180,35 @@ const AddBundle = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+    <div className="app-shell flex items-center justify-center p-4">
       <form
         onSubmit={handleSubmit}
-        className="bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-2xl"
+        className="app-surface p-8 rounded-lg shadow-lg w-full max-w-2xl"
       >
-        <h2 className="text-2xl font-bold mb-6 text-white text-center">
+        <h2 className="text-2xl font-bold mb-6 text-center">
           {bundleId ? "Edit Bundle" : "Add New Bundle"}
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-white mb-2">Name*</label>
+            <label className="block mb-2">Name*</label>
             <input
               type="text"
               name="name"
               value={formData.name}
               onChange={handleInputChange}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
               placeholder="Bundle name"
             />
           </div>
 
           <div>
-            <label className="block text-white mb-2">Difficulty*</label>
+            <label className="block mb-2">Difficulty*</label>
             <select
               name="difficulty"
               value={formData.difficulty}
               onChange={handleInputChange}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
             >
               <option value="">Select difficulty</option>
               {difficulties.map((diff) => (
@@ -221,24 +221,24 @@ const AddBundle = () => {
         </div>
 
         <div className="mt-4">
-          <label className="block text-white mb-2">Description*</label>
+          <label className="block mb-2">Description*</label>
           <textarea
             name="description"
             value={formData.description}
             onChange={handleInputChange}
-            className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500 min-h-[100px]"
+            className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500 min-h-[100px]"
             placeholder="Bundle description"
           />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <div>
-            <label className="block text-white mb-2">Category*</label>
+            <label className="block mb-2">Category*</label>
             <select
               name="category"
               value={formData.category}
               onChange={handleInputChange}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
             >
               <option value="">Select category</option>
               {categories.map((cat) => (
@@ -250,7 +250,7 @@ const AddBundle = () => {
           </div>
 
           <div>
-            <label className="block text-white mb-2">
+            <label className="block mb-2">
               Tags (comma separated)
             </label>
             <input
@@ -258,7 +258,7 @@ const AddBundle = () => {
               name="tags"
               value={formData.tags}
               onChange={handleInputChange}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
               placeholder="beginner, algorithms, fundamentals"
             />
           </div>
@@ -273,17 +273,17 @@ const AddBundle = () => {
               onChange={handleInputChange}
               className="mr-2"
             />
-            <label className="text-white">Premium Bundle</label>
+            <label>Premium Bundle</label>
           </div>
 
           <div>
-            <label className="block text-white mb-2">Price ($)</label>
+            <label className="block mb-2">Price ($)</label>
             <input
               type="number"
               name="price"
               value={formData.price}
               onChange={handleInputChange}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
               min="0"
               step="0.01"
               disabled={!formData.isPremium}
@@ -291,12 +291,12 @@ const AddBundle = () => {
           </div>
 
           <div>
-            <label className="block text-white mb-2">Currency</label>
+            <label className="block mb-2">Currency</label>
             <select
               name="currency"
               value={formData.currency}
               onChange={handleInputChange}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
               disabled={!formData.isPremium}
             >
               <option value="USD">USD</option>
@@ -307,8 +307,8 @@ const AddBundle = () => {
         </div>
 
         <div className="mt-4">
-          <label className="block text-white mb-2">Shared Template Code</label>
-          <div className="text-gray-400 text-xs mb-2">
+          <label className="block mb-2">Shared Template Code</label>
+          <div className="app-muted text-xs mb-2">
             This template will be used for all problems in this bundle. Use
             placeholders like {"{functionName}"} and {"{parameters}"} for
             dynamic content.
@@ -317,7 +317,7 @@ const AddBundle = () => {
             name="sharedTemplate"
             value={formData.sharedTemplate}
             onChange={handleInputChange}
-            className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500 min-h-[150px] font-mono text-sm"
+            className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500 min-h-[150px] font-mono text-sm"
             placeholder="public class Solution {&#10;    public int solve(int[] nums) {&#10;        // Your code here&#10;        return 0;&#10;    }&#10;}"
           />
         </div>
@@ -330,10 +330,10 @@ const AddBundle = () => {
             onChange={handleInputChange}
             className="mr-2"
           />
-          <label className="text-white">Active (available to users)</label>
+          <label>Active (available to users)</label>
         </div>
 
-        {error && <div className="text-red-400 mt-4 text-center">{error}</div>}
+        {error && <div className="text-red-600 dark:text-red-400 mt-4 text-center">{error}</div>}
         {success && (
           <div className="text-green-400 mt-4 text-center">{success}</div>
         )}
@@ -353,7 +353,7 @@ const AddBundle = () => {
           <button
             type="button"
             onClick={() => navigate("/admin")}
-            className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors"
+            className="px-6 py-3 rounded transition-colors bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-600 dark:text-white dark:hover:bg-gray-700"
           >
             Cancel
           </button>

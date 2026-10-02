@@ -2,15 +2,15 @@ import React from "react";
 import { Link } from "react-router-dom";
 
 const TermsPage = () => (
-  <div className="min-h-screen bg-gray-900 text-gray-200 p-8">
+  <div className="app-shell p-8">
     <div className="max-w-3xl mx-auto space-y-6">
       <Link to="/" className="text-blue-400 hover:underline">← Home</Link>
-      <h1 className="text-3xl font-bold text-white">Terms of Service</h1>
+      <h1 className="text-3xl font-bold">Terms of Service</h1>
       <p>
         These notes describe how CoderzClub currently works. They are not a complete legal agreement and do not set jurisdiction, liability, or payment terms.
       </p>
       <section>
-        <h2 className="text-xl font-semibold text-white mb-2">Using the service</h2>
+        <h2 className="text-xl font-semibold mb-2">Using the service</h2>
         <ul className="list-disc pl-6 space-y-1">
           <li>You are responsible for the credentials you use to sign in.</li>
           <li>The platform is for practicing programming problems and related classroom batch features.</li>
