@@ -236,10 +236,10 @@ public class SubmissionJobController {
     }
 
     /**
-     * Get job status
+     * Get job status. Ownership matches SSE ticket: owner or ADMIN via SubmissionJobAccessService.
      */
     @GetMapping("/{jobId}")
-    public ResponseEntity<?> getJobStatus(@PathVariable String jobId) {
+    public ResponseEntity<?> getJobStatus(@PathVariable String jobId, Authentication authentication) {
         try {
             Optional<SubmissionJob> jobOpt = jobService.getJob(jobId);
             if (!jobOpt.isPresent()) {
@@ -247,6 +247,9 @@ public class SubmissionJobController {
             }
 
             SubmissionJob job = jobOpt.get();
+            if (!canViewJob(authentication, job)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());
