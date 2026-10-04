@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatCodingDuration } from "../execution/codingDuration.js";
 
 function formatMemory(bytes) {
   if (bytes == null) return "—";
@@ -8,12 +9,12 @@ function formatMemory(bytes) {
 }
 
 function verdictClass(verdict) {
-  if (verdict === "ACCEPTED") return "text-green-400";
-  if (verdict === "INTERNAL_ERROR") return "text-orange-400";
-  return "text-yellow-300";
+  if (verdict === "ACCEPTED") return "text-green-700 dark:text-green-400";
+  if (verdict === "INTERNAL_ERROR") return "text-orange-600 dark:text-orange-400";
+  return "text-yellow-700 dark:text-yellow-300";
 }
 
-const ProblemSubmissionHistory = ({ problemId, numericId }) => {
+const ProblemSubmissionHistory = ({ problemId, numericId, enabled = true, refreshKey = 0 }) => {
   const [submissions, setSubmissions] = useState([]);
   const [page, setPage] = useState(0);
   const [hasNext, setHasNext] = useState(false);
@@ -24,11 +25,13 @@ const ProblemSubmissionHistory = ({ problemId, numericId }) => {
   useEffect(() => {
     setPage(0);
     setSubmissions([]);
-  }, [problemId]);
+    setSelected(null);
+  }, [problemId, refreshKey]);
 
   useEffect(() => {
+    if (!enabled || !problemId) return;
     const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-    if (!token || !problemId) return;
+    if (!token) return;
     const controller = new AbortController();
     const load = async () => {
       setLoading(true);
@@ -56,29 +59,30 @@ const ProblemSubmissionHistory = ({ problemId, numericId }) => {
     };
     load();
     return () => controller.abort();
-  }, [problemId, numericId, page]);
+  }, [problemId, numericId, page, enabled, refreshKey]);
 
   if (!problemId) return null;
 
   return (
-    <div className="mt-8">
+    <div>
       <h2 className="text-xl font-bold mb-3">Your submissions</h2>
-      {error && <div className="text-red-400 text-sm mb-3">{error}</div>}
+      {error && <div className="text-red-600 dark:text-red-400 text-sm mb-3">{error}</div>}
       {loading && submissions.length === 0 && (
-        <div className="text-gray-400 text-sm">Loading history...</div>
+        <div className="app-muted text-sm">Loading history...</div>
       )}
       {!loading && submissions.length === 0 && !error && (
-        <div className="text-gray-400 text-sm">No submissions yet.</div>
+        <div className="app-muted text-sm">No submissions yet.</div>
       )}
       {submissions.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead>
-              <tr className="text-gray-400">
+              <tr className="app-muted">
                 <th className="py-2 pr-3">When</th>
                 <th className="py-2 pr-3">Language</th>
                 <th className="py-2 pr-3">Verdict</th>
                 <th className="py-2 pr-3">Runtime</th>
+                <th className="py-2 pr-3">Coding time</th>
                 <th className="py-2 pr-3">Memory</th>
               </tr>
             </thead>
@@ -88,15 +92,16 @@ const ProblemSubmissionHistory = ({ problemId, numericId }) => {
                 return (
                   <tr
                     key={submission.id}
-                    className="border-t border-gray-700 cursor-pointer hover:bg-gray-900/60"
+                    className="border-t border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900/60"
                     onClick={() => setSelected(submission)}
                   >
-                    <td className="py-2 pr-3 text-gray-300">
+                    <td className="py-2 pr-3">
                       {submission.createdAt ? new Date(submission.createdAt).toLocaleString() : "—"}
                     </td>
                     <td className="py-2 pr-3">{submission.language || "—"}</td>
                     <td className={`py-2 pr-3 font-semibold ${verdictClass(verdict)}`}>{verdict}</td>
                     <td className="py-2 pr-3">{submission.runtime != null ? `${submission.runtime} ms` : "—"}</td>
+                    <td className="py-2 pr-3">{formatCodingDuration(submission.codingDurationSeconds)}</td>
                     <td className="py-2 pr-3">{formatMemory(submission.memory)}</td>
                   </tr>
                 );
@@ -108,7 +113,7 @@ const ProblemSubmissionHistory = ({ problemId, numericId }) => {
       {hasNext && (
         <button
           type="button"
-          className="mt-3 text-blue-400 hover:underline text-sm"
+          className="mt-3 text-blue-600 dark:text-blue-400 hover:underline text-sm"
           onClick={() => setPage((current) => current + 1)}
           disabled={loading}
         >
@@ -116,14 +121,14 @@ const ProblemSubmissionHistory = ({ problemId, numericId }) => {
         </button>
       )}
       {selected && (
-        <div className="mt-4 bg-gray-900 border border-gray-700 rounded-lg p-4">
+        <div className="mt-4 app-inset rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold">Submitted code (read-only)</h3>
-            <button type="button" className="text-sm text-gray-400" onClick={() => setSelected(null)}>
+            <button type="button" className="text-sm app-muted" onClick={() => setSelected(null)}>
               Close
             </button>
           </div>
-          <pre className="text-xs text-gray-200 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
+          <pre className="text-xs overflow-auto max-h-80 whitespace-pre-wrap font-mono app-code rounded p-3">
             {selected.code || ""}
           </pre>
         </div>

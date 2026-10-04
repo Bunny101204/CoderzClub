@@ -47,17 +47,19 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="app-shell flex items-center justify-center p-4">
-          <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-8">
+          <div className="max-w-md w-full app-surface rounded-lg shadow-lg p-8">
             <div className="text-center">
-              <div className="text-6xl mb-4">⚠️</div>
+              <div className="mb-4 flex justify-center text-yellow-600 dark:text-yellow-400">
+                <svg className="h-16 w-16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4 21 19H3L12 4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M12 10v5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="17.5" r="1" fill="currentColor"/></svg>
+              </div>
               <h1 className="text-3xl font-bold mb-4 text-red-500">Something went wrong</h1>
               
-              <p className="text-gray-300 mb-4">
+              <p className="app-muted mb-4">
                 We're sorry! An unexpected error occurred. Please try again.
               </p>
 
               {process.env.NODE_ENV === 'development' && this.state.error && (
-                <details className="mt-6 text-left bg-gray-900 p-4 rounded mb-4 max-h-64 overflow-auto">
+                <details className="mt-6 text-left app-inset p-4 rounded mb-4 max-h-64 overflow-auto">
                   <summary className="cursor-pointer font-mono text-sm text-yellow-400 mb-2">
                     Error Details (Dev Only)
                   </summary>

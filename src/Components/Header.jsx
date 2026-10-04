@@ -2,6 +2,8 @@ import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { ThemeToggleIcon } from "../icons/AppIcons.jsx";
+import { themeTogglePresentation } from "../icons/themeToggle.js";
 
 const Header = () => {
   const { user, isAuthenticated } = useAuth();
@@ -44,10 +46,11 @@ const Header = () => {
             <button
               type="button"
               onClick={toggleTheme}
-              className="px-3 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-900 hover:bg-gray-200 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              className="p-2 rounded-lg bg-gray-100 text-gray-900 hover:bg-gray-200 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+              aria-label={themeTogglePresentation(theme).label}
+              title={themeTogglePresentation(theme).label}
             >
-              {theme === "dark" ? "Light" : "Dark"}
+              <ThemeToggleIcon theme={theme} />
             </button>
             {isAuthenticated && (
               <button

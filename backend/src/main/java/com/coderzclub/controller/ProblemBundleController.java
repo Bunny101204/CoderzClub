@@ -1,10 +1,13 @@
 package com.coderzclub.controller;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,10 +15,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.coderzclub.dto.ProblemDetailResponse;
 import com.coderzclub.model.ProblemBundle;
+import com.coderzclub.model.User;
+import com.coderzclub.repository.UserRepository;
+import com.coderzclub.service.BundleAccessService;
 import com.coderzclub.service.ProblemBundleService;
 
 @RestController
@@ -25,10 +31,16 @@ public class ProblemBundleController {
     @Autowired
     private ProblemBundleService problemBundleService;
 
+    @Autowired
+    private BundleAccessService bundleAccessService;
+
+    @Autowired
+    private UserRepository userRepository;
+
     @GetMapping
     public ResponseEntity<List<ProblemBundle>> getAllBundles() {
         try {
-            return ResponseEntity.ok(problemBundleService.getAllActiveBundles());
+            return ResponseEntity.ok(bundleAccessService.listAccessibleActiveBundles(currentUser().orElse(null)));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -42,62 +54,49 @@ public class ProblemBundleController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
-
-
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<ProblemBundle> getBundleById(@PathVariable String id) {
-        try {
-            ProblemBundle bundle = problemBundleService.getBundleById(id);
-            if (bundle != null) {
-                return ResponseEntity.ok(bundle);
-            } else {
-                return ResponseEntity.notFound().build();
-            }
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        ProblemBundle bundle = bundleAccessService.requireAccessibleBundle(currentUser().orElse(null), id);
+        ProblemBundle normalized = problemBundleService.getBundleById(id);
+        return ResponseEntity.ok(normalized != null ? normalized : bundle);
+    }
+
+    @GetMapping("/{id}/problems")
+    public ResponseEntity<?> getBundleProblems(@PathVariable String id) {
+        List<ProblemDetailResponse> problems = bundleAccessService.problemsForAccessibleBundle(currentUser().orElse(null), id)
+            .stream()
+            .map(ProblemDetailResponse::new)
+            .toList();
+        return ResponseEntity.ok(java.util.Map.of("problems", problems));
     }
 
     @GetMapping("/difficulty/{difficulty}")
     public ResponseEntity<List<ProblemBundle>> getBundlesByDifficulty(@PathVariable String difficulty) {
-        try {
-            List<ProblemBundle> bundles = problemBundleService.getBundlesByDifficulty(difficulty);
-            return ResponseEntity.ok(bundles);
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        List<ProblemBundle> bundles = bundleAccessService.listAccessibleActiveBundles(currentUser().orElse(null))
+            .stream()
+            .filter(bundle -> difficulty.equalsIgnoreCase(bundle.getDifficulty()))
+            .toList();
+        return ResponseEntity.ok(bundles);
     }
 
     @GetMapping("/category/{category}")
     public ResponseEntity<List<ProblemBundle>> getBundlesByCategory(@PathVariable String category) {
-        try {
-            List<ProblemBundle> bundles = problemBundleService.getBundlesByCategory(category);
-            return ResponseEntity.ok(bundles);
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        List<ProblemBundle> bundles = bundleAccessService.listAccessibleActiveBundles(currentUser().orElse(null))
+            .stream()
+            .filter(bundle -> category.equalsIgnoreCase(bundle.getCategory()))
+            .toList();
+        return ResponseEntity.ok(bundles);
     }
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> createBundle(@RequestBody ProblemBundle bundle) {
-        System.out.println("=== BUNDLE CREATION DEBUG ===");
-        System.out.println("Create bundle endpoint hit");
-        
-        // Get current authentication
-        org.springframework.security.core.Authentication auth = 
-            org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-        System.out.println("Current authentication: " + auth);
-        System.out.println("Authentication authorities: " + auth.getAuthorities());
-        System.out.println("Authentication principal: " + auth.getPrincipal());
-        
         try {
             ProblemBundle createdBundle = problemBundleService.createBundle(bundle);
             return ResponseEntity.ok(createdBundle);
         } catch (Exception e) {
-            e.printStackTrace();
             return ResponseEntity.internalServerError().body("Create bundle failed: " + e.getMessage());
         }
     }
@@ -114,7 +113,6 @@ public class ProblemBundleController {
                 return ResponseEntity.notFound().build();
             }
         } catch (Exception e) {
-            e.printStackTrace();
             return ResponseEntity.internalServerError().body("Update bundle failed: " + e.getMessage());
         }
     }
@@ -133,9 +131,13 @@ public class ProblemBundleController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+    private Optional<User> currentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getName() == null
+            || "anonymousUser".equals(auth.getName())) {
+            return Optional.empty();
+        }
+        return userRepository.findByUsername(auth.getName());
+    }
 }
-
-
-
-
-

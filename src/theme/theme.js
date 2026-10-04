@@ -46,6 +46,12 @@ export function editorThemeName(theme) {
 
 export function editorSurfaceClasses(theme) {
   return normalizeTheme(theme) === "light"
-    ? "bg-white text-gray-900 border-gray-300"
-    : "bg-gray-800 text-gray-100 border-gray-700";
+    ? "bg-white text-gray-900 border border-gray-300"
+    : "bg-gray-900 text-gray-100 border border-gray-600";
+}
+
+export function resultCardClasses(passed) {
+  return passed
+    ? "bg-green-50 border-green-600 text-green-900 dark:bg-green-950/70 dark:border-green-500 dark:text-green-100"
+    : "bg-red-50 border-red-600 text-red-900 dark:bg-red-950/70 dark:border-red-500 dark:text-red-100";
 }

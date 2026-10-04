@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DEFAULT_THEME,
   THEME_STORAGE_KEY,
@@ -56,9 +59,20 @@ test("toggling applies root class and persistence", () => {
   assert.equal(storage.getItem(THEME_STORAGE_KEY), "dark");
 });
 
+test("shared form controls have visible borders in both themes", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../App.css"),
+    "utf8"
+  );
+  assert.match(css, /\.app-input \{/);
+  assert.match(css, /color-scheme: light/);
+  assert.match(css, /html\.dark \{[\s\S]*color-scheme: dark/);
+  assert.match(css, /select\.app-input/);
+});
+
 test("editor theme mapping follows global theme", () => {
   assert.equal(editorThemeName("dark"), "vs-dark");
   assert.equal(editorThemeName("light"), "vs");
   assert.match(editorSurfaceClasses("light"), /bg-white/);
-  assert.match(editorSurfaceClasses("dark"), /bg-gray-800/);
+  assert.match(editorSurfaceClasses("dark"), /bg-gray-900/);
 });

@@ -17,6 +17,7 @@ const AddBundle = () => {
     currency: "USD",
     sharedTemplate: "",
     isActive: true,
+    visibility: "PUBLIC",
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -40,7 +41,9 @@ const AddBundle = () => {
 
   const fetchBundle = async () => {
     try {
-      const response = await fetch(`/api/bundles/${bundleId}`);
+      const response = await fetch(`/api/bundles/${bundleId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("jwtToken") || localStorage.getItem("token") || ""}` }
+      });
       if (response.ok) {
         const bundle = await response.json();
         setFormData({
@@ -54,6 +57,7 @@ const AddBundle = () => {
           currency: bundle.currency || "USD",
           sharedTemplate: bundle.sharedTemplate || "",
           isActive: bundle.isActive !== undefined ? bundle.isActive : true,
+          visibility: bundle.visibility || "PUBLIC",
         });
       }
     } catch (error) {
@@ -102,6 +106,7 @@ const AddBundle = () => {
         currency: formData.currency,
         sharedTemplate: formData.sharedTemplate,
         isActive: !!formData.isActive,
+        visibility: formData.visibility || "PUBLIC",
         totalProblems: 0,
         totalPoints: 0,
         estimatedTotalTime: 0,
@@ -320,6 +325,19 @@ const AddBundle = () => {
             className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500 min-h-[150px] font-mono text-sm"
             placeholder="public class Solution {&#10;    public int solve(int[] nums) {&#10;        // Your code here&#10;        return 0;&#10;    }&#10;}"
           />
+        </div>
+
+        <div className="mt-4">
+          <label className="block mb-2">Visibility</label>
+          <select
+            name="visibility"
+            value={formData.visibility}
+            onChange={handleInputChange}
+            className="w-full p-3 rounded app-input focus:outline-none focus:border-blue-500"
+          >
+            <option value="PUBLIC">Public</option>
+            <option value="RESTRICTED">Restricted</option>
+          </select>
         </div>
 
         <div className="flex items-center mt-4">

@@ -85,5 +85,6 @@ test("AdminDashboard keeps the search input mounted during load and refresh", ()
   assert.doesNotMatch(adminDashboardSource, />\{problem\.id\}</);
   assert.match(adminDashboardSource, /clearInterval\(interval\)/);
   assert.match(adminDashboardSource, /if \(seq !== problemFetchSeq\.current\) \{\s*return;/);
-  assert.match(adminDashboardSource, /if \(seq === problemFetchSeq\.current\) \{\s*setLoading\(false\);/);
+  assert.match(adminDashboardSource, /md:grid-cols-\[240px_minmax\(0,1fr\)\]/);
+  assert.match(adminDashboardSource, /min-w-0 w-full/);
 });

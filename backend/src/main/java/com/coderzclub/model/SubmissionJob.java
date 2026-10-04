@@ -5,6 +5,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.coderzclub.service.CodingDuration;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,8 @@ public class SubmissionJob {
     private String code;
     private String language;
     private Integer languageId; // Judge0 language ID
+    /** Client-supplied editor timer seconds. Informational only. */
+    private Integer codingDurationSeconds;
 
     // Job status
     private JobStatus status = JobStatus.PENDING;
@@ -155,6 +158,11 @@ public class SubmissionJob {
 
     public Integer getLanguageId() { return languageId; }
     public void setLanguageId(Integer languageId) { this.languageId = languageId; }
+
+    public Integer getCodingDurationSeconds() { return codingDurationSeconds; }
+    public void setCodingDurationSeconds(Integer codingDurationSeconds) {
+        this.codingDurationSeconds = CodingDuration.sanitize(codingDurationSeconds);
+    }
 
     public JobStatus getStatus() { return status; }
     public void setStatus(JobStatus status) { this.status = status; }

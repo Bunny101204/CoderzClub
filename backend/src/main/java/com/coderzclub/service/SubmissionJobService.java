@@ -42,12 +42,21 @@ public class SubmissionJobService {
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests,
                                    ExecutionMode executionMode) {
+        return createJob(userId, problemId, code, language, languageId, testcaseVersion, totalTests,
+            executionMode, null);
+    }
+
+    @Transactional
+    public SubmissionJob createJob(String userId, String problemId, String code, String language,
+                                   Integer languageId, String testcaseVersion, int totalTests,
+                                   ExecutionMode executionMode, Integer codingDurationSeconds) {
         SubmissionJob job = new SubmissionJob();
         job.setUserId(userId);
         job.setProblemId(problemId);
         job.setCode(code);
         job.setLanguage(language);
         job.setLanguageId(languageId);
+        job.setCodingDurationSeconds(codingDurationSeconds);
         job.setTestcaseVersion(testcaseVersion == null ? "v1" : testcaseVersion);
         job.setExecutionMode(executionMode == null ? ExecutionMode.STANDARD_PER_CASE : executionMode);
         job.setStatus(SubmissionJob.JobStatus.QUEUED);

@@ -45,6 +45,9 @@ public class ProblemBundleService {
         bundle.setCreatedAt(new Date());
         bundle.setUpdatedAt(new Date());
         bundle.setActive(true);
+        if (bundle.getVisibility() == null || bundle.getVisibility().isBlank()) {
+            bundle.setVisibility("PUBLIC");
+        }
         
         // Calculate totals if not provided
         normalize(bundle);
@@ -66,6 +69,11 @@ public class ProblemBundleService {
             // Preserve creation date
             bundle.setCreatedAt(existing.getCreatedAt());
             bundle.setUpdatedAt(new Date());
+            if (bundle.getVisibility() == null || bundle.getVisibility().isBlank()) {
+                bundle.setVisibility(existing.getVisibility() == null || existing.getVisibility().isBlank()
+                    ? "PUBLIC"
+                    : existing.getVisibility());
+            }
             
             // Calculate totals if not provided
             normalize(bundle);

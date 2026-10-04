@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { selectableExecutionModes, helpForExecutionMode } from "./executionModes";
+import TestcaseFileImport from "./TestcaseFileImport";
 
 const AddProblemNew = () => {
   const navigate = useNavigate();
@@ -433,6 +434,11 @@ const AddProblemNew = () => {
                 + Add Test Case
               </button>
             </div>
+            <TestcaseFileImport
+              kind="public"
+              cases={publicTestCases}
+              onApply={setPublicTestCases}
+            />
 
             <div className="space-y-4">
               {publicTestCases.map((tc, index) => (
@@ -501,6 +507,11 @@ const AddProblemNew = () => {
                 + Add Test Case
               </button>
             </div>
+            <TestcaseFileImport
+              kind="hidden"
+              cases={hiddenTestCases}
+              onApply={setHiddenTestCases}
+            />
 
             <div className="space-y-4">
               {hiddenTestCases.map((tc, index) => (

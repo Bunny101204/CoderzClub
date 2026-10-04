@@ -29,7 +29,7 @@ const LandingPage = () => {
                 CoderzClub
               </h1>
             </div>
-            <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-3xl mx-auto">
+            <p className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto">
               Empowering developers through competitive programming, practice, and community
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">

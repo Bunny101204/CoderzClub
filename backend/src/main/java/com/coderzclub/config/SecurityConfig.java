@@ -67,6 +67,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/prometheus").permitAll()
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/category/**").permitAll() // GET requests for filtering
+                .requestMatchers("/api/bundles/{id}/problems").permitAll()
                 .requestMatchers("/api/bundles/{id}").permitAll() // GET requests for individual bundles
                 .requestMatchers("/api/bundles").permitAll() // GET requests for viewing all bundles
                 .requestMatchers("/api/users/leaderboard").permitAll()

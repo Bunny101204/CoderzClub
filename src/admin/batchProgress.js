@@ -1,13 +1,15 @@
+import { statusPresentation } from "../progress/problemStatusView.js";
+
 export function batchStatusSymbol(status) {
-  if (status === "SOLVED") return "✓";
-  if (status === "ATTEMPTED") return "●";
-  return "–";
+  const presentation = statusPresentation(status);
+  if (presentation.kind === "blank") return "";
+  return presentation.kind;
 }
 
 export function batchStatusLabel(status) {
-  if (status === "SOLVED") return "Solved";
-  if (status === "ATTEMPTED") return "Attempted";
-  return "Unsolved";
+  return statusPresentation(status).label === "Not attempted"
+    ? "Unsolved"
+    : statusPresentation(status).label;
 }
 
 export function displayAssignedProblemId(problem) {

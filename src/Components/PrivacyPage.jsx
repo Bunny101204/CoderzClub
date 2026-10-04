@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 const PrivacyPage = () => (
   <div className="app-shell p-8">
     <div className="max-w-3xl mx-auto space-y-6">
-      <Link to="/" className="text-blue-400 hover:underline">← Home</Link>
+      <Link to="/" className="text-blue-600 dark:text-blue-400 hover:underline">← Home</Link>
       <h1 className="text-3xl font-bold">Privacy</h1>
       <p>
         This page describes how the current CoderzClub application stores and uses account data.

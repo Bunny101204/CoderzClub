@@ -62,7 +62,8 @@ public class FunctionHarnessService {
         Object statusObject = response.get("status");
         String classified = errorType(statusObject);
         if (ExecutionVerdictMapper.INTERNAL_ERROR.equals(classified)) {
-            return errorResults(testCases, ExecutionVerdictMapper.INTERNAL_ERROR, statusDescription(statusObject));
+            return errorResults(testCases, ExecutionVerdictMapper.INTERNAL_ERROR,
+                ExecutionUserFacing.infrastructureMessage());
         }
         String executionError = statusDescription(statusObject);
         if (executionError != null && !"Accepted".equalsIgnoreCase(executionError)) {
@@ -106,7 +107,8 @@ public class FunctionHarnessService {
             result.setExpectedOutput(test.getExpectedOutput());
             result.setPassed(false);
             result.setErrorType(type);
-            result.setErrorMessage(message);
+            result.setErrorMessage(ExecutionUserFacing.studentDetail(
+                ExecutionVerdictMapper.fromErrorType(type), message, false));
             results.add(result);
         }
         return results;

@@ -128,13 +128,13 @@ const SubscriptionPlans = () => {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4">💎 Choose Your Plan</h1>
+          <h1 className="text-4xl font-bold mb-4">Choose Your Plan</h1>
           <p className="text-gray-400 text-lg">
             Unlock your full potential with our premium features
           </p>
           {user?.subscriptionPlan && user.subscriptionPlan !== "free" && (
             <div className="mt-4 p-4 bg-green-900 border border-green-600 rounded-lg inline-block">
-              <span className="text-green-400">✓</span> Current Plan: {getCurrentPlan().name}
+              <span className="text-green-600 dark:text-green-400">Current Plan:</span> {getCurrentPlan().name}
             </div>
           )}
         </div>
@@ -148,7 +148,7 @@ const SubscriptionPlans = () => {
             return (
               <div
                 key={plan.id}
-                className={`relative bg-gray-800 rounded-xl p-6 border-2 transition-all duration-300 ${
+                className={`relative app-surface rounded-xl p-6 border-2 transition-all duration-300 ${
                   plan.popular 
                     ? 'border-purple-500 scale-105' 
                     : isCurrentPlan 
@@ -188,7 +188,7 @@ const SubscriptionPlans = () => {
 
                 {/* Features */}
                 <div className="mb-6">
-                  <h4 className="font-semibold mb-3 text-green-400">✓ What's included:</h4>
+                  <h4 className="font-semibold mb-3 text-green-700 dark:text-green-400">What's included:</h4>
                   <ul className="space-y-2">
                     {plan.features.map((feature, index) => (
                       <li key={index} className="text-sm text-gray-300 flex items-start">
@@ -202,7 +202,7 @@ const SubscriptionPlans = () => {
                 {/* Limitations */}
                 {plan.limitations.length > 0 && (
                   <div className="mb-6">
-                    <h4 className="font-semibold mb-3 text-red-400">✗ Limitations:</h4>
+                    <h4 className="font-semibold mb-3 text-red-600 dark:text-red-400">Limitations:</h4>
                     <ul className="space-y-2">
                       {plan.limitations.map((limitation, index) => (
                         <li key={index} className="text-sm text-gray-400 flex items-start">

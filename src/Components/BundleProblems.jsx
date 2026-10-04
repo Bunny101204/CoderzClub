@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { CheckIcon } from "../icons/AppIcons.jsx";
 
 const BundleProblems = () => {
   const { id } = useParams();
@@ -19,20 +20,29 @@ const BundleProblems = () => {
   const fetchBundleData = async () => {
     try {
       console.log("[BundleProblems] Fetching bundle data for ID:", id);
-      const response = await fetch(`/api/bundles/${id}`);
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      const response = await fetch(`/api/bundles/${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (response.status === 404 || response.status === 403) {
+        setBundle(null);
+        setProblems([]);
+        setLoading(false);
+        return;
+      }
       if (response.ok) {
         const data = await response.json();
-        console.log("[BundleProblems] Bundle data received:", data);
         setBundle(data);
-        
-        // Fetch all problems in the bundle
-        // Check if problemIds exists and is a non-empty array
-        if (data.problemIds && Array.isArray(data.problemIds) && data.problemIds.length > 0) {
-          console.log("[BundleProblems] Bundle has", data.problemIds.length, "problem IDs");
+        const problemsResponse = await fetch(`/api/bundles/${id}/problems`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (problemsResponse.ok) {
+          const payload = await problemsResponse.json();
+          const rows = Array.isArray(payload.problems) ? payload.problems : [];
+          setProblems(rows);
+        } else if (data.problemIds && Array.isArray(data.problemIds) && data.problemIds.length > 0) {
           await fetchBundleProblems(data.problemIds);
         } else {
-          console.warn("[BundleProblems] Bundle has no problemIds or empty array");
-          console.log("[BundleProblems] problemIds value:", data.problemIds);
           setProblems([]);
         }
       } else {
@@ -301,21 +311,21 @@ const BundleProblems = () => {
               return (
                 <div
                   key={problem.id}
-                  className={`bg-gray-800 rounded-xl p-6 border transition-all duration-300 hover:scale-[1.02] ${
+                  className={`app-surface rounded-xl p-6 border transition-all duration-300 hover:scale-[1.02] ${
                     isSolved
                       ? 'border-green-500'
                       : isAttempted
                       ? 'border-yellow-500'
-                      : 'border-gray-700 hover:border-blue-500'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-blue-500'
                   }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-start space-x-4 flex-1">
                       {/* Problem Number */}
                       <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${
-                        isSolved ? 'bg-green-500' : isAttempted ? 'bg-yellow-500' : 'bg-gray-700'
+                        isSolved ? 'bg-green-500 text-white' : isAttempted ? 'bg-yellow-500 text-black' : 'bg-gray-200 dark:bg-gray-700'
                       }`}>
-                        {isSolved ? '✓' : index + 1}
+                        {isSolved ? <CheckIcon className="h-5 w-5" /> : index + 1}
                       </div>
 
                       {/* Problem Info */}
@@ -327,7 +337,7 @@ const BundleProblems = () => {
                           </span>
                         </div>
                         
-                        <p className="text-gray-400 mb-3">{problem.description}</p>
+                        <p className="app-muted mb-3">{problem.description}</p>
 
                         {/* Tags */}
                         {problem.tags && problem.tags.length > 0 && (
@@ -335,7 +345,7 @@ const BundleProblems = () => {
                             {problem.tags.map((tag, i) => (
                               <span
                                 key={i}
-                                className="px-2 py-1 bg-gray-700 text-xs rounded-full text-gray-300"
+                                className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-xs rounded-full app-muted"
                               >
                                 {tag}
                               </span>
@@ -345,13 +355,11 @@ const BundleProblems = () => {
 
                         {/* Progress Info */}
                         {user && isAttempted && (
-                          <div className="flex items-center space-x-4 text-sm">
-                            <span className="text-gray-400">
+                          <div className="flex items-center space-x-4 text-sm app-muted">
                               {progress.submissions} attempt{progress.submissions !== 1 ? 's' : ''}
-                            </span>
                             {isSolved && (
                               <span className="text-green-400 font-semibold flex items-center">
-                                <span className="mr-1">✓</span> Solved
+                                <CheckIcon className="h-4 w-4 mr-1" /> Solved
                               </span>
                             )}
                           </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useProblemStatus } from "../hooks/useProblemStatus";
+import ProblemStatusMark from "./ProblemStatusMark";
 
 const HomePage = ({ problems: propsProblems }) => {
   const { user } = useAuth();
@@ -52,15 +53,7 @@ const HomePage = ({ problems: propsProblems }) => {
     return styles[difficulty] || 'bg-gray-600 text-white';
   };
 
-  const getStatusIcon = (status) => {
-    if (status === 'SOLVED') {
-      return <span className="inline-flex items-center text-green-400 text-lg leading-none" title="Solved" aria-label="Solved"><span aria-hidden="true">✓</span></span>;
-    }
-    if (status === 'ATTEMPTED') {
-      return <span className="inline-flex items-center text-yellow-400 text-lg leading-none" title="Attempted" aria-label="Attempted"><span aria-hidden="true">●</span></span>;
-    }
-    return <span className="inline-flex items-center text-gray-600 text-lg leading-none" title="Unsolved" aria-label="Unsolved"><span aria-hidden="true">–</span></span>;
-  };
+  const getStatusIcon = (status) => <ProblemStatusMark status={status} />;
 
   const compareById = (a, b) => {
     const idA = String(a.id || "");
@@ -253,7 +246,7 @@ const HomePage = ({ problems: propsProblems }) => {
               <option value="sorting">Sorting</option>
             </select>
             <div className="flex items-center">
-              <label className="text-sm text-gray-400 mr-2">Items:</label>
+              <label className="text-sm app-muted mr-2">Items:</label>
               <select
                 value={itemsPerPage}
                 onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(0); }}
@@ -290,11 +283,11 @@ const HomePage = ({ problems: propsProblems }) => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-gray-400 text-center py-4">Loading...</td>
+                <td colSpan={5} className="app-muted text-center py-4">Loading...</td>
               </tr>
             ) : problems.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-gray-400 text-center py-4">No problems found.</td>
+                <td colSpan={5} className="app-muted text-center py-4">No problems found.</td>
               </tr>
             ) : (
               problems.map((problem) => {
@@ -303,7 +296,7 @@ const HomePage = ({ problems: propsProblems }) => {
                 return (
                   <tr
                     key={problem.id}
-                    className="border-t border-gray-700 cursor-pointer hover:bg-gray-700/40"
+                    className="border-t border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/40"
                     onClick={() => navigate(`/problem/${problem.id}`)}
                   >
                     <td className="py-2 px-3 align-top">
@@ -311,14 +304,14 @@ const HomePage = ({ problems: propsProblems }) => {
                     </td>
                     <td className="py-2 px-3 font-mono">{displayId}</td>
                     <td className="py-2 px-3">
-                      <div className="font-semibold text-white">{problem.title}</div>
+                      <div className="font-semibold">{problem.title}</div>
                     </td>
                     <td className="py-2 px-3">
                       <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${getDifficultyBadge(problem.difficulty)}`}>
                         {problem.difficulty || 'N/A'}
                       </span>
                     </td>
-                    <td className="py-2 px-3 text-gray-300">{(problem.tags || []).join(', ')}</td>
+                    <td className="py-2 px-3 app-muted">{(problem.tags || []).join(', ')}</td>
                   </tr>
                 );
               })

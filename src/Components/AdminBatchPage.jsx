@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { displayAssignedProblemId, batchStatusLabel, batchStatusSymbol } from "../admin/batchProgress";
+import { displayAssignedProblemId, batchStatusLabel } from "../admin/batchProgress";
+import ProblemStatusMark from "./ProblemStatusMark";
 
 function authHeaders(json = false) {
   const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
@@ -363,7 +364,7 @@ const AdminBatchPage = () => {
                           <td className="py-2 px-3 sticky left-0 bg-white dark:bg-gray-800">{student.username}</td>
                           {(student.cells || []).map((cell) => (
                             <td key={cell.problemId} className="py-2 px-3" title={batchStatusLabel(cell.status)} aria-label={batchStatusLabel(cell.status)}>
-                              {batchStatusSymbol(cell.status)}
+                              <ProblemStatusMark status={cell.status} />
                             </td>
                           ))}
                           <td className="py-2 px-3">{student.solvedCount}</td>

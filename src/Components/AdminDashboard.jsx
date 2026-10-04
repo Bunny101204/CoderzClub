@@ -337,8 +337,8 @@ const AdminDashboard = () => {
         </div>
 
         {activeTab === "problems" && (
-          <div className="flex flex-col lg:flex-row gap-6 items-start">
-            <aside className="w-full lg:w-60 shrink-0 app-surface rounded-lg shadow p-4">
+          <div className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-6 items-start">
+            <aside className="w-full md:w-[240px] md:max-w-[240px] app-surface rounded-lg shadow p-4">
               <h2 className="text-lg font-semibold mb-4">Filters</h2>
               <label className="block text-sm app-muted mb-2" htmlFor="admin-problem-topic">Topic</label>
               <select
@@ -374,7 +374,7 @@ const AdminDashboard = () => {
                 <option value={100}>100</option>
               </select>
             </aside>
-            <div className="min-w-0 flex-1 w-full">
+            <div className="min-w-0 w-full overflow-x-auto">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
               <div>
                 <h2 className="text-xl font-semibold">All Problems</h2>

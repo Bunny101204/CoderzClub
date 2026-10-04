@@ -158,9 +158,15 @@ ensureIndex(db.batches, { "name": 1 }, { name: "name_idx" });
 // Membership uniqueness and per-batch member scans / counts.
 ensureIndex(db.batch_members, { "batchId": 1, "userId": 1 }, { unique: true, name: "batchId_userId_unique_idx" });
 ensureIndex(db.batch_members, { "batchId": 1, "addedAt": 1 }, { name: "batchId_addedAt_idx" });
+// userId -> batchIds for bundle access resolution (memberships of a user).
+ensureIndex(db.batch_members, { "userId": 1, "batchId": 1 }, { name: "userId_batchId_idx" });
 // Assignment uniqueness and per-batch assignment scans / counts.
 ensureIndex(db.batch_assignments, { "batchId": 1, "problemId": 1 }, { unique: true, name: "batchId_problemId_unique_idx" });
 ensureIndex(db.batch_assignments, { "batchId": 1, "assignedAt": 1 }, { name: "batchId_assignedAt_idx" });
+// Bundle access grants: uniqueness and subject lookup for USER/BATCH grants.
+ensureIndex(db.bundle_access_grants, { "bundleId": 1, "subjectType": 1, "subjectId": 1 }, { unique: true, name: "bundle_subject_unique_idx" });
+ensureIndex(db.bundle_access_grants, { "subjectType": 1, "subjectId": 1, "bundleId": 1 }, { name: "subject_bundle_idx" });
+ensureIndex(db.problem_bundles, { "isActive": 1, "visibility": 1 }, { name: "isActive_visibility_idx" });
 // Batch reports query submissions with userId $in page-or-all members AND problemId $in assigned IDs/aliases.
 // Existing submissions.userId_problemId_createdAt_desc_idx already covers that compound lookup.
 
@@ -189,3 +195,8 @@ assertIndex(db.batch_members, "batchId_userId_unique_idx", function(idx) {
 assertIndex(db.batch_assignments, "batchId_problemId_unique_idx", function(idx) {
   return idx.unique === true;
 });
+assertIndex(db.batch_members, "userId_batchId_idx");
+assertIndex(db.bundle_access_grants, "bundle_subject_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.bundle_access_grants, "subject_bundle_idx");

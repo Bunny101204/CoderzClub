@@ -10,6 +10,8 @@ public class TestResultResponse {
     private Long memory;
     private String errorType;
     private String errorMessage;
+    private String errorCode;
+    private String diagnosticMessage;
 
     // For hidden test summaries
     private String type; // e.g., "hidden"
@@ -42,6 +44,12 @@ public class TestResultResponse {
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+
+    public String getDiagnosticMessage() { return diagnosticMessage; }
+    public void setDiagnosticMessage(String diagnosticMessage) { this.diagnosticMessage = diagnosticMessage; }
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }

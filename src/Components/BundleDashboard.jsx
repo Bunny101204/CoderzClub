@@ -188,7 +188,7 @@ const BundleDashboard = () => {
   if (loading) {
     return (
       <div className="app-shell flex items-center justify-center">
-        <div className="text-white text-xl">Loading bundles...</div>
+        <div className="text-xl">Loading bundles...</div>
       </div>
     );
   }
@@ -226,7 +226,7 @@ const BundleDashboard = () => {
             <button
               onClick={() => setBundlePage((p) => Math.max(1, p - 1))}
               disabled={bundlePage === 1}
-              className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+              className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50"
             >
               Prev
             </button>
@@ -234,7 +234,7 @@ const BundleDashboard = () => {
               <button
                 key={i + 1}
                 onClick={() => setBundlePage(i + 1)}
-                className={`px-3 py-1 rounded ${bundlePage === i + 1 ? 'bg-blue-500' : 'bg-gray-700'} text-white`}
+                className={`px-3 py-1 rounded ${bundlePage === i + 1 ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'}`}
               >
                 {i + 1}
               </button>
@@ -242,7 +242,7 @@ const BundleDashboard = () => {
             <button
               onClick={() => setBundlePage((p) => Math.min(totalBundlePages, p + 1))}
               disabled={bundlePage === totalBundlePages}
-              className="px-3 py-1 rounded bg-gray-700 text-white disabled:opacity-50"
+              className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50"
             >
               Next
             </button>
@@ -250,7 +250,7 @@ const BundleDashboard = () => {
         )}
 
         {/* Bundle Links */}
-        <div className="mb-8 bg-gray-800 border border-gray-700 rounded-xl p-5">
+        <div className="mb-8 app-surface rounded-xl p-5">
           <h2 className="text-xl font-semibold mb-3">Problem Bundle</h2>
           <div className="flex flex-wrap gap-3">
             {safeBundles.length > 0 ? (
@@ -272,11 +272,11 @@ const BundleDashboard = () => {
         {/* Filters */}
         <div className="flex flex-wrap gap-4 mb-8 justify-center">
           <div className="flex flex-col">
-            <label className="text-sm text-gray-400 mb-2">Difficulty</label>
+            <label className="text-sm app-muted mb-2">Difficulty</label>
             <select
               value={selectedDifficulty}
               onChange={(e) => setSelectedDifficulty(e.target.value)}
-              className="bg-gray-800 text-white px-4 py-2 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="app-input px-4 py-2 rounded-lg focus:outline-none focus:border-blue-500"
             >
               {difficulties.map(diff => (
                 <option key={diff} value={diff}>{diff}</option>
@@ -285,11 +285,11 @@ const BundleDashboard = () => {
           </div>
           
           <div className="flex flex-col">
-            <label className="text-sm text-gray-400 mb-2">Category</label>
+            <label className="text-sm app-muted mb-2">Category</label>
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-gray-800 text-white px-4 py-2 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="app-input px-4 py-2 rounded-lg focus:outline-none focus:border-blue-500"
             >
               {categories.map(cat => (
                 <option key={cat} value={cat}>{cat.replace('_', ' ')}</option>
@@ -323,7 +323,7 @@ const BundleDashboard = () => {
           <div className="text-sm text-gray-300">Showing {filteredBundles.length} bundles</div>
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-400">Items:</label>
-            <select value={bundleItemsPerPage} onChange={(e) => { setBundleItemsPerPage(Number(e.target.value)); setBundlePage(1); }} className="px-3 py-1 bg-gray-800 rounded border border-gray-600">
+            <select value={bundleItemsPerPage} onChange={(e) => { setBundleItemsPerPage(Number(e.target.value)); setBundlePage(1); }} className="px-3 py-1 app-input rounded">
               <option value={6}>6</option>
               <option value={9}>9</option>
               <option value={12}>12</option>
@@ -339,7 +339,7 @@ const BundleDashboard = () => {
               return (
             <div
               key={bundle.id}
-              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-700 transition-all duration-300 border border-gray-700 hover:border-blue-500 cursor-pointer"
+              className="app-surface rounded-xl p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-300 border hover:border-blue-500 cursor-pointer"
               onClick={() => {
                 // Both admin and user can click to view bundle problems
                 window.location.href = `/bundle/${bundle.id}`;
@@ -389,7 +389,7 @@ const BundleDashboard = () => {
                 {bundle.tags?.map((tag, index) => (
                   <span
                     key={index}
-                    className="px-2 py-1 bg-gray-700 text-xs rounded-full text-gray-300"
+                    className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-xs rounded-full app-muted"
                   >
                     {tag}
                   </span>

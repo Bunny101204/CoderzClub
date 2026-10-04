@@ -193,7 +193,7 @@ const AuthPage = () => {
                 onChange={() => setRegisterAsAdmin(!registerAsAdmin)}
                 className="mr-2"
               />
-              <label htmlFor="registerAsAdmin" className="text-sm text-gray-300">
+              <label htmlFor="registerAsAdmin" className="text-sm app-muted">
                 Register as Admin (temporary)
               </label>
             </div>
@@ -259,11 +259,11 @@ const AuthPage = () => {
         </form>
 
         <div className="mt-6 text-center">
-          <p className="text-gray-300">
+          <p className="app-muted">
             {isLogin ? "Don't have an account? " : "Already have an account? "}
             <button
               onClick={toggleMode}
-              className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-500 font-medium transition-colors"
             >
               {isLogin ? 'Sign up' : 'Sign in'}
             </button>

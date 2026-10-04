@@ -41,12 +41,26 @@ public class Judge0Controller {
             String errorType = Judge0ExecutionService.parseErrorType(responseMap);
             if (errorType != null) {
                 responseMap.put("errorType", errorType);
+                if (com.coderzclub.service.ExecutionVerdictMapper.isInfrastructureFailure(errorType)) {
+                    responseMap.put("message", com.coderzclub.service.ExecutionUserFacing.infrastructureMessage());
+                    responseMap.put("errorCode", com.coderzclub.service.ExecutionUserFacing.JUDGE0_PROVIDER_ERROR);
+                    Object status = responseMap.get("status");
+                    if (status instanceof Map<?, ?> statusMap) {
+                        Map<String, Object> safeStatus = new HashMap<>();
+                        safeStatus.put("id", 13);
+                        safeStatus.put("description", com.coderzclub.service.ExecutionUserFacing.infrastructureMessage());
+                        responseMap.put("status", safeStatus);
+                    }
+                }
             }
             return ResponseEntity.ok(responseMap);
         } catch (RunLimitExceededException limited) {
             return RateLimitResponses.from(limited);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Judge0 execution failed", "details", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of(
+                "error", com.coderzclub.service.ExecutionUserFacing.infrastructureMessage(),
+                "errorCode", com.coderzclub.service.ExecutionUserFacing.JUDGE0_PROVIDER_ERROR,
+                "errorType", "INTERNAL_ERROR"));
         }
     }
 

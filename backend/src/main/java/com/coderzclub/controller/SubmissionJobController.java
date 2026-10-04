@@ -22,6 +22,8 @@ import com.coderzclub.service.SubmissionQueueAdmissionService;
 import com.coderzclub.service.SubmissionJobAccessService;
 import com.coderzclub.service.SubmissionJobSseTicketService;
 import com.coderzclub.service.ExecutionCompatibilityService;
+import com.coderzclub.service.ExecutionUserFacing;
+import com.coderzclub.service.ExecutionVerdictMapper;
 import com.coderzclub.service.IncompatibleExecutionException;
 
 import org.slf4j.Logger;
@@ -81,6 +83,12 @@ public class SubmissionJobController {
 
     @Autowired
     private ExecutionCompatibilityService compatibilityService;
+
+    @Autowired(required = false)
+    private com.coderzclub.config.Judge0ProviderProperties providerProperties;
+
+    @Autowired(required = false)
+    private com.coderzclub.config.SubmissionLimitsConfig limitsConfig;
 
 
     /**
@@ -201,11 +209,8 @@ public class SubmissionJobController {
 
                 problem.getTestcaseVersion(),
                 totalTests,
-                problem.getExecutionMode()
-
-                //publicTests,
-                //hiddenTests
-
+                problem.getExecutionMode(),
+                request.getCodingDurationSeconds()
             );
 
             // Note: the submission attempt is already acquired atomically above.
@@ -213,8 +218,11 @@ public class SubmissionJobController {
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());
+            resp.setReference(job.getId());
             resp.setStatus(job.getStatus().toString());
             resp.setCreatedAt(job.getCreatedAt());
+            resp.setCorrelationId(ExecutionUserFacing.correlationId());
+            resp.setCodingDurationSeconds(job.getCodingDurationSeconds());
 
             logger.info("Created submission job {} for user {} problemId={} totalTests={}",
                 job.getId(), username, request.getProblemId(), job.getTotalTests());
@@ -242,6 +250,10 @@ public class SubmissionJobController {
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());
+            resp.setReference(job.getId());
+            resp.setSubmissionId(job.getSubmissionId());
+            resp.setCorrelationId(ExecutionUserFacing.correlationId());
+            resp.setCodingDurationSeconds(job.getCodingDurationSeconds());
             resp.setStatus(job.getStatus().toString());
             resp.setCreatedAt(job.getCreatedAt());
             resp.setStartedAt(job.getStartedAt());
@@ -253,40 +265,24 @@ public class SubmissionJobController {
                 resp.setResult(job.getFinalResult());
                 resp.setRuntime(job.getTotalRuntime());
                 resp.setMemory(job.getTotalMemory());
+                applyJobVerdictDiagnostics(resp, job.getFinalResult());
 
                 // Sanitize test results: do not leak hidden test input/expected output
                 List<com.coderzclub.model.SubmissionTestResult> storedResults = jobService.getResults(job);
                 List<TestResultResponse> sanitized = new java.util.ArrayList<>();
                 for (int i = 0; i < (storedResults != null ? storedResults.size() : 0); i++) {
                     com.coderzclub.model.SubmissionTestResult r = storedResults.get(i);
-                    if (r.getTestcaseType() == com.coderzclub.model.SubmissionTestResult.TestcaseType.PUBLIC) {
-                        TestResultResponse tr = new TestResultResponse();
-                        tr.setInput(r.getInput());
-                        tr.setExpectedOutput(r.getExpectedOutput());
-                        tr.setActualOutput(r.getActualOutput());
-                        tr.setPassed(r.isPassed());
-                        tr.setRuntime(r.getRuntime());
-                        tr.setMemory(r.getMemory());
-                        tr.setErrorType(r.getErrorType());
-                        tr.setErrorMessage(r.getErrorMessage());
-                        sanitized.add(tr);
-                    } else {
-                        // Hidden test: never expose input or expected output
-                        TestResultResponse tr = new TestResultResponse();
-                        tr.setType("hidden");
-                        tr.setStatus(r.isPassed() ? "PASSED" : "FAILED");
-                        tr.setPassed(r.isPassed());
-                        tr.setRuntime(r.getRuntime());
-                        tr.setMemory(r.getMemory());
-                        if (!r.isPassed()) tr.setMessage("Failed on hidden testcase");
-                        sanitized.add(tr);
-                    }
+                    boolean hidden = r.getTestcaseType() != com.coderzclub.model.SubmissionTestResult.TestcaseType.PUBLIC;
+                    TestResultResponse tr = toSafeTestResult(r, hidden);
+                    sanitized.add(tr);
                 }
 
                 resp.setTestResults(sanitized);
 
             } else if (job.getStatus() == SubmissionJob.JobStatus.FAILED) {
-                resp.setError(job.getErrorMessage());
+                resp.setErrorCode(ExecutionUserFacing.JUDGE0_PROVIDER_ERROR);
+                resp.setError(ExecutionUserFacing.infrastructureMessage());
+                resp.setDiagnosticMessage(ExecutionUserFacing.INFRASTRUCTURE_NOT_WRONG_ANSWER);
             }
 
             return ResponseEntity.ok(resp);
@@ -399,6 +395,80 @@ public class SubmissionJobController {
         return testCases == null ? List.of() : testCases.stream()
             .map(test -> new SubmissionJob.TestCase(test.getInput(), test.getOutput(), test.getExplanation()))
             .toList();
+    }
+
+    private void applyJobVerdictDiagnostics(SubmissionJobResponse resp, String verdict) {
+        if (verdict == null || verdict.isBlank() || "ACCEPTED".equals(verdict)) {
+            return;
+        }
+        resp.setErrorCode(ExecutionUserFacing.clientErrorCode(verdict));
+        if (ExecutionVerdictMapper.INTERNAL_ERROR.equals(verdict)
+            || ExecutionVerdictMapper.isInfrastructureFailure(verdict)) {
+            resp.setError(ExecutionUserFacing.infrastructureMessage());
+            resp.setDiagnosticMessage(ExecutionUserFacing.INFRASTRUCTURE_NOT_WRONG_ANSWER);
+            return;
+        }
+        if (ExecutionVerdictMapper.WRONG_ANSWER.equals(verdict)) {
+            resp.setDiagnosticMessage("Wrong answer.");
+            return;
+        }
+        resp.setDiagnosticMessage(limitAwareDetail(verdict, null));
+    }
+
+    private TestResultResponse toSafeTestResult(com.coderzclub.model.SubmissionTestResult r, boolean hidden) {
+        TestResultResponse tr = new TestResultResponse();
+        tr.setPassed(r.isPassed());
+        tr.setRuntime(r.getRuntime());
+        tr.setMemory(r.getMemory());
+        if (hidden) {
+            tr.setType("hidden");
+            tr.setStatus(r.isPassed() ? "PASSED" : "FAILED");
+        } else {
+            tr.setInput(r.getInput());
+            tr.setExpectedOutput(r.getExpectedOutput());
+            tr.setActualOutput(r.getActualOutput());
+        }
+        if (r.isPassed()) {
+            return tr;
+        }
+        String mapped = (r.getErrorType() == null || r.getErrorType().isBlank())
+            ? ExecutionVerdictMapper.WRONG_ANSWER
+            : ExecutionVerdictMapper.fromErrorType(r.getErrorType());
+        tr.setErrorType(mapped);
+        tr.setErrorCode(ExecutionUserFacing.clientErrorCode(mapped));
+        String detail = limitAwareDetail(mapped, r.getErrorMessage());
+        if (hidden && ExecutionVerdictMapper.WRONG_ANSWER.equals(mapped)) {
+            detail = ExecutionUserFacing.HIDDEN_WRONG_ANSWER;
+        } else if (hidden) {
+            detail = ExecutionUserFacing.studentDetail(mapped, r.getErrorMessage(), true);
+            if (ExecutionVerdictMapper.INTERNAL_ERROR.equals(mapped)) {
+                detail = ExecutionUserFacing.infrastructureMessage();
+            }
+        }
+        tr.setErrorMessage(detail);
+        tr.setDiagnosticMessage(detail);
+        if (hidden) {
+            tr.setMessage(detail);
+        }
+        return tr;
+    }
+
+    private String limitAwareDetail(String verdict, String providerText) {
+        if (ExecutionVerdictMapper.TIME_LIMIT_EXCEEDED.equals(verdict)) {
+            int seconds = limitsConfig != null ? limitsConfig.getMaxExecutionTimeSeconds() : 0;
+            if (seconds > 0) {
+                return "Time limit exceeded (" + seconds + "s per test).";
+            }
+            return "Time limit exceeded.";
+        }
+        if (ExecutionVerdictMapper.MEMORY_LIMIT_EXCEEDED.equals(verdict)) {
+            int kb = providerProperties != null ? providerProperties.getMemoryLimitKb() : 0;
+            if (kb > 0) {
+                return "Memory limit exceeded (" + kb + " KB).";
+            }
+            return "Memory limit exceeded.";
+        }
+        return ExecutionUserFacing.studentDetail(verdict, providerText, false);
     }
 
     /**

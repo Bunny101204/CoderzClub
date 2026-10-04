@@ -38,6 +38,8 @@ public class Submission {
     private Integer totalTestCases;    // Total number of test cases
     private Map<String, Object> executionDetails; // Full Judge0 response for debugging
     private boolean statsCounted;
+    /** Client-supplied editor timer seconds. Informational only; not used for judging. */
+    private Integer codingDurationSeconds;
 
     // Default constructor
     public Submission() {}
@@ -77,6 +79,7 @@ public class Submission {
         private Integer passedTestCases;
         private Integer totalTestCases;
         private Map<String, Object> executionDetails;
+        private Integer codingDurationSeconds;
 
         public Builder id(String id) {
             this.id = id;
@@ -163,6 +166,11 @@ public class Submission {
             return this;
         }
 
+        public Builder codingDurationSeconds(Integer codingDurationSeconds) {
+            this.codingDurationSeconds = codingDurationSeconds;
+            return this;
+        }
+
         public Submission build() {
             Submission submission = new Submission(id, userId, problemId, code, language, result, output, createdAt);
             submission.setRuntime(runtime);
@@ -174,6 +182,7 @@ public class Submission {
             submission.setTotalTestCases(totalTestCases);
             submission.setExecutionDetails(executionDetails);
             submission.setSubmissionJobId(submissionJobId);
+            submission.setCodingDurationSeconds(codingDurationSeconds);
             return submission;
         }
     }
@@ -232,4 +241,9 @@ public class Submission {
 
     public Map<String, Object> getExecutionDetails() { return executionDetails; }
     public void setExecutionDetails(Map<String, Object> executionDetails) { this.executionDetails = executionDetails; }
+
+    public Integer getCodingDurationSeconds() { return codingDurationSeconds; }
+    public void setCodingDurationSeconds(Integer codingDurationSeconds) {
+        this.codingDurationSeconds = com.coderzclub.service.CodingDuration.sanitize(codingDurationSeconds);
+    }
 } 

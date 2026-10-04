@@ -125,8 +125,8 @@ const ProblemPage = ({ problems }) => {
   return (
     <div className="app-shell p-4 flex flex-col md:flex-row gap-6">
       {/* Left: Problem details */}
-      <div className="md:w-1/2 w-full bg-gray-800 rounded-lg p-6 shadow-lg mb-4 md:mb-0">
-        <h2 className="text-2xl font-bold mb-4">🧩 {problem.title}</h2>
+      <div className="md:w-1/2 w-full app-surface rounded-lg p-6 shadow-lg mb-4 md:mb-0">
+        <h2 className="text-2xl font-bold mb-4">{problem.title}</h2>
         {renderSignature()}
         <p className="mb-4 whitespace-pre-line">{problem.statement}</p>
         {constraints.length > 0 && (

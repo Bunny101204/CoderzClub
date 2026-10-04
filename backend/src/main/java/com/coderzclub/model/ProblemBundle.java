@@ -28,6 +28,7 @@ public class ProblemBundle {
     private Date createdAt = new Date();
     private Date updatedAt = new Date();
     private boolean isActive; // Whether this bundle is available for users
+    private String visibility; // PUBLIC or RESTRICTED; missing/null is treated as PUBLIC
     private String sharedTemplate; // Shared template code for all problems in this bundle
 
     // Getters and setters
@@ -81,6 +82,9 @@ public class ProblemBundle {
 
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
+
+    public String getVisibility() { return visibility; }
+    public void setVisibility(String visibility) { this.visibility = visibility; }
     
     public String getSharedTemplate() { return sharedTemplate; }
     public void setSharedTemplate(String sharedTemplate) { this.sharedTemplate = sharedTemplate; }

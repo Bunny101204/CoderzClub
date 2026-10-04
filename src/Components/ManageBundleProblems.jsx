@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import BundleAccessPanel from "./BundleAccessPanel";
 
 const ManageBundleProblems = () => {
   const { id } = useParams();
@@ -11,6 +12,7 @@ const ManageBundleProblems = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedProblem, setSelectedProblem] = useState("");
+  const [manageTab, setManageTab] = useState("content");
 
   useEffect(() => {
     fetchBundleData();
@@ -19,7 +21,9 @@ const ManageBundleProblems = () => {
 
   const fetchBundleData = async () => {
     try {
-      const response = await fetch(`/api/bundles/${id}`);
+      const response = await fetch(`/api/bundles/${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("jwtToken") || localStorage.getItem("token") || ""}` }
+      });
       if (response.ok) {
         const data = await response.json();
         setBundle(data);
@@ -273,8 +277,27 @@ const ManageBundleProblems = () => {
           </div>
           <p className="app-muted">{bundle.description}</p>
         </div>
+        <div className="flex mb-6 border-b border-gray-200 dark:border-gray-700">
+          <button
+            type="button"
+            className={`px-4 py-2 font-semibold ${manageTab === "content" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "app-muted"}`}
+            onClick={() => setManageTab("content")}
+          >
+            Content
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 font-semibold ${manageTab === "access" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "app-muted"}`}
+            onClick={() => setManageTab("access")}
+          >
+            Access
+          </button>
+        </div>
 
         {/* Messages */}
+        {manageTab === "access" && <BundleAccessPanel bundleId={id} />}
+        {manageTab === "content" && (
+        <>
         {error && (
           <div className="bg-red-50 border border-red-400 text-red-800 dark:bg-red-900/50 dark:border-red-500 dark:text-red-200 px-4 py-3 rounded mb-6">
             {error}
@@ -422,6 +445,8 @@ const ManageBundleProblems = () => {
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

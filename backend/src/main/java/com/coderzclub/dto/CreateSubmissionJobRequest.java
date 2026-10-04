@@ -25,6 +25,9 @@ public class CreateSubmissionJobRequest {
     @Max(value = 91, message = "languageId must be a valid Judge0 language ID (max 91)")
     private Integer languageId;
 
+    /** Informational client timer; ignored when invalid. Not used for judging. */
+    private Integer codingDurationSeconds;
+
     public String getProblemId() { return problemId; }
     public void setProblemId(String problemId) { this.problemId = problemId; }
 
@@ -36,4 +39,9 @@ public class CreateSubmissionJobRequest {
 
     public Integer getLanguageId() { return languageId; }
     public void setLanguageId(Integer languageId) { this.languageId = languageId; }
+
+    public Integer getCodingDurationSeconds() { return codingDurationSeconds; }
+    public void setCodingDurationSeconds(Integer codingDurationSeconds) {
+        this.codingDurationSeconds = com.coderzclub.service.CodingDuration.sanitize(codingDurationSeconds);
+    }
 }

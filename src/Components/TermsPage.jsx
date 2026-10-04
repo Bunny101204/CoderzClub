@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 const TermsPage = () => (
   <div className="app-shell p-8">
     <div className="max-w-3xl mx-auto space-y-6">
-      <Link to="/" className="text-blue-400 hover:underline">← Home</Link>
+      <Link to="/" className="text-blue-600 dark:text-blue-400 hover:underline">← Home</Link>
       <h1 className="text-3xl font-bold">Terms of Service</h1>
       <p>
         These notes describe how CoderzClub currently works. They are not a complete legal agreement and do not set jurisdiction, liability, or payment terms.

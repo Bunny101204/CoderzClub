@@ -377,6 +377,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
   const [deletePhrase, setDeletePhrase] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [profileTab, setProfileTab] = useState("overview");
 
   useEffect(() => {
     if (!asPage && !isOpen) return;
@@ -404,13 +405,6 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     };
 
     fetchAll();
-
-    // Refresh data every 30 seconds for dynamic updates
-    const interval = setInterval(() => {
-      fetchAll();
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, [isOpen, asPage]);
 
   const handleLogout = async () => {
@@ -551,11 +545,10 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
 
   // heatColor: scale counts relative to max (4 intensity buckets)
   const heatColor = (count, max) => {
-    if (!count || count === 0) return "bg-gray-800";
-    // intensity from 1..4
+    if (!count || count === 0) return "bg-gray-200 dark:bg-gray-800";
     const intensity = Math.ceil((count / Math.max(1, max)) * 4);
-    if (intensity <= 1) return "bg-green-900";
-    if (intensity === 2) return "bg-green-700";
+    if (intensity <= 1) return "bg-green-200 dark:bg-green-900";
+    if (intensity === 2) return "bg-green-400 dark:bg-green-700";
     if (intensity === 3) return "bg-green-500";
     return "bg-green-300";
   };
@@ -575,10 +568,26 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
         className={asPage ? "max-w-7xl mx-auto" : "w-full max-w-2xl mx-auto"}
       >
         <h2 className="text-2xl font-bold mb-6">Profile</h2>
+        <div className="flex mb-6 border-b border-gray-200 dark:border-gray-700">
+          <button
+            type="button"
+            className={`px-4 py-2 font-semibold ${profileTab === "overview" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "app-muted"}`}
+            onClick={() => setProfileTab("overview")}
+          >
+            Overview
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 font-semibold ${profileTab === "account" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "app-muted"}`}
+            onClick={() => setProfileTab("account")}
+          >
+            Account & Privacy
+          </button>
+        </div>
+        {profileTab === "overview" && (
         <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
-          {/* Left - 30% */}
           <div className="lg:col-span-3 space-y-4">
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
+            <div className="app-surface rounded-2xl p-6">
               <div className="flex items-center space-x-3 mb-4">
                 <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold text-lg">
@@ -586,13 +595,13 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-white font-semibold">{user?.username}</h3>
+                  <h3 className="font-semibold">{user?.username}</h3>
                 </div>
               </div>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between py-2 border-b border-gray-700">
-                  <span className="text-gray-300">Username</span>
-                  <span className="text-white font-medium">
+                <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                  <span className="app-muted">Username</span>
+                  <span className="font-medium">
                     {user?.username}
                   </span>
                 </div>
@@ -608,87 +617,57 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
               </div>
             </div>
 
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 space-y-3">
-              <h3 className="text-white font-semibold">Your data</h3>
-              <button onClick={handleExportData} className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg">
-                Download my data
-              </button>
-              <p className="text-sm text-gray-400">
-                Deleting your account disables login and anonymizes your username and email. Judged submissions may remain for system integrity and will not show your original identity. This cannot be undone in the app.
-              </p>
-              <label className="block text-sm text-gray-300">
-                Type {DELETE_CONFIRMATION_PHRASE} to confirm
-                <input
-                  value={deletePhrase}
-                  onChange={(e) => setDeletePhrase(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded"
-                />
-              </label>
-              {deleteError && <p className="text-red-400 text-sm">{deleteError}</p>}
-              <button
-                onClick={handleDeleteAccount}
-                disabled={!canConfirmAccountDeletion(deletePhrase) || deleting}
-                className="w-full bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white py-2 rounded-lg"
-              >
-                {deleting ? "Deleting..." : "Delete account"}
-              </button>
-            </div>
-
-            {/* Quick stats card */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-              <h3 className="text-white font-semibold mb-3">Overview</h3>
+            <div className="app-surface rounded-2xl p-6">
+              <h3 className="font-semibold mb-3">Overview</h3>
               {loadingStats ? (
-                <div className="text-gray-400 text-sm">Loading stats...</div>
+                <div className="app-muted text-sm">Loading stats...</div>
               ) : statsError ? (
-                <div className="text-red-400 text-sm">{statsError}</div>
+                <div className="text-red-600 dark:text-red-400 text-sm">{statsError}</div>
               ) : stats ? (
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Points</div>
-                    <div className="text-green-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Points</div>
+                    <div className="text-green-600 dark:text-green-400 text-xl font-bold">
                       {stats.totalPoints}
                     </div>
                   </div>
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Solved</div>
-                    <div className="text-blue-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Solved</div>
+                    <div className="text-blue-600 dark:text-blue-400 text-xl font-bold">
                       {stats.uniqueProblemsSolved ?? stats.totalProblemsSolved}
                     </div>
                   </div>
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Success</div>
-                    <div className="text-yellow-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Success</div>
+                    <div className="text-yellow-700 dark:text-yellow-400 text-xl font-bold">
                       {Math.round((stats.successRate || 0) * 100)}%
                     </div>
                   </div>
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Streak</div>
-                    <div className="text-orange-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Streak</div>
+                    <div className="text-orange-600 dark:text-orange-400 text-xl font-bold">
                       {stats.currentStreak}
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="text-gray-400 text-sm">No stats available.</div>
+                <div className="app-muted text-sm">No stats available.</div>
               )}
             </div>
           </div>
 
-          {/* Right - 70% */}
           <div className="lg:col-span-7 space-y-6">
-            {/* Total Solved visual */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
+            <div className="app-surface rounded-2xl p-6">
               <div className="flex items-center justify-between">
-                <h3 className="text-white font-semibold">Problems Solved</h3>
-                <div className="text-4xl font-extrabold text-blue-400">
+                <h3 className="font-semibold">Problems Solved</h3>
+                <div className="text-4xl font-extrabold text-blue-600 dark:text-blue-400">
                   {stats?.uniqueProblemsSolved ?? stats?.totalProblemsSolved ?? 0}
                 </div>
               </div>
             </div>
 
-            {/* Difficulty distribution */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-              <h3 className="text-white font-semibold mb-4">
+            <div className="app-surface rounded-2xl p-6">
+              <h3 className="font-semibold mb-4">
                 Solved by Difficulty
               </h3>
               <div className="space-y-3">
@@ -698,8 +677,8 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   { key: "HARD", label: "Hard", color: "bg-orange-500" },
                 ].map((d) => (
                   <div key={d.key} className="flex items-center gap-3">
-                    <div className="w-32 text-sm text-gray-300">{d.label}</div>
-                    <div className="flex-1 bg-gray-900 rounded h-3 overflow-hidden">
+                    <div className="w-32 text-sm">{d.label}</div>
+                    <div className="flex-1 bg-gray-200 dark:bg-gray-900 rounded h-3 overflow-hidden">
                       <div
                         className={`h-3 ${d.color}`}
                         style={{
@@ -712,7 +691,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                         }}
                       />
                     </div>
-                    <div className="w-10 text-right text-sm text-gray-300">
+                    <div className="w-10 text-right text-sm">
                       {difficultyCounts[d.key] || 0}
                     </div>
                   </div>
@@ -720,20 +699,18 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
               </div>
             </div>
 
-            {/* Activity heatmap (yearly, week columns) */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
+            <div className="app-surface rounded-2xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-semibold">
+                <h3 className="font-semibold">
                   Active Days (Last 12 months)
                 </h3>
-                <div className="text-sm text-gray-400">
-                  A day is active if it has ≥1 submission (UTC dates)
+                <div className="text-sm app-muted">
+                  A day is active if it has at least 1 submission (UTC dates)
                 </div>
               </div>
 
               <div className="relative">
-                {/* Month labels */}
-                <div className="relative h-5 mb-2 text-xs text-gray-400">
+                <div className="relative h-5 mb-2 text-xs app-muted">
                   {heatmap.monthLabels.map((ml, idx) => (
                     <div
                       key={idx}
@@ -751,17 +728,13 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   ))}
                 </div>
 
-                {/* Grid: columns = weeks, each column stacks 7 days */}
                 <div className="overflow-x-auto -mx-2 px-2">
-                  {" "}
-                  {/* allow horizontal scroll on small screens */}
                   <div
                     className="grid gap-1"
                     style={{
                       gridAutoFlow: "column",
                       gridAutoColumns: "min-content",
                       alignItems: "start",
-                      // small left/right padding keeps it compact
                     }}
                   >
                     {heatmap.weeks.map((week, wIdx) => (
@@ -772,7 +745,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                             className={`${heatColor(
                               d.count,
                               heatmap.max
-                            )} w-3 h-3 rounded-sm border border-gray-700 transition-transform transform hover:scale-110`}
+                            )} w-3 h-3 rounded-sm border border-gray-200 dark:border-gray-700 transition-transform transform hover:scale-110`}
                             title={`${d.key}: ${d.count} submission(s)`}
                           />
                         ))}
@@ -781,19 +754,60 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mt-3 text-xs text-gray-400">
+                <div className="flex items-center gap-2 mt-3 text-xs app-muted">
                   <span>Less</span>
-                  <span className="w-3 h-3 bg-gray-800 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-900 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-700 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-500 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-300 rounded border border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-gray-200 dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-200 dark:bg-green-900 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-400 dark:bg-green-700 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-500 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-300 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
                   <span>More</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
+        )}
+        {profileTab === "account" && (
+          <div className="max-w-xl space-y-6">
+            <div className="app-surface rounded-2xl p-6 space-y-3">
+              <h3 className="font-semibold">Your Data</h3>
+              <button onClick={handleExportData} className="w-full bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white py-2 rounded-lg">
+                Download my data
+              </button>
+              <p className="text-sm app-muted">
+                Export includes account fields and submissions associated with this login.
+              </p>
+            </div>
+            <div className="app-surface rounded-2xl p-6 space-y-3">
+              <h3 className="font-semibold">Account</h3>
+              <p className="text-sm"><span className="app-muted">Username:</span> {user?.username}</p>
+              {user?.email && <p className="text-sm"><span className="app-muted">Email:</span> {user.email}</p>}
+            </div>
+            <div className="app-surface rounded-2xl p-6 space-y-3 border-red-300 dark:border-red-800">
+              <h3 className="font-semibold text-red-700 dark:text-red-400">Danger Zone</h3>
+              <p className="text-sm app-muted">
+                Deleting your account disables login and anonymizes your username and email. Judged submissions may remain for system integrity and will not show your original identity. This cannot be undone in the app.
+              </p>
+              <label className="block text-sm">
+                Type {DELETE_CONFIRMATION_PHRASE} to confirm
+                <input
+                  value={deletePhrase}
+                  onChange={(e) => setDeletePhrase(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 app-input rounded"
+                />
+              </label>
+              {deleteError && <p className="text-red-600 dark:text-red-400 text-sm">{deleteError}</p>}
+              <button
+                onClick={handleDeleteAccount}
+                disabled={!canConfirmAccountDeletion(deletePhrase) || deleting}
+                className="w-full bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {deleting ? "Deleting..." : "Delete account"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </Wrapper>
   );

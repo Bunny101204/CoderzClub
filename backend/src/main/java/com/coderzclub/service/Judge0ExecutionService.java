@@ -351,9 +351,10 @@ public class Judge0ExecutionService {
             if (ExecutionVerdictMapper.isInfrastructureFailure(errorType)) {
                 result.setPassed(false);
                 result.setErrorType(ExecutionVerdictMapper.INTERNAL_ERROR);
-                result.setErrorMessage(parseErrorMessage(responseMap));
-                logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
-                    languageId, ExecutionVerdictMapper.INTERNAL_ERROR, runtime, memory, actualOutputSummary);
+                result.setErrorMessage(ExecutionUserFacing.infrastructureMessage());
+                logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={} technicalMessage={}",
+                    languageId, ExecutionVerdictMapper.INTERNAL_ERROR, runtime, memory, actualOutputSummary,
+                    parseErrorMessage(responseMap));
             } else if (outputTruncated) {
                 result.setErrorType("OUTPUT_LIMIT_EXCEEDED");
                 result.setPassed(false);
@@ -362,7 +363,8 @@ public class Judge0ExecutionService {
             } else if (errorType != null) {
                 result.setPassed(false);
                 result.setErrorType(errorType);
-                result.setErrorMessage(parseErrorMessage(responseMap));
+                result.setErrorMessage(ExecutionUserFacing.studentDetail(
+                    ExecutionVerdictMapper.fromErrorType(errorType), parseErrorMessage(responseMap), false));
                 logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
                     languageId, errorType, runtime, memory, actualOutputSummary);
             } else {
@@ -379,7 +381,7 @@ public class Judge0ExecutionService {
             logger.error("Failed to execute test case", e);
             result.setPassed(false);
             result.setErrorType(ExecutionVerdictMapper.INTERNAL_ERROR);
-            result.setErrorMessage("Failed to execute code: " + e.getMessage());
+            result.setErrorMessage(ExecutionUserFacing.infrastructureMessage());
         }
 
         return result;
@@ -431,7 +433,9 @@ public class Judge0ExecutionService {
             recordTransportFailure(classification);
             logger.warn("judge0_provider_transport_failure class={} reason={} retry=false",
                 classification.kind(), classification.reason());
-            return Map.of("status", Map.of("id", 13, "description", "Judge0 provider error: " + e.getMessage()));
+            logger.warn("judge0_provider_exception class={} message={}",
+                e.getClass().getSimpleName(), e.getMessage(), e);
+            return Map.of("status", Map.of("id", 13, "description", ExecutionUserFacing.infrastructureMessage()));
         }
     }
 
@@ -605,26 +609,34 @@ public class Judge0ExecutionService {
     /**
      * Parse error message from Judge0 response
      */
-    private String parseErrorMessage(Map<String, Object> response) {
-        if (response == null) return null;
+    static String parseErrorMessage(Map<String, Object> response) {
+        if (response == null) return ExecutionUserFacing.infrastructureMessage();
 
         if (response.get("compile_output") != null && !response.get("compile_output").toString().trim().isEmpty()) {
-            return response.get("compile_output").toString();
+            return ExecutionUserFacing.bound(response.get("compile_output").toString());
         }
 
         if (response.get("stderr") != null && !response.get("stderr").toString().trim().isEmpty()) {
-            return response.get("stderr").toString();
+            return ExecutionUserFacing.bound(response.get("stderr").toString());
         }
 
         if (response.get("message") != null) {
-            return response.get("message").toString();
+            String message = response.get("message").toString();
+            if (ExecutionUserFacing.isUnusableProviderText(message)) {
+                return ExecutionUserFacing.infrastructureMessage();
+            }
+            return ExecutionUserFacing.bound(message);
         }
 
         Object status = response.get("status");
         if (status instanceof Map<?, ?> statusMap) {
             Object description = statusMap.get("description");
             if (description != null) {
-                return description.toString();
+                String text = description.toString();
+                if (ExecutionUserFacing.isUnusableProviderText(text)) {
+                    return ExecutionUserFacing.infrastructureMessage();
+                }
+                return ExecutionUserFacing.bound(text);
             }
         }
 

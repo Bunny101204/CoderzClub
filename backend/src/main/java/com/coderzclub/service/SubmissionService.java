@@ -110,6 +110,7 @@ public class SubmissionService {
                 .passedTestCases((int) passedCount)
                 .totalTestCases(job.getTotalTests())
                 .executionDetails(buildExecutionDetails(job, storedResults))
+                .codingDurationSeconds(job.getCodingDurationSeconds())
                 .build();
 
             try {

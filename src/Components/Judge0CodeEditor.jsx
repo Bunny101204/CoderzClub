@@ -14,8 +14,11 @@ import {
   normalizeJobResult,
   isHiddenResult,
 } from "./submissionPolling";
-import { editorSurfaceClasses } from "../theme/theme";
+import { editorSurfaceClasses, resultCardClasses } from "../theme/theme";
 import { useTheme } from "../context/ThemeContext";
+import { CopyIcon } from "../icons/AppIcons.jsx";
+import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.js";
+import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -350,11 +353,12 @@ const Judge0CodeEditor = ({
     const statusId = res.status?.id;
     const statusDescription = res.status?.description;
 
-    if (statusId === 13 || res.errorType === "INTERNAL_ERROR") {
+    if (statusId === 13 || res.errorType === "INTERNAL_ERROR" || res.errorCode === "JUDGE0_PROVIDER_ERROR") {
       return {
         type: "INTERNAL_ERROR",
-        message: res.message || statusDescription || "Judge0 provider error",
-        details: statusDescription
+        message: "Execution service is temporarily unavailable. Please retry.",
+        details: "Judging infrastructure failed. This is not a wrong answer.",
+        code: "JUDGE0_PROVIDER_ERROR"
       };
     }
 
@@ -599,7 +603,7 @@ const Judge0CodeEditor = ({
 
       if (!limits.canSubmitNow) {
         const cooldown = limits.cooldownSeconds || 0;
-        setOutput(`⏳ Please wait ${cooldown} seconds before submitting again.`);
+        setOutput(`Please wait ${cooldown} seconds before submitting again.`);
         setErrorDetails({
           type: 'Rate Limit',
           message: `You must wait ${cooldown} seconds between submissions.`,
@@ -609,7 +613,7 @@ const Judge0CodeEditor = ({
       }
 
       if (limits.hasExceededDailyLimit) {
-        setOutput(`❌ Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
+        setOutput(`Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
         setErrorDetails({
           type: 'Daily Limit Exceeded',
           message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
@@ -619,7 +623,7 @@ const Judge0CodeEditor = ({
       }
 
       if (limits.hasExceededProblemLimit) {
-        setOutput(`❌ Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
+        setOutput(`Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
         setErrorDetails({
           type: 'Problem Limit Exceeded',
           message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
@@ -661,7 +665,8 @@ const Judge0CodeEditor = ({
         problemId: problemId,
         code: sourceCode,
         language: languageNames[languageId] || "Unknown",
-        languageId: languageId
+        languageId: languageId,
+        codingDurationSeconds: codingDurationSecondsFromElapsedMs(elapsedTime)
       };
 
       const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
@@ -777,11 +782,22 @@ const Judge0CodeEditor = ({
             return;
           }
           if (job.status === 'FAILED') {
-            const message = job.error || job.lastError || "Submission processing failed";
             setSubmissionStatus("FAILED");
-            setOutput(`Submission failed: ${message}`);
-            setErrorDetails({ type: "Submission Error", message, details: "The execution could not be completed." });
-            setSubmitResult({ status: "failed", failedCase: null, failureReason: job.result || "FAILED" });
+            setOutput("Execution service is temporarily unavailable. Please retry.");
+            setErrorDetails({
+              type: "INTERNAL_ERROR",
+              message: "Execution service is temporarily unavailable. Please retry.",
+              details: "Judging infrastructure failed. This is not a wrong answer.",
+              code: "JUDGE0_PROVIDER_ERROR"
+            });
+            setSubmitResult({
+              status: "failed",
+              failedCase: null,
+              failureReason: "INTERNAL_ERROR",
+              errorCode: job.errorCode || "JUDGE0_PROVIDER_ERROR",
+              diagnosticMessage: job.diagnosticMessage,
+              reference: job.reference || job.jobId
+            });
             return;
           }
 
@@ -808,21 +824,24 @@ const Judge0CodeEditor = ({
                 error.details = `Expected: ${failedTest.expected}, Got: ${failedTest.actual}`;
               }
 
-              setSubmitResult({
-                status: "failed",
-                failedCase: {
-                  input: failedTest.input,
-                  output: failedTest.expected,
-                  expected: failedTest.expected,
-                  actual: failedTest.actual,
-                  type: failedTest.type,
-                  index: failedIndex,
-                  error: error
-                },
-                passedCount: normalizedResults.filter(r => r.passed).length,
-                totalCount: normalizedResults.length,
-                failureReason: job.result
-              });
+            setSubmitResult({
+              status: "failed",
+              failedCase: {
+                input: failedTest.input,
+                output: failedTest.expected,
+                expected: failedTest.expected,
+                actual: failedTest.actual,
+                type: failedTest.type,
+                index: failedIndex,
+                error: error
+              },
+              passedCount: normalizedResults.filter(r => r.passed).length,
+              totalCount: normalizedResults.length,
+              failureReason: job.result,
+              errorCode: job.errorCode,
+              diagnosticMessage: job.diagnosticMessage,
+              reference: job.reference || job.jobId || job.submissionId
+            });
 
               if (error) {
                 setErrorDetails(error);
@@ -981,7 +1000,7 @@ const Judge0CodeEditor = ({
         <select
           value={languageId}
           onChange={(e) => setLanguageId(Number(e.target.value))}
-          className="bg-gray-700 text-white px-3 py-1 rounded text-sm focus:outline-none"
+          className="app-input px-3 py-1 rounded text-sm focus:outline-none"
         >
           <option value={62}>Java</option>
           <option value={71}>Python</option>
@@ -1001,12 +1020,12 @@ const Judge0CodeEditor = ({
 
         {/* Timer */}
         <div className="flex items-center space-x-2">
-          <span className="text-sm text-gray-400">Timer:</span>
+          <span className="text-sm app-muted">Timer:</span>
           <span
-            className={`text-sm font-mono px-2 py-1 rounded ${
+            className={`text-sm font-mono px-2 py-1 rounded border ${
               isTimerRunning
-                ? "bg-green-600 text-white"
-                : "bg-gray-600 text-gray-300"
+                ? "bg-green-100 text-green-900 border-green-600 dark:bg-green-700 dark:text-white dark:border-green-500"
+                : "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-500"
             }`}
           >
             {formatTime(elapsedTime)}
@@ -1228,7 +1247,7 @@ const Judge0CodeEditor = ({
         <>
           <input
             type="text"
-            className="w-full p-3 mb-4 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+            className="w-full p-3 mb-4 rounded-lg app-input text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
             placeholder="Enter input (stdin)"
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
@@ -1242,24 +1261,24 @@ const Judge0CodeEditor = ({
             }`}
             disabled={isLoading}
           >
-            {isLoading ? "⏳ Running..." : "▶️ Run Code"}
+            {isLoading ? "Running..." : "Run Code"}
           </button>
           {output && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-600">
-              <h3 className="text-xl font-semibold mb-2 text-gray-300">
-                🧾 Output:
+            <div className="mt-6 p-4 rounded-lg border border-gray-300 dark:border-gray-600 app-surface">
+              <h3 className="text-xl font-semibold mb-2">
+                Output:
               </h3>
-              <pre className="bg-gray-800 border border-gray-700 text-green-300 p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
+              <pre className="app-code p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
                 {output}
               </pre>
             </div>
           )}
           {!output && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-600">
-              <h3 className="text-xl font-semibold mb-2 text-gray-300">
-                🧾 Output:
+            <div className="mt-6 p-4 rounded-lg border border-gray-300 dark:border-gray-600 app-surface">
+              <h3 className="text-xl font-semibold mb-2">
+                Output:
               </h3>
-              <pre className="bg-gray-800 border border-gray-700 text-gray-500 p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
+              <pre className="app-code app-muted p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
                 Output will appear here.
               </pre>
             </div>
@@ -1279,9 +1298,9 @@ const Judge0CodeEditor = ({
                 type="checkbox"
                 checked={useCustomInput}
                 onChange={(e) => setUseCustomInput(e.target.checked)}
-                className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
+                className="w-4 h-4 text-blue-600 border-gray-400 rounded focus:ring-blue-500 focus:ring-2"
               />
-              <span className="text-sm text-gray-300">
+              <span className="text-sm">
                 Use custom input for testing
               </span>
             </label>
@@ -1289,7 +1308,7 @@ const Judge0CodeEditor = ({
             {useCustomInput && (
               <input
                 type="text"
-                className="w-full p-3 mb-4 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                className="w-full p-3 mb-4 rounded-lg app-input text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
                 placeholder="Enter custom input (stdin)"
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
@@ -1300,7 +1319,7 @@ const Judge0CodeEditor = ({
           
           {/* Show message if no test cases */}
           {!useCustomInput && (!testCases || testCases.length === 0) && !isLoading && (
-            <div className="mt-4 p-3 bg-gray-800 border border-gray-600 rounded-lg text-gray-300 text-sm">
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
               No test cases available for this problem. Use "Use custom input" checkbox to test your code.
             </div>
           )}
@@ -1321,7 +1340,7 @@ const Judge0CodeEditor = ({
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-green-500 hover:bg-green-600 disabled:bg-green-800 disabled:cursor-not-allowed`}
               disabled={isLoading}
             >
-              {isLoading ? "⏳ Running..." : `▶️ Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
+              {isLoading ? "Running..." : `Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
             </button>
             <button
               onClick={() => handleSubmitSolution(testCases || [])}
@@ -1333,27 +1352,27 @@ const Judge0CodeEditor = ({
           </div>
           {/* Output - Show when there's output OR when running with custom input */}
           {(output || (useCustomInput && !isLoading && !results.length && !submitResult)) && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-600 bg-gray-800">
+            <div className="mt-6 p-4 rounded-lg border border-gray-200 dark:border-gray-600 app-surface">
               <div className="flex justify-between items-center mb-2">
-                <h3 className="text-xl font-semibold text-gray-300">
-                  🧾 Output:
+                <h3 className="text-xl font-semibold">
+                  Output:
                 </h3>
                 {output && (
                   <button
                     onClick={() => copyToClipboard(output)}
-                    className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center space-x-1"
+                    className="px-3 py-1 app-btn-secondary rounded text-sm flex items-center space-x-1"
                     title="Copy to clipboard"
                   >
-                    {copySuccess ? '✓ Copied!' : '📋 Copy'}
+                    {copySuccess ? "Copied!" : <span className="inline-flex items-center gap-1"><CopyIcon /> Copy</span>}
                   </button>
                 )}
               </div>
-              <pre className="bg-gray-900 border border-gray-700 text-green-300 p-4 rounded-lg whitespace-pre-wrap min-h-[120px] max-h-96 overflow-auto">
+              <pre className="app-code text-green-700 dark:text-green-300 p-4 rounded-lg whitespace-pre-wrap min-h-[120px] max-h-96 overflow-auto">
                 {output || "Output will appear here after running your code."}
               </pre>
               {(executionTime || executionMemory) && (
-                <div className="mt-2 flex gap-4 text-sm text-gray-400">
-                  {executionTime && <span>⏱️ Time: {formatExecutionTime(executionTime)}</span>}
+                <div className="mt-2 flex gap-4 text-sm app-muted">
+                  {executionTime && <span>Time: {formatExecutionTime(executionTime)}</span>}
                   {executionMemory && <span>Memory: {formatMemory(executionMemory)}</span>}
                 </div>
               )}
@@ -1362,47 +1381,47 @@ const Judge0CodeEditor = ({
           
           {/* Error Display */}
           {errorDetails && (
-            <div className="mt-6 p-4 rounded-lg border-2 border-red-500 bg-red-900/20">
+            <div className="mt-6 p-4 rounded-lg border-2 border-red-600 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100">
               <div className="flex justify-between items-start mb-2">
-                <h3 className="text-xl font-semibold text-red-400">
-                  ⚠️ {errorDetails.type}
+                <h3 className="text-xl font-semibold">
+                  {errorDetails.type}
                 </h3>
                 <div className="flex gap-2">
                   {(executionTime || executionMemory) && (
                     <div className="text-xs text-red-300 flex gap-2">
-                      {executionTime && <span>⏱️ {formatExecutionTime(executionTime)}</span>}
+                      {executionTime && <span>{formatExecutionTime(executionTime)}</span>}
                       {executionMemory && <span>{formatMemory(executionMemory)}</span>}
                     </div>
                   )}
                   <button
                     onClick={() => copyToClipboard(errorDetails.message)}
-                    className="px-3 py-1 bg-red-800 hover:bg-red-700 rounded text-sm"
+                    className="px-3 py-1 app-btn-secondary rounded text-sm"
                     title="Copy error to clipboard"
                   >
-                    {copySuccess ? '✓' : '📋'}
+                    {copySuccess ? "Copied" : <CopyIcon />}
                   </button>
                 </div>
               </div>
-              <div className="bg-gray-900 border border-red-700 p-3 rounded mt-2">
-                <pre className="text-red-300 whitespace-pre-wrap text-sm">
+              <div className="app-code border border-red-300 dark:border-red-700 p-3 rounded mt-2">
+                <pre className="whitespace-pre-wrap text-sm">
                   {errorDetails.message}
                 </pre>
                 {errorDetails.details && (
-                  <p className="text-red-400 text-xs mt-2">{errorDetails.details}</p>
+                  <p className="text-xs mt-2">{errorDetails.details}</p>
                 )}
               </div>
             </div>
           )}
           {/* Run results - Show test case results */}
           {results.length > 0 && !submitResult && (
-            <div className="mt-6 p-4 rounded-lg border-2 border-gray-600 bg-gray-800">
+            <div className="mt-6 p-4 rounded-lg border-2 border-gray-300 dark:border-gray-600 app-surface">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-semibold text-gray-300">
+                <h3 className="text-xl font-semibold">
                   Public Test Case Results ({results.length} test cases):
                 </h3>
                 {/* Overall execution metrics */}
                 {(executionTime || executionMemory) && (
-                  <div className="text-sm text-gray-300 flex gap-4">
+                  <div className="text-sm app-muted flex gap-4">
                     {executionTime && <span>Avg Time: {formatExecutionTime(executionTime)}</span>}
                     {executionMemory && <span>Max Memory: {formatMemory(executionMemory)}</span>}
                   </div>
@@ -1412,73 +1431,69 @@ const Judge0CodeEditor = ({
                 {results.map((r, idx) => (
                   <li
                     key={idx}
-                    className={`p-4 rounded-lg border-2 text-sm whitespace-pre-wrap ${
-                      r.passed
-                        ? "bg-green-900/50 border-green-500 text-green-200"
-                        : "bg-red-900/50 border-red-500 text-red-200"
-                    }`}
+                    className={`p-4 rounded-lg border-2 text-sm whitespace-pre-wrap ${resultCardClasses(r.passed)}`}
                   >
                     <div className="flex justify-between items-center mb-2">
                       <div className="font-semibold text-lg">
-                        Test Case {idx + 1}: {r.passed ? "✅ Passed" : "❌ Failed"}
+                        Test Case {idx + 1}: {r.passed ? "Passed" : "Failed"}
                       </div>
                       {(r.runtime || r.memory) && (
-                        <div className="text-xs text-gray-300 flex gap-2">
-                          {r.runtime && <span>⏱️ {formatExecutionTime(r.runtime)}</span>}
+                        <div className="text-xs flex gap-2 opacity-90">
+                          {r.runtime && <span>{formatExecutionTime(r.runtime)}</span>}
                           {r.memory && <span>{formatMemory(r.memory)}</span>}
                         </div>
                       )}
                     </div>
                     {r.error && (
-                      <div className="mb-2 p-2 bg-red-900/30 border border-red-700 rounded">
-                        <div className="text-red-400 font-semibold text-sm mb-1">{r.error.type}</div>
-                        <pre className="text-red-300 text-xs whitespace-pre-wrap">{r.error.message}</pre>
+                      <div className="mb-2 p-2 app-inset rounded">
+                        <div className="font-semibold text-sm mb-1">{r.error.type}</div>
+                        <pre className="text-xs whitespace-pre-wrap">{r.error.message}</pre>
                       </div>
                     )}
                     {isHiddenResult(r) ? (
-                      <div className="mb-2 text-gray-300">Hidden testcase details are not shown.</div>
+                      <div className="mb-2 text-sm">Hidden testcase details are not shown.</div>
                     ) : <div className="mb-2">
-                      <span className="font-bold text-gray-300">Input:</span>
+                      <span className="font-bold">Input:</span>
                       <div className="mt-1 flex items-center gap-2">
-                        <pre className="flex-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-xs">
+                        <pre className="flex-1 app-code p-2 rounded whitespace-pre-wrap text-xs">
                           {String(r.input || 'N/A')}
                         </pre>
                         <button
                           onClick={() => copyToClipboard(String(r.input || ''))}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                          className="px-2 py-1 app-btn-secondary rounded text-xs"
                           title="Copy input"
                         >
-                          📋
+                          <CopyIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>}
                     {!isHiddenResult(r) && <div className="mb-2">
-                      <span className="font-bold text-gray-300">Expected Output:</span>
+                      <span className="font-bold">Expected Output:</span>
                       <div className="mt-1 flex items-center gap-2">
-                        <pre className="flex-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-xs text-green-300">
+                        <pre className="flex-1 app-code p-2 rounded whitespace-pre-wrap text-xs">
                           {String(r.expected || 'N/A')}
                         </pre>
                         <button
                           onClick={() => copyToClipboard(String(r.expected || ''))}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                          className="px-2 py-1 app-btn-secondary rounded text-xs"
                           title="Copy expected output"
                         >
-                          📋
+                          <CopyIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>}
                     {!isHiddenResult(r) && <div>
-                      <span className="font-bold text-gray-300">Your Output:</span>
+                      <span className="font-bold">Your Output:</span>
                       <div className="mt-1 flex items-center gap-2">
-                        <pre className="flex-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-xs">
+                        <pre className="flex-1 app-code p-2 rounded whitespace-pre-wrap text-xs">
                           {String(r.actual || 'No Output')}
                         </pre>
                         <button
                           onClick={() => copyToClipboard(String(r.actual || ''))}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                          className="px-2 py-1 app-btn-secondary rounded text-xs"
                           title="Copy your output"
                         >
-                          📋
+                          <CopyIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>}
@@ -1489,7 +1504,7 @@ const Judge0CodeEditor = ({
           )}
           {/* Submit result panel - Show this prominently */}
           {submitResult && (
-            <div className="mt-6 p-4 rounded-lg border-2 border-blue-500 bg-gray-800">
+            <div className="mt-6 p-4 rounded-lg border-2 border-blue-500 app-surface">
               {submitResult.status === "timeout" && (
                 <div className="p-6 text-center text-yellow-300">
                   <div className="text-xl font-bold mb-2">Submission timed out</div>
@@ -1516,81 +1531,23 @@ const Judge0CodeEditor = ({
               {submitResult.status === "accepted" ? (
                 <div className="flex flex-col items-center justify-center p-6">
                   {showAccepted && (
-                    <div className="animate-bounce text-4xl mb-2">🎉</div>
+                    <div className="text-4xl mb-2 font-bold text-green-600 dark:text-green-400">Accepted</div>
                   )}
-                  <div className="text-green-400 text-2xl font-bold mb-2">
-                    ✅ Solution Accepted!
+                  <div className="text-green-700 dark:text-green-400 text-2xl font-bold mb-2">
+                    Solution Accepted!
                   </div>
-                  <div className="text-green-200 text-lg mb-2">
+                  <div className="text-green-800 dark:text-green-200 text-lg mb-2">
                     All {submitResult.totalCount} test cases passed.
                   </div>
                   {(executionTime || executionMemory) && (
-                    <div className="text-green-300 text-sm flex gap-4 justify-center">
-                      {executionTime && <span>⏱️ Time: {formatExecutionTime(executionTime)}</span>}
+                    <div className="text-green-800 dark:text-green-300 text-sm flex gap-4 justify-center">
+                      {executionTime && <span>Time: {formatExecutionTime(executionTime)}</span>}
                       {executionMemory && <span>Memory: {formatMemory(executionMemory)}</span>}
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="bg-red-900/50 border-2 border-red-600 text-red-200 p-6 rounded-lg">
-                  <div className="font-bold text-xl mb-4 text-red-400">
-                    ❌ Test Case Failed (
-                    {submitResult.failedCase?.type === "public"
-                      ? "Public"
-                      : submitResult.failedCase?.type === "hidden"
-                        ? "Hidden"
-                        : "Test Case"}{" "}
-                    #{submitResult.failedCase?.index !== undefined ? submitResult.failedCase.index + 1 : 'N/A'})
-                    {submitResult.failureReason && (
-                      <span className="ml-2 text-sm font-normal text-red-300">
-                        ({submitResult.failureReason.replace(/_/g, ' ')})
-                      </span>
-                    )}
-                  </div>
-                  {submitResult.failedCase?.error && (
-                    <div className="mb-4 p-3 bg-red-950 border border-red-700 rounded">
-                      <div className="font-semibold text-red-300 mb-1">{submitResult.failedCase.error.type}</div>
-                      <pre className="text-red-200 text-xs whitespace-pre-wrap">
-                        {submitResult.failedCase.error.message}
-                      </pre>
-                    </div>
-                  )}
-                  {submitResult.failedCase && (
-                    <>
-                      {submitResult.failedCase.type === 'hidden' ? (
-                        <div className="mb-3">
-                          <span className="font-bold text-red-300">Hidden Testcase</span>
-                          <div className="mt-2 text-gray-300">Failed on a hidden testcase. Details are not shown.</div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="mb-3">
-                            <span className="font-bold text-red-300">Input:</span>
-                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm">
-                              {submitResult.failedCase.input || 'N/A'}
-                            </pre>
-                          </div>
-                          <div className="mb-3">
-                            <span className="font-bold text-red-300">Expected Output:</span>
-                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-green-300">
-                              {submitResult.failedCase.output || 'N/A'}
-                            </pre>
-                          </div>
-                          <div className="mb-3">
-                            <span className="font-bold text-red-300">Your Output:</span>
-                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-red-300">
-                              {submitResult.failedCase.actual || 'N/A'}
-                            </pre>
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                  <div className="mt-4 pt-4 border-t border-red-700">
-                    Passed {submitResult.passedCount || 0} out of{" "}
-                    {submitResult.totalCount || 0} test cases.
-                  </div>
-                </div>
+                <SubmitFailurePanel submitResult={submitResult} />
               )}
               </>
               )}
@@ -1601,5 +1558,81 @@ const Judge0CodeEditor = ({
     </div>
   );
 };
+
+function SubmitFailurePanel({ submitResult }) {
+  const hidden = submitResult.failedCase?.type === "hidden";
+  const verdict = submitResult.failureReason || submitResult.failedCase?.error?.type || "WRONG_ANSWER";
+  const copy = studentVerdictCopy({
+    verdict,
+    hidden,
+    passedCount: submitResult.passedCount,
+    totalCount: submitResult.totalCount,
+    errorMessage: submitResult.failedCase?.error?.message || submitResult.diagnosticMessage,
+    errorCode: submitResult.errorCode,
+    diagnosticMessage: submitResult.diagnosticMessage
+  });
+  const reference = formatSupportReference(submitResult.reference);
+  const showPublicIo = copy.showHiddenIo && submitResult.failedCase;
+  return (
+    <div className={`p-6 rounded-lg border-2 ${resultCardClasses(false)}`}>
+      <div className="font-bold text-xl mb-2">
+        {copy.title}
+        {verdict && (
+          <span className="ml-2 text-sm font-normal">({String(verdict).replace(/_/g, " ")})</span>
+        )}
+      </div>
+      <div className="mb-3">{copy.summary}</div>
+      {copy.detail && <div className="mb-3">{copy.detail}</div>}
+      {copy.code === "COMPILATION_ERROR" && submitResult.failedCase?.error?.message && (
+        <pre className="app-code p-3 rounded text-xs whitespace-pre-wrap mb-3">
+          {submitResult.failedCase.error.message}
+        </pre>
+      )}
+      {copy.code === "RUNTIME_ERROR" && submitResult.failedCase?.error?.message && (
+        <pre className="app-code p-3 rounded text-xs whitespace-pre-wrap mb-3">
+          {submitResult.failedCase.error.message}
+        </pre>
+      )}
+      {hidden && copy.code === "WRONG_ANSWER" && (
+        <div className="mb-3">Hidden test details are not shown.</div>
+      )}
+      {showPublicIo && (
+        <>
+          <div className="mb-3">
+            <span className="font-bold">Input:</span>
+            <pre className="mt-1 app-code p-2 rounded whitespace-pre-wrap text-sm">
+              {submitResult.failedCase.input || "N/A"}
+            </pre>
+          </div>
+          <div className="mb-3">
+            <span className="font-bold">Expected Output:</span>
+            <pre className="mt-1 app-code p-2 rounded whitespace-pre-wrap text-sm">
+              {submitResult.failedCase.output || "N/A"}
+            </pre>
+          </div>
+          <div className="mb-3">
+            <span className="font-bold">Your Output:</span>
+            <pre className="mt-1 app-code p-2 rounded whitespace-pre-wrap text-sm">
+              {submitResult.failedCase.actual || "N/A"}
+            </pre>
+          </div>
+        </>
+      )}
+      {Number.isFinite(submitResult.passedCount) && Number.isFinite(submitResult.totalCount) && (
+        <div className="mt-4 pt-4 border-t border-current/30">
+          Passed {submitResult.passedCount} of {submitResult.totalCount} test cases.
+        </div>
+      )}
+      {reference && (
+        <div className="mt-3 text-sm">
+          Reference: {reference}
+        </div>
+      )}
+      {copy.code && (
+        <div className="mt-1 text-xs app-muted">{copy.code}</div>
+      )}
+    </div>
+  );
+}
 
 export default Judge0CodeEditor;
