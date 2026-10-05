@@ -24,6 +24,7 @@ import com.coderzclub.service.SubmissionJobSseTicketService;
 import com.coderzclub.service.ExecutionCompatibilityService;
 import com.coderzclub.service.ExecutionUserFacing;
 import com.coderzclub.service.ExecutionVerdictMapper;
+import com.coderzclub.service.OperationalMetrics;
 import com.coderzclub.service.IncompatibleExecutionException;
 
 import org.slf4j.Logger;
@@ -34,6 +35,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -90,12 +92,16 @@ public class SubmissionJobController {
     @Autowired(required = false)
     private com.coderzclub.config.SubmissionLimitsConfig limitsConfig;
 
+    @Autowired(required = false)
+    private OperationalMetrics operationalMetrics;
+
 
     /**
      * Create a new submission job with strict validation
      */
     @PostMapping
     public ResponseEntity<?> createJob(@Valid @RequestBody CreateSubmissionJobRequest request) {
+        Timer.Sample total = startAdmissionStage();
         try {
             // Step 1: Validate code size and content
             try {
@@ -117,14 +123,26 @@ public class SubmissionJobController {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             String username = auth.getName();
 
-            Optional<User> userOpt = userRepository.findByUsername(username);
+            Timer.Sample userLookup = startAdmissionStage();
+            Optional<User> userOpt;
+            try {
+                userOpt = userRepository.findByUsername(username);
+            } finally {
+                stopAdmissionStage(userLookup, "user_lookup");
+            }
             if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
 
             User user = userOpt.get();
 
-            SubmissionQueueAdmissionService.Admission admission = queueAdmissionService.check();
+            Timer.Sample queueAdmission = startAdmissionStage();
+            SubmissionQueueAdmissionService.Admission admission;
+            try {
+                admission = queueAdmissionService.check();
+            } finally {
+                stopAdmissionStage(queueAdmission, "queue_admission");
+            }
             if (!admission.allowed()) {
                 return ResponseEntity.status(admission.reason().equals("QUEUE_UNAVAILABLE")
                     ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
@@ -133,7 +151,13 @@ public class SubmissionJobController {
                         "retryAfterSeconds", 30));
             }
 
-            SubmissionLimitDecision decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), request.getProblemId());
+            Timer.Sample rateLimit = startAdmissionStage();
+            SubmissionLimitDecision decision;
+            try {
+                decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), request.getProblemId());
+            } finally {
+                stopAdmissionStage(rateLimit, "rate_limit");
+            }
             if (!decision.isAllowed()) {
                 switch (decision.getReason()) {
                     case "COOLDOWN" ->
@@ -161,7 +185,13 @@ public class SubmissionJobController {
             }
 
             // Step 4: Load problem and validate it exists
-            Optional<Problem> problemOpt = problemRepository.findById(request.getProblemId());
+            Timer.Sample problemLookup = startAdmissionStage();
+            Optional<Problem> problemOpt;
+            try {
+                problemOpt = problemRepository.findById(request.getProblemId());
+            } finally {
+                stopAdmissionStage(problemLookup, "problem_lookup");
+            }
             if (problemOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Problem not found"));
             }
@@ -174,21 +204,25 @@ public class SubmissionJobController {
                 username, request.getProblemId(), request.getLanguage(), request.getLanguageId(),
                 totalTests, request.getCode() != null ? request.getCode().length() : 0);
 
-            // Step 5: Validate problem testcases against limits
+            Timer.Sample problemValidation = startAdmissionStage();
             try {
-                submissionValidator.validateProblemTestCases(problem);
-            } catch (IllegalArgumentException e) {
-                logger.error("Problem testcases validation failed: {}", e.getMessage());
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Problem configuration error: " + e.getMessage()));
+                // Step 5: Validate problem testcases against limits
+                try {
+                    submissionValidator.validateProblemTestCases(problem);
+                } catch (IllegalArgumentException e) {
+                    logger.error("Problem testcases validation failed: {}", e.getMessage());
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("error", "Problem configuration error: " + e.getMessage()));
+                }
+
+                validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), request.getLanguageId());
+            } finally {
+                stopAdmissionStage(problemValidation, "problem_validation");
             }
-
-            // Step 6: Create job using server-side testcases
-
-            validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), request.getLanguageId());
 
             List<SubmissionJob.TestCase> publicTests = convertTests(problem.getPublicTestCases());
             List<SubmissionJob.TestCase> hiddenTests = convertTests(problem.getHiddenTestCases());
+            Timer.Sample compatibility = startAdmissionStage();
             try {
                 compatibilityService.validate(problem.getExecutionMode(), request.getLanguageId(),
                     request.getCode(), publicTests, hiddenTests, problem.getTestcaseVersion());
@@ -197,21 +231,28 @@ public class SubmissionJobController {
                     "error", incompatible.getMessage(),
                     "reason", incompatible.getReason()
                 ));
+            } finally {
+                stopAdmissionStage(compatibility, "compatibility_validation");
             }
 
-            // Resolve problem test cases server-side so hidden data never travels in the public submission payload.
-            SubmissionJob job = jobService.createJob(
-                user.getId(),
-                request.getProblemId(),
-                request.getCode(),
-                request.getLanguage(),
-                request.getLanguageId(),
+            Timer.Sample jobCreate = startAdmissionStage();
+            SubmissionJob job;
+            try {
+                job = jobService.createJob(
+                    user.getId(),
+                    request.getProblemId(),
+                    request.getCode(),
+                    request.getLanguage(),
+                    request.getLanguageId(),
 
-                problem.getTestcaseVersion(),
-                totalTests,
-                problem.getExecutionMode(),
-                request.getCodingDurationSeconds()
-            );
+                    problem.getTestcaseVersion(),
+                    totalTests,
+                    problem.getExecutionMode(),
+                    request.getCodingDurationSeconds()
+                );
+            } finally {
+                stopAdmissionStage(jobCreate, "job_create");
+            }
 
             // Note: the submission attempt is already acquired atomically above.
             // If job creation fails after acquisition, the attempt is counted and not compensated.
@@ -232,6 +273,8 @@ public class SubmissionJobController {
         } catch (Exception e) {
             logger.error("Failed to create submission job", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to create submission job: " + e.getMessage()));
+        } finally {
+            stopAdmissionStage(total, "total");
         }
     }
 
@@ -472,6 +515,16 @@ public class SubmissionJobController {
             return "Memory limit exceeded.";
         }
         return ExecutionUserFacing.studentDetail(verdict, providerText, false);
+    }
+
+    private Timer.Sample startAdmissionStage() {
+        return operationalMetrics == null ? null : operationalMetrics.admissionStageTimer();
+    }
+
+    private void stopAdmissionStage(Timer.Sample sample, String stage) {
+        if (operationalMetrics != null) {
+            operationalMetrics.stopAdmissionStageTimer(sample, stage);
+        }
     }
 
     /**

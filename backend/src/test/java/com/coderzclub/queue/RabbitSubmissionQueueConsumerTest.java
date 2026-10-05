@@ -17,7 +17,8 @@ class RabbitSubmissionQueueConsumerTest {
     void invalidMessageIsRejectedToDeadLetterExchange() throws Exception {
         RabbitTemplate template = mock(RabbitTemplate.class);
         RabbitSubmissionQueueConsumer consumer = new RabbitSubmissionQueueConsumer(
-            mock(ConnectionFactory.class), template, new SubmissionQueueProperties());
+            mock(ConnectionFactory.class), template, new SubmissionQueueProperties(),
+            new com.coderzclub.service.OperationalMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         MessageProperties properties = new MessageProperties();
         properties.setDeliveryTag(11L);
 
@@ -35,7 +36,8 @@ class RabbitSubmissionQueueConsumerTest {
         RabbitTemplate template = mock(RabbitTemplate.class);
         SubmissionQueueProperties config = new SubmissionQueueProperties();
         RabbitSubmissionQueueConsumer consumer = new RabbitSubmissionQueueConsumer(
-            mock(ConnectionFactory.class), template, config);
+            mock(ConnectionFactory.class), template, config,
+            new com.coderzclub.service.OperationalMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         Channel channel = mock(Channel.class);
         MessageProperties properties = new MessageProperties();
         properties.setDeliveryTag(12L);

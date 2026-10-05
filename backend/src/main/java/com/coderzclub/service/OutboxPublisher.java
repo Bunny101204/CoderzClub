@@ -108,6 +108,13 @@ public class OutboxPublisher {
     }
 
     private void counter(String outcome) {
-        metrics.counter("submission.outbox.publish", "outcome", outcome).increment();
+        metrics.counter("submission.outbox.publish", "transport", "rabbit", "outcome", boundedOutcome(outcome)).increment();
+    }
+
+    private static String boundedOutcome(String outcome) {
+        if ("published".equals(outcome) || "failed".equals(outcome)) {
+            return outcome;
+        }
+        return "unknown";
     }
 }

@@ -11,10 +11,46 @@ public class OperationalMetrics {
     private final MeterRegistry registry;
     private final AtomicInteger activeWorkers = new AtomicInteger();
     private final AtomicInteger providerInflight = new AtomicInteger();
+    static final String ADMISSION_STAGE_METRIC = "submission.admission.stage";
+    static final String QUEUE_ADMISSION_STAGE_METRIC = "submission.queue_admission.stage";
+
+    private static final java.util.Set<String> ADMISSION_STAGES = java.util.Set.of(
+        "user_lookup",
+        "queue_admission",
+        "rate_limit",
+        "problem_lookup",
+        "problem_validation",
+        "compatibility_validation",
+        "job_create",
+        "total"
+    );
+    private static final java.util.Set<String> QUEUE_ADMISSION_STAGES = java.util.Set.of(
+        "rabbit_queue_info",
+        "mongo_oldest_job",
+        "total"
+    );
+    private static final java.util.Set<String> OUTBOX_TRANSPORTS = java.util.Set.of("rabbit", "in_memory");
+    private static final java.util.Set<String> OUTBOX_OUTCOMES = java.util.Set.of("published", "failed");
+    private static final java.util.Set<String> CONSUMER_OUTCOMES = java.util.Set.of(
+        "claimed",
+        "duplicate_or_unclaimable",
+        "unknown_job",
+        "retry",
+        "dead_letter",
+        "requeued_exception",
+        "acked"
+    );
+
     public OperationalMetrics(MeterRegistry registry) {
         this.registry = registry;
         registry.gauge("submission.worker.active", activeWorkers);
         registry.gauge("judge0.provider.inflight", providerInflight);
+        for (String stage : ADMISSION_STAGES) {
+            admissionStageTimer(stage);
+        }
+        for (String stage : QUEUE_ADMISSION_STAGES) {
+            queueAdmissionStageTimer(stage);
+        }
     }
     public void admission(String outcome, String reason) { Counter.builder("submission.admission").tag("outcome", outcome).tag("reason", reason).register(registry).increment(); }
     public void retry() { Counter.builder("submission.job.retry").register(registry).increment(); }
@@ -55,6 +91,69 @@ public class OperationalMetrics {
         Counter.builder("submission.materialization.duplicate_prevented").register(registry).increment();
     }
     public void duplicateClaim() { Counter.builder("submission.job.duplicate_claim").register(registry).increment(); }
+
+    public void outboxPublish(String transport, String outcome) {
+        Counter.builder("submission.outbox.publish")
+            .tag("transport", bounded(transport, OUTBOX_TRANSPORTS))
+            .tag("outcome", bounded(outcome, OUTBOX_OUTCOMES))
+            .register(registry)
+            .increment();
+    }
+
+    public void queueConsumer(String outcome) {
+        Counter.builder("submission.queue.consumer")
+            .tag("outcome", bounded(outcome, CONSUMER_OUTCOMES))
+            .register(registry)
+            .increment();
+    }
+
+    public Timer.Sample admissionStageTimer() {
+        return Timer.start(registry);
+    }
+
+    public void stopAdmissionStageTimer(Timer.Sample sample, String stage) {
+        if (sample == null) {
+            return;
+        }
+        sample.stop(admissionStageTimer(boundedStage(stage, ADMISSION_STAGES)));
+    }
+
+    public Timer.Sample queueAdmissionStageTimer() {
+        return Timer.start(registry);
+    }
+
+    public void stopQueueAdmissionStageTimer(Timer.Sample sample, String stage) {
+        if (sample == null) {
+            return;
+        }
+        sample.stop(queueAdmissionStageTimer(boundedStage(stage, QUEUE_ADMISSION_STAGES)));
+    }
+
+    private Timer admissionStageTimer(String stage) {
+        return Timer.builder(ADMISSION_STAGE_METRIC)
+            .tag("stage", stage)
+            .publishPercentiles(0.5, 0.95, 0.99)
+            .register(registry);
+    }
+
+    private Timer queueAdmissionStageTimer(String stage) {
+        return Timer.builder(QUEUE_ADMISSION_STAGE_METRIC)
+            .tag("stage", stage)
+            .publishPercentiles(0.5, 0.95, 0.99)
+            .register(registry);
+    }
+
+    private static String boundedStage(String stage, java.util.Set<String> allowed) {
+        return bounded(stage, allowed);
+    }
+
+    private static String bounded(String value, java.util.Set<String> allowed) {
+        if (value != null && allowed.contains(value)) {
+            return value;
+        }
+        return "unknown";
+    }
+
     private static String sanitize(String reason) {
         if (reason == null || reason.isBlank()) return "unknown";
         String trimmed = reason.length() > 40 ? reason.substring(0, 40) : reason;

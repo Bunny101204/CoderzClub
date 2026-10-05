@@ -1,5 +1,12 @@
+/**
+ * OBSOLETE: this script hits /api/judge0/execute (or Judge0 directly), not
+ * POST /api/submission-jobs. Do not use it for capacity testing of the async
+ * Submit architecture. Use k6/submission-smoke.js instead.
+ *
+ * Credentials must come from the environment. Never embed a JWT here.
+ */
 import http from 'k6/http';
-import { check } from 'k6';
+import { check, fail } from 'k6';
 
 export const options = {
     vus: 75,
@@ -7,7 +14,10 @@ export const options = {
 };
 
 export default function () {
-    const token = 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJidW5ueSIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzg4ODA2MDkwLCJleHAiOjE3ODg4OTI0OTB9.g8TV7D0JBMe1xUgzcdltuQmmhJjmASmrJHmKpiCLxI5MEunXrw1yAtiIcAZ4Ly7HbS_GQHL8y0gQJ-Y0PXShFA';
+    const token = __ENV.K6_TOKEN;
+    if (!token && __ENV.JUDGE0_DIRECT !== 'true') {
+        fail('Obsolete script: set K6_TOKEN (or JUDGE0_DIRECT=true). Prefer k6/submission-smoke.js.');
+    }
 
     const judge0Url = __ENV.JUDGE0_DIRECT === 'true'
     ? 'http://127.0.0.1:2358/submissions?base64_encoded=false&wait=true'

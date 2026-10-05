@@ -14,18 +14,21 @@ import java.nio.charset.StandardCharsets;
 import org.slf4j.MDC;
 
 @Component
-@Profile("worker")
+@Profile("worker & !local")
 public class RabbitSubmissionQueueConsumer implements SubmissionQueueConsumer {
     private final ConnectionFactory connectionFactory;
     private final RabbitTemplate rabbitTemplate;
     private final SubmissionQueueProperties properties;
+    private final com.coderzclub.service.OperationalMetrics metrics;
     private SimpleMessageListenerContainer container;
 
     public RabbitSubmissionQueueConsumer(ConnectionFactory connectionFactory, RabbitTemplate rabbitTemplate,
-                                         SubmissionQueueProperties properties) {
+                                         SubmissionQueueProperties properties,
+                                         com.coderzclub.service.OperationalMetrics metrics) {
         this.connectionFactory = connectionFactory;
         this.rabbitTemplate = rabbitTemplate;
         this.properties = properties;
+        this.metrics = metrics;
     }
 
     @Override
@@ -46,6 +49,7 @@ public class RabbitSubmissionQueueConsumer implements SubmissionQueueConsumer {
         try {
             String jobId = new String(message.getBody(), StandardCharsets.UTF_8).trim();
             if (jobId.isEmpty()) {
+                metrics.queueConsumer("dead_letter");
                 channel.basicReject(deliveryTag, false);
                 return;
             }
@@ -54,6 +58,7 @@ public class RabbitSubmissionQueueConsumer implements SubmissionQueueConsumer {
                 correlationId == null ? "queue-" + jobId : correlationId)) {
                 MessageDisposition disposition = handler.handle(jobId);
                 if (disposition == MessageDisposition.RETRY) {
+                    metrics.queueConsumer("retry");
                     if (correlationId == null) {
                         rabbitTemplate.convertAndSend(properties.getExchange(), properties.getRetryRoutingKey(), jobId);
                     } else {
@@ -64,12 +69,15 @@ public class RabbitSubmissionQueueConsumer implements SubmissionQueueConsumer {
                     }
                     channel.basicAck(deliveryTag, false);
                 } else if (disposition == MessageDisposition.DEAD_LETTER) {
+                    metrics.queueConsumer("dead_letter");
                     channel.basicReject(deliveryTag, false);
                 } else {
+                    metrics.queueConsumer("acked");
                     channel.basicAck(deliveryTag, false);
                 }
             }
         } catch (Exception transientFailure) {
+            metrics.queueConsumer("requeued_exception");
             try {
                 channel.basicNack(deliveryTag, false, true);
             } catch (java.io.IOException acknowledgementFailure) {

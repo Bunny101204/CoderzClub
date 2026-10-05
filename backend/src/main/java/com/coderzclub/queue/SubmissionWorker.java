@@ -98,9 +98,11 @@ public class SubmissionWorker {
 
     private SubmissionQueueConsumer.MessageDisposition handleMessage(String jobId) {
         if (jobId == null || jobId.isBlank()) {
+            operationalMetrics.queueConsumer("dead_letter");
             return SubmissionQueueConsumer.MessageDisposition.DEAD_LETTER;
         }
         if (!jobRepository.existsById(jobId)) {
+            operationalMetrics.queueConsumer("unknown_job");
             logger.warn("Received submission message for unknown job {}; sending to DLQ", jobId);
             return SubmissionQueueConsumer.MessageDisposition.DEAD_LETTER;
         }
@@ -120,10 +122,12 @@ public class SubmissionWorker {
         Optional<SubmissionJob> jobOpt = leaseService.claimJob(jobId, workerId, workerProperties.getLeaseDurationSeconds());
         if (jobOpt.isEmpty()) {
             operationalMetrics.duplicateClaim();
+            operationalMetrics.queueConsumer("duplicate_or_unclaimable");
             return SubmissionQueueConsumer.MessageDisposition.ACK;
         }
 
         SubmissionJob job = jobOpt.get();
+        operationalMetrics.queueConsumer("claimed");
         operationalMetrics.workerStarted();
         eventService.publish(job, SubmissionJob.JobStatus.RUNNING);
         if (heartbeatExecutor == null || heartbeatExecutor.isShutdown()) {

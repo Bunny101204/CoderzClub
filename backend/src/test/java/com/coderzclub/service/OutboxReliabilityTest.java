@@ -70,6 +70,7 @@ class OutboxReliabilityTest {
             .publishDueEvents();
 
         ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(rabbit).convertAndSend(any(), any(), any(), any(MessagePostProcessor.class), any(CorrelationData.class));
         verify(mongo).updateFirst(any(Query.class), update.capture(), eq(SubmissionOutboxEvent.class));
         assertEquals(SubmissionOutboxEvent.Status.PUBLISHED,
             update.getValue().getUpdateObject().get("$set", org.bson.Document.class).get("status"));
@@ -90,6 +91,20 @@ class OutboxReliabilityTest {
         verify(outbox).save(event.capture());
         assertEquals("job-orphan", event.getValue().getPayload());
         assertEquals(SubmissionOutboxEvent.Status.PENDING, event.getValue().getStatus());
+    }
+
+    @Test
+    void queuedJobWithExistingPublishedEventIsNotRepaired() {
+        SubmissionJobRepository jobs = mock(SubmissionJobRepository.class);
+        SubmissionOutboxRepository outbox = mock(SubmissionOutboxRepository.class);
+        SubmissionJob job = new SubmissionJob();
+        job.setId("job-published");
+        when(jobs.findByStatusOrderByCreatedAtAsc(SubmissionJob.JobStatus.QUEUED)).thenReturn(List.of(job));
+        when(outbox.existsByAggregateIdAndEventType("job-published", "SubmissionJobCreated")).thenReturn(true);
+
+        new SubmissionOutboxRepairService(jobs, outbox).repairOrphanedJobs();
+
+        verify(outbox, never()).save(any());
     }
 
     @Test
