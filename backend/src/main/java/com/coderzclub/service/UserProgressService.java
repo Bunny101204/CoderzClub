@@ -36,38 +36,8 @@ public class UserProgressService {
     }
 
     public List<ProblemProgressEntry> progressForUser(String userId) {
-        List<Document> groups = groupedOutcomes(userId);
-        Map<String, Set<SubmissionAttemptClassifier.Kind>> byStoredId = new LinkedHashMap<>();
-        for (Document group : groups) {
-            String storedId = stringId(group.get("_id"));
-            if (storedId == null || storedId.isBlank()) {
-                continue;
-            }
-            Set<SubmissionAttemptClassifier.Kind> kinds = byStoredId.computeIfAbsent(storedId, ignored -> new HashSet<>());
-            addKinds(kinds, group.get("results"));
-            addKinds(kinds, group.get("verdicts"));
-        }
-        Map<String, Problem> problems = loadProblems(byStoredId.keySet());
-        List<ProblemProgressEntry> entries = new ArrayList<>();
-        for (Map.Entry<String, Set<SubmissionAttemptClassifier.Kind>> item : byStoredId.entrySet()) {
-            String status = SubmissionAttemptClassifier.problemStatus(item.getValue());
-            if (status == null) {
-                continue;
-            }
-            Problem problem = resolveProblem(item.getKey(), problems);
-            ProblemProgressEntry entry = new ProblemProgressEntry();
-            entry.setStatus(status);
-            if (problem != null) {
-                entry.setProblemId(problem.getId());
-                entry.setNumericId(problem.getNumericId());
-                entry.setAliases(aliases(problem, item.getKey()));
-            } else {
-                entry.setProblemId(item.getKey());
-                entry.setAliases(List.of(item.getKey()));
-            }
-            entries.add(entry);
-        }
-        return entries;
+        Map<String, Set<SubmissionAttemptClassifier.Kind>> byStoredId = outcomesFromGroups(groupedOutcomes(userId));
+        return progressEntries(byStoredId, loadProblems(byStoredId.keySet()));
     }
 
     public UserProfileStatsResponse profileStats(User user) {
@@ -81,16 +51,20 @@ public class UserProgressService {
         response.setSuccessRateDefinition(SUCCESS_RATE_DEFINITION);
         response.setActivityTimezone("UTC");
 
-        List<ProblemProgressEntry> progress = progressForUser(user.getId());
-        List<ProblemProgressEntry> solved = progress.stream().filter(item -> "SOLVED".equals(item.getStatus())).toList();
+        List<Submission> submissions = loadSubmissionSnapshot(user.getId());
+        SubmissionAnalysis analysis = analyzeSubmissions(submissions);
+        Map<String, Problem> problems = loadProblems(analysis.outcomesByProblem.keySet());
+        List<ProblemProgressEntry> progress = progressEntries(analysis.outcomesByProblem, problems);
+        List<ProblemProgressEntry> solved = progress.stream()
+            .filter(item -> "SOLVED".equals(item.getStatus()))
+            .toList();
         response.setUniqueProblemsSolved(solved.size());
-        response.setDifficultySolved(difficultyCounts(solved));
-
-        SubmissionCounts counts = countSubmissions(user.getId());
-        response.setAcceptedJudgedSubmissions(counts.accepted);
-        response.setCompletedStudentSubmissions(counts.student);
-        response.setSuccessRate(counts.student == 0 ? 0.0 : (double) counts.accepted / (double) counts.student);
-        response.setActivity(activityByUtcDate(user.getId()));
+        response.setDifficultySolved(difficultyCounts(solved, difficultyById(problems)));
+        response.setAcceptedJudgedSubmissions(analysis.accepted);
+        response.setCompletedStudentSubmissions(analysis.student);
+        response.setSuccessRate(analysis.student == 0 ? 0.0
+            : (double) analysis.accepted / (double) analysis.student);
+        response.setActivity(analysis.activity);
         return response;
     }
 
@@ -137,48 +111,51 @@ public class UserProgressService {
             return List.of();
         }
         for (Submission submission : submissions) {
-            if (submission == null || submission.getCreatedAt() == null) {
-                continue;
-            }
-            if (!SubmissionAttemptClassifier.countsTowardActivity(submission.getResult(), submission.getVerdict())) {
-                continue;
-            }
-            LocalDate day = Instant.ofEpochMilli(submission.getCreatedAt().getTime()).atZone(ZoneOffset.UTC).toLocalDate();
-            String key = day.toString();
-            byDay.put(key, byDay.getOrDefault(key, 0) + 1);
+            addActivityDay(byDay, submission);
         }
-        List<Map<String, Object>> activity = new ArrayList<>();
-        byDay.forEach((date, count) -> activity.add(Map.of("date", date, "count", count)));
-        return activity;
+        return activityRows(byDay);
     }
 
-    private Map<String, Integer> difficultyCounts(List<ProblemProgressEntry> solved) {
-        Set<String> ids = new HashSet<>();
-        Set<Integer> numericIds = new HashSet<>();
-        for (ProblemProgressEntry entry : solved) {
-            if (entry.getProblemId() != null) {
-                ids.add(entry.getProblemId());
-            }
-            if (entry.getNumericId() != null) {
-                numericIds.add(entry.getNumericId());
-            }
+    static SubmissionAnalysis analyzeSubmissions(List<Submission> submissions) {
+        Map<String, Set<SubmissionAttemptClassifier.Kind>> outcomesByProblem = new LinkedHashMap<>();
+        Map<String, Integer> byDay = new LinkedHashMap<>();
+        long accepted = 0;
+        long student = 0;
+        if (submissions == null) {
+            return new SubmissionAnalysis(outcomesByProblem, accepted, student, List.of());
         }
-        Map<String, Problem> problems = loadProblems(ids);
-        if (!numericIds.isEmpty()) {
-            Query numericQuery = Query.query(Criteria.where("numericId").in(numericIds));
-            numericQuery.fields().include("numericId").include("difficulty");
-            for (Problem problem : mongoTemplate.find(numericQuery, Problem.class)) {
-                problems.putIfAbsent(problem.getId(), problem);
+        for (Submission submission : submissions) {
+            if (submission == null) {
+                continue;
             }
-        }
-        Map<String, String> difficultyById = new HashMap<>();
-        for (Problem problem : problems.values()) {
-            difficultyById.put(problem.getId(), problem.getDifficulty());
-            if (problem.getNumericId() != null) {
-                difficultyById.put(String.valueOf(problem.getNumericId()), problem.getDifficulty());
+            SubmissionAttemptClassifier.Kind kind = SubmissionAttemptClassifier.classify(
+                submission.getResult(), submission.getVerdict());
+            if (kind == SubmissionAttemptClassifier.Kind.ACCEPTED) {
+                accepted++;
+                student++;
+            } else if (kind == SubmissionAttemptClassifier.Kind.STUDENT_VERDICT) {
+                student++;
             }
+            String storedId = submission.getProblemId();
+            if (storedId != null && !storedId.isBlank()) {
+                Set<SubmissionAttemptClassifier.Kind> kinds =
+                    outcomesByProblem.computeIfAbsent(storedId, ignored -> new HashSet<>());
+                kinds.add(SubmissionAttemptClassifier.classifyOne(submission.getResult()));
+                kinds.add(SubmissionAttemptClassifier.classifyOne(submission.getVerdict()));
+            }
+            addActivityDay(byDay, submission);
         }
-        return difficultyCounts(solved, difficultyById);
+        return new SubmissionAnalysis(outcomesByProblem, accepted, student, activityRows(byDay));
+    }
+
+    private List<Submission> loadSubmissionSnapshot(String userId) {
+        Query query = Query.query(Criteria.where("userId").is(userId));
+        query.fields()
+            .include("problemId")
+            .include("result")
+            .include("verdict")
+            .include("createdAt");
+        return mongoTemplate.find(query, Submission.class);
     }
 
     private List<Document> groupedOutcomes(String userId) {
@@ -190,30 +167,6 @@ public class UserProgressService {
         );
         AggregationResults<Document> results = mongoTemplate.aggregate(aggregation, "submissions", Document.class);
         return results.getMappedResults();
-    }
-
-    private SubmissionCounts countSubmissions(String userId) {
-        Query query = Query.query(Criteria.where("userId").is(userId));
-        query.fields().include("result").include("verdict");
-        long accepted = 0;
-        long student = 0;
-        for (Submission submission : mongoTemplate.find(query, Submission.class)) {
-            SubmissionAttemptClassifier.Kind kind = SubmissionAttemptClassifier.classify(
-                submission.getResult(), submission.getVerdict());
-            if (kind == SubmissionAttemptClassifier.Kind.ACCEPTED) {
-                accepted++;
-                student++;
-            } else if (kind == SubmissionAttemptClassifier.Kind.STUDENT_VERDICT) {
-                student++;
-            }
-        }
-        return new SubmissionCounts(accepted, student);
-    }
-
-    private List<Map<String, Object>> activityByUtcDate(String userId) {
-        Query query = Query.query(Criteria.where("userId").is(userId));
-        query.fields().include("createdAt").include("result").include("verdict");
-        return activityFromStudentAttempts(mongoTemplate.find(query, Submission.class));
     }
 
     private Map<String, Problem> loadProblems(Set<String> storedIds) {
@@ -246,6 +199,57 @@ public class UserProgressService {
             }
         }
         return byAnyId;
+    }
+
+    private static Map<String, Set<SubmissionAttemptClassifier.Kind>> outcomesFromGroups(List<Document> groups) {
+        Map<String, Set<SubmissionAttemptClassifier.Kind>> byStoredId = new LinkedHashMap<>();
+        for (Document group : groups) {
+            String storedId = stringId(group.get("_id"));
+            if (storedId == null || storedId.isBlank()) {
+                continue;
+            }
+            Set<SubmissionAttemptClassifier.Kind> kinds = byStoredId.computeIfAbsent(storedId, ignored -> new HashSet<>());
+            addKinds(kinds, group.get("results"));
+            addKinds(kinds, group.get("verdicts"));
+        }
+        return byStoredId;
+    }
+
+    private static List<ProblemProgressEntry> progressEntries(
+        Map<String, Set<SubmissionAttemptClassifier.Kind>> byStoredId,
+        Map<String, Problem> problems
+    ) {
+        List<ProblemProgressEntry> entries = new ArrayList<>();
+        for (Map.Entry<String, Set<SubmissionAttemptClassifier.Kind>> item : byStoredId.entrySet()) {
+            String status = SubmissionAttemptClassifier.problemStatus(item.getValue());
+            if (status == null) {
+                continue;
+            }
+            Problem problem = resolveProblem(item.getKey(), problems);
+            ProblemProgressEntry entry = new ProblemProgressEntry();
+            entry.setStatus(status);
+            if (problem != null) {
+                entry.setProblemId(problem.getId());
+                entry.setNumericId(problem.getNumericId());
+                entry.setAliases(aliases(problem, item.getKey()));
+            } else {
+                entry.setProblemId(item.getKey());
+                entry.setAliases(List.of(item.getKey()));
+            }
+            entries.add(entry);
+        }
+        return entries;
+    }
+
+    private static Map<String, String> difficultyById(Map<String, Problem> problems) {
+        Map<String, String> difficultyById = new HashMap<>();
+        for (Problem problem : problems.values()) {
+            difficultyById.put(problem.getId(), problem.getDifficulty());
+            if (problem.getNumericId() != null) {
+                difficultyById.put(String.valueOf(problem.getNumericId()), problem.getDifficulty());
+            }
+        }
+        return difficultyById;
     }
 
     private static Problem resolveProblem(String storedId, Map<String, Problem> problems) {
@@ -281,9 +285,32 @@ public class UserProgressService {
         }
     }
 
+    private static void addActivityDay(Map<String, Integer> byDay, Submission submission) {
+        if (submission == null || submission.getCreatedAt() == null) {
+            return;
+        }
+        if (!SubmissionAttemptClassifier.countsTowardActivity(submission.getResult(), submission.getVerdict())) {
+            return;
+        }
+        LocalDate day = Instant.ofEpochMilli(submission.getCreatedAt().getTime()).atZone(ZoneOffset.UTC).toLocalDate();
+        String key = day.toString();
+        byDay.put(key, byDay.getOrDefault(key, 0) + 1);
+    }
+
+    private static List<Map<String, Object>> activityRows(Map<String, Integer> byDay) {
+        List<Map<String, Object>> activity = new ArrayList<>();
+        byDay.forEach((date, count) -> activity.add(Map.of("date", date, "count", count)));
+        return activity;
+    }
+
     private static String stringId(Object value) {
         return value == null ? null : String.valueOf(value);
     }
 
-    private record SubmissionCounts(long accepted, long student) {}
+    record SubmissionAnalysis(
+        Map<String, Set<SubmissionAttemptClassifier.Kind>> outcomesByProblem,
+        long accepted,
+        long student,
+        List<Map<String, Object>> activity
+    ) {}
 }
