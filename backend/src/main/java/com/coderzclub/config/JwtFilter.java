@@ -1,4 +1,5 @@
 package com.coderzclub.config;
+import com.coderzclub.model.User;
 import com.coderzclub.service.UserService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -41,7 +42,7 @@ public class JwtFilter extends OncePerRequestFilter {
         }
         
         final String authHeader = request.getHeader("Authorization");
-        String username = null;
+        JwtUtil.JwtIdentity identity = null;
         String jwt = null;
 
         if (authHeader != null) {
@@ -49,24 +50,28 @@ public class JwtFilter extends OncePerRequestFilter {
             if (trimmedHeader.regionMatches(true, 0, "Bearer ", 0, 7)) {
                 jwt = trimmedHeader.substring(7).trim();
                 try {
-                    username = jwtUtil.extractUsername(jwt);
+                    identity = jwtUtil.extractIdentity(jwt);
                 } catch (Exception ignored) {
                 }
             }
         }
 
-        if (username != null) {
+        if (identity != null && identity.username() != null) {
             var existingAuthentication = SecurityContextHolder.getContext().getAuthentication();
             boolean shouldReplaceAuthentication = existingAuthentication == null || existingAuthentication instanceof AnonymousAuthenticationToken;
 
             if (shouldReplaceAuthentication) {
                 try {
-                    UserDetails userDetails = userService.loadUserByUsername(username);
-                    if (userDetails.isEnabled() && jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
+                    User user = userService.loadUserForAuthentication(identity.userId(), identity.username());
+                    UserDetails userDetails = userService.toUserDetails(user);
+                    boolean legacyIdentityOk = (identity.userId() != null && !identity.userId().isBlank())
+                        || jwtUtil.legacyTokenCouldBelongToUser(identity, user);
+                    if (legacyIdentityOk && userDetails.isEnabled() && jwtUtil.isTokenValid(jwt, userDetails.getUsername())) {
                         UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                                 userDetails, null, userDetails.getAuthorities());
                         authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(authToken);
+                        AuthenticatedUser.set(request, user);
                     }
                 } catch (UsernameNotFoundException ignored) {
                     logger.debug("JWT Filter: user no longer authenticable");

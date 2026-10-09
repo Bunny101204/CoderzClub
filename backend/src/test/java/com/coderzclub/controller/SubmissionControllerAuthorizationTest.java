@@ -1,5 +1,6 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.config.AuthenticatedUser;
 import com.coderzclub.model.Submission;
 import com.coderzclub.model.User;
 import com.coderzclub.repository.ProblemRepository;
@@ -31,7 +32,9 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,7 +62,7 @@ class SubmissionControllerAuthorizationTest {
         ReflectionTestUtils.setField(controller, "problemRepository", problemRepository);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         authenticate("alice");
-        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u-alice", "alice")));
+        lenient().when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u-alice", "alice")));
     }
 
     @AfterEach
@@ -80,6 +83,18 @@ class SubmissionControllerAuthorizationTest {
 
         verify(submissionRepository).findByUserId(eq("u-alice"), any(Pageable.class));
         verify(submissionRepository, never()).findByUserId(eq("u-bob"), any(Pageable.class));
+    }
+
+    @Test
+    void mySubmissionsReusesRequestUserWithoutRepositoryLookup() throws Exception {
+        User requestUser = user("u-alice", "alice");
+        when(submissionRepository.findByUserId(eq("u-alice"), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+        mockMvc.perform(get("/api/submissions/my-submissions")
+                .requestAttr(AuthenticatedUser.ATTRIBUTE, requestUser))
+            .andExpect(status().isOk());
+        verify(userRepository, never()).findByUsername(anyString());
+        verify(submissionRepository).findByUserId(eq("u-alice"), any(Pageable.class));
     }
 
     @Test

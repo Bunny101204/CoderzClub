@@ -1,5 +1,6 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.config.AuthenticatedUser;
 import com.coderzclub.dto.AccountDeletionRequest;
 import com.coderzclub.dto.LeaderboardEntry;
 import com.coderzclub.dto.UserProfileStatsResponse;
@@ -15,8 +16,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Optional;
@@ -45,11 +44,8 @@ public class UserController {
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile() {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -67,11 +63,8 @@ public class UserController {
     @GetMapping("/stats")
     public ResponseEntity<?> getUserStats() {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -107,24 +100,19 @@ public class UserController {
         try {
             int requestedSize = limit == null ? size : limit;
             Map<String, Object> body = new java.util.LinkedHashMap<>(leaderboardService.page(page, requestedSize));
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth != null && auth.isAuthenticated()
-                && !(auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
-                && auth.getName() != null) {
-                userRepository.findByUsername(auth.getName())
-                    .filter(user -> !user.isDeleted())
-                    .ifPresent(user -> {
-                        java.util.Map<String, Object> viewer = new java.util.LinkedHashMap<>();
-                        viewer.put("username", user.getUsername());
-                        viewer.put("rank", leaderboardService.rank(user.getId()));
-                        viewer.put("totalPoints", user.getTotalPoints());
-                        viewer.put("problemsSolved", user.getProblemsSolved());
-                        @SuppressWarnings("unchecked")
-                        java.util.List<LeaderboardEntry> users = (java.util.List<LeaderboardEntry>) body.get("users");
-                        viewer.put("onPage", users != null && users.stream().anyMatch(entry -> user.getId().equals(entry.getId())));
-                        body.put("viewer", viewer);
-                    });
-            }
+            currentUser()
+                .filter(user -> !user.isDeleted())
+                .ifPresent(user -> {
+                    java.util.Map<String, Object> viewer = new java.util.LinkedHashMap<>();
+                    viewer.put("username", user.getUsername());
+                    viewer.put("rank", leaderboardService.rank(user.getId()));
+                    viewer.put("totalPoints", user.getTotalPoints());
+                    viewer.put("problemsSolved", user.getProblemsSolved());
+                    @SuppressWarnings("unchecked")
+                    java.util.List<LeaderboardEntry> users = (java.util.List<LeaderboardEntry>) body.get("users");
+                    viewer.put("onPage", users != null && users.stream().anyMatch(entry -> user.getId().equals(entry.getId())));
+                    body.put("viewer", viewer);
+                });
             return ResponseEntity.ok(body);
         } catch (Exception e) {
             return ResponseEntity.status(503).body(Map.of("error", "Leaderboard is temporarily unavailable"));
@@ -134,11 +122,8 @@ public class UserController {
     @PutMapping("/profile")
     public ResponseEntity<?> updateProfile(@RequestBody ProfileUpdateRequest request) {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -159,7 +144,7 @@ public class UserController {
 
     @GetMapping("/me/export")
     public ResponseEntity<?> exportMyData() {
-        User user = currentUser();
+        User user = currentUser().orElse(null);
         if (user == null || user.isDeleted()) {
             return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
         }
@@ -170,7 +155,7 @@ public class UserController {
 
     @DeleteMapping("/me")
     public ResponseEntity<?> deleteMyAccount(@RequestBody(required = false) AccountDeletionRequest body) {
-        User user = currentUser();
+        User user = currentUser().orElse(null);
         if (user == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
         }
@@ -178,12 +163,8 @@ public class UserController {
         return ResponseEntity.ok(accountDeletionService.deleteSelf(user, confirmation));
     }
 
-    private User currentUser() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || auth.getName() == null) {
-            return null;
-        }
-        return userRepository.findByUsername(auth.getName()).orElse(null);
+    private Optional<User> currentUser() {
+        return AuthenticatedUser.current(userRepository);
     }
     
     // DTO for profile update request

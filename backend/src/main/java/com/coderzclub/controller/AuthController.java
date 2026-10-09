@@ -112,7 +112,7 @@ public class AuthController {
             
             boolean passwordMatch = userService.checkPassword(req.getPassword(), user.getPasswordHash());
             if (passwordMatch) {
-                String token = jwtUtil.generateToken(user.getUsername(), user.getRole());
+                String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
                 return ResponseEntity.ok(new JwtResponse(token, user.getRole()));
             }
             return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));

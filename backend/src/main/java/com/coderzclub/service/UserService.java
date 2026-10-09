@@ -128,15 +128,32 @@ public class UserService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        User user = userRepository.findByUsername(username)
+        return toUserDetails(loadUserForAuthentication(null, username));
+    }
+
+    public User loadUserForAuthentication(String userId, String username) throws UsernameNotFoundException {
+        User user;
+        if (userId != null && !userId.isBlank()) {
+            user = userRepository.findById(userId)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+            if (username != null && user.getUsername() != null
+                && !user.getUsername().equalsIgnoreCase(username)) {
+                throw new UsernameNotFoundException("User not found");
+            }
+        } else {
+            user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        }
         if (user.isDeleted()) {
             throw new UsernameNotFoundException("User not found");
         }
+        return user;
+    }
+
+    public UserDetails toUserDetails(User user) {
         String normalizedRole = (user.getRole() == null ? "USER" : user.getRole().trim().toUpperCase());
         String roleAuthority = "ROLE_" + normalizedRole;
         String password = user.getPasswordHash() == null ? "" : user.getPasswordHash();
-
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getUsername())
                 .password(password)

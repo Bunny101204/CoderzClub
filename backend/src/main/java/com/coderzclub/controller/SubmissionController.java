@@ -1,5 +1,6 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.config.AuthenticatedUser;
 import com.coderzclub.model.Submission;
 import com.coderzclub.repository.SubmissionRepository;
 import com.coderzclub.repository.UserRepository;
@@ -13,8 +14,6 @@ import com.coderzclub.service.UserProgressService;
 import com.coderzclub.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -57,12 +56,8 @@ public class SubmissionController {
     @PostMapping
     public ResponseEntity<?> submitSolution(@RequestBody SubmissionRequest request) {
         try {
-            // Get current user from JWT
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -210,11 +205,8 @@ public class SubmissionController {
         @RequestParam(required = false) String result
     ) {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -245,11 +237,8 @@ public class SubmissionController {
     @GetMapping("/limits")
     public ResponseEntity<?> getSubmissionLimits(@RequestParam(required = false) String problemId) {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -276,12 +265,7 @@ public class SubmissionController {
     }
     
     private Optional<User> currentUser() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth.getName() == null
-            || "anonymousUser".equals(auth.getName())) {
-            return Optional.empty();
-        }
-        return userRepository.findByUsername(auth.getName());
+        return AuthenticatedUser.current(userRepository);
     }
 
     private int clampSize(int size) {
