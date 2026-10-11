@@ -3,6 +3,7 @@ package com.coderzclub.service;
 import com.coderzclub.dto.ProblemContentUpdate;
 import com.coderzclub.model.ExecutionMode;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -85,6 +86,9 @@ public class ProblemContentService {
         }
         if (update.getPublicTestCases() != null || update.getHiddenTestCases() != null) {
             submissionValidator.validateProblemTestCases(existing);
+        }
+        if (update.getAvailability() != null) {
+            existing.setAvailability(ProblemAvailability.fromValue(update.getAvailability()));
         }
         if (update.getExecutionMode() != null || update.getTestcaseVersion() != null) {
             ExecutionMode mode = update.getExecutionMode() == null

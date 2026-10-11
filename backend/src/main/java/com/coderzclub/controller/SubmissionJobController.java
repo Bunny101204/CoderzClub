@@ -19,6 +19,7 @@ import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionValidationService;
 import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.SubmissionQueueAdmissionService;
+import com.coderzclub.service.ProblemAccessService;
 import com.coderzclub.service.SubmissionJobAccessService;
 import com.coderzclub.service.SubmissionJobSseTicketService;
 import com.coderzclub.service.ExecutionCompatibilityService;
@@ -65,6 +66,9 @@ public class SubmissionJobController {
 
     @Autowired
     private ProblemRepository problemRepository;
+
+    @Autowired
+    private ProblemAccessService problemAccessService;
 
 
 
@@ -196,6 +200,7 @@ public class SubmissionJobController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Problem not found"));
             }
             Problem problem = problemOpt.get();
+            problemAccessService.requirePracticeExecute(user, problem);
 
             int totalTests = (problem.getPublicTestCases() != null ? problem.getPublicTestCases().size() : 0)
                 + (problem.getHiddenTestCases() != null ? problem.getHiddenTestCases().size() : 0);
@@ -270,6 +275,8 @@ public class SubmissionJobController {
 
             return ResponseEntity.accepted().body(resp);
 
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             logger.error("Failed to create submission job", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to create submission job: " + e.getMessage()));

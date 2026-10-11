@@ -1,6 +1,7 @@
 package com.coderzclub.dto;
 
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 
 import java.util.List;
@@ -28,6 +29,7 @@ public class AdminProblemResponse {
     private String bundleId;
     private List<TestCase> publicTestCases;
     private List<TestCase> hiddenTestCases;
+    private String availability;
 
     public AdminProblemResponse() {}
 
@@ -53,6 +55,7 @@ public class AdminProblemResponse {
         this.bundleId = problem.getBundleId();
         this.publicTestCases = sanitize(problem.getPublicTestCases());
         this.hiddenTestCases = sanitize(problem.getHiddenTestCases());
+        this.availability = ProblemAvailability.of(problem).name();
     }
 
     private List<TestCase> sanitize(List<TestCase> testCases) {
@@ -110,4 +113,6 @@ public class AdminProblemResponse {
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
     public List<TestCase> getHiddenTestCases() { return hiddenTestCases; }
     public void setHiddenTestCases(List<TestCase> hiddenTestCases) { this.hiddenTestCases = hiddenTestCases; }
+    public String getAvailability() { return availability; }
+    public void setAvailability(String availability) { this.availability = availability; }
 }

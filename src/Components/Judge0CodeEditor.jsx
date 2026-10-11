@@ -19,6 +19,8 @@ import { useTheme } from "../context/ThemeContext";
 import { CopyIcon } from "../icons/AppIcons.jsx";
 import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.js";
 import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
+import { api } from "../apiClient";
+import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } from "../contests/contestRunPolling";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -30,6 +32,9 @@ const Judge0CodeEditor = ({
   parameters: propParameters = [],
   problemId,
   executionMode = "STDIN_STDOUT",
+  executionLocked = false,
+  contestId = null,
+  contestStatus = null,
   onSubmissionSuccess,
 }) => {
   const { theme } = useTheme();
@@ -48,11 +53,10 @@ const Judge0CodeEditor = ({
   const [output, setOutput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState([]); // [{input, expected, actual, passed}]
-  const [showMainWarning, setShowMainWarning] = useState(false);
+  const [, setSubmissionStatus] = useState(null);
   const [userInput, setUserInput] = useState("");
   const [submitResult, setSubmitResult] = useState(null); // {status, failedCase, passedCount, totalCount}
   const [showAccepted, setShowAccepted] = useState(false);
-  const [submissionStatus, setSubmissionStatus] = useState(null); // Track submission status
   const [useCustomInput, setUseCustomInput] = useState(false);
   const [executionTime, setExecutionTime] = useState(null); // Execution time in ms
   const [executionMemory, setExecutionMemory] = useState(null); // Execution memory in bytes
@@ -61,6 +65,13 @@ const Judge0CodeEditor = ({
   const pollingControllerRef = useRef(null);
   const activeJobIdRef = useRef(null);
   const submissionGenerationRef = useRef(0);
+  const contestRunGenerationRef = useRef(0);
+  const contestRunControllerRef = useRef(null);
+  const activeRunIdRef = useRef(null);
+  const contestMode = Boolean(contestId);
+  const contestLive = contestMode && contestStatus === "LIVE";
+  const runLocked = contestMode ? !contestLive : executionLocked;
+  const customRunLocked = contestMode ? true : executionLocked;
   const eventSourceRef = useRef(null);
   const previousLanguageRef = useRef(languageId);
   const skipNextPersistRef = useRef(false);
@@ -87,11 +98,18 @@ const Judge0CodeEditor = ({
   useEffect(() => () => {
     pollingControllerRef.current?.abort();
     eventSourceRef.current?.close();
+    contestRunControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => () => {
+    contestRunGenerationRef.current += 1;
+    contestRunControllerRef.current?.abort();
+    contestRunControllerRef.current = null;
+    activeRunIdRef.current = null;
+  }, [problemId, contestId]);
 
   //for line numbers in editor
   const [lineCount, setLineCount] = useState(1);
-  const textareaRef = React.useRef(null);
   const lineRef = React.useRef(null);
 
   // Initialize timer when component mounts
@@ -129,13 +147,6 @@ const Judge0CodeEditor = ({
     return `${minutes.toString().padStart(2, "0")}:${seconds
       .toString()
       .padStart(2, "0")}`;
-  };
-
-  //for numbers in code editor
-  const syncScroll = () => {
-    if (textareaRef.current && lineRef.current) {
-      lineRef.current.scrollTop = textareaRef.current.scrollTop;
-    }
   };
 
   useEffect(() => {
@@ -211,12 +222,6 @@ const Judge0CodeEditor = ({
     link.href = URL.createObjectURL(blob);
     link.click();
   };
-
-  // Normalize class name
-  const normalizedCode = sourceCode.replace(
-    /public\s+class\s+\w+/,
-    "public class Main"
-  );
 
   // Helper to wrap user code for Java
   function generateJavaCode(userCode, functionName, testInput, parameters) {
@@ -432,7 +437,146 @@ const Judge0CodeEditor = ({
     throw lastErr;
   }
 
+  const cancelContestRunPolling = () => {
+    contestRunGenerationRef.current += 1;
+    contestRunControllerRef.current?.abort();
+    contestRunControllerRef.current = null;
+    activeRunIdRef.current = null;
+  };
+
+  const applyContestRunPayload = (payload) => {
+    const remoteResults = payload.results || [];
+    const allResults = [];
+    for (let i = 0; i < remoteResults.length; i++) {
+      const r = remoteResults[i];
+      const errorType = r.errorType;
+      const error = errorType && errorType !== "WRONG_ANSWER"
+        ? { type: errorType, message: r.errorMessage || errorType }
+        : null;
+      allResults.push({
+        input: r.input || "",
+        expected: r.expectedOutput || "",
+        actual: r.actualOutput || "No Output",
+        passed: !!r.passed,
+        runtime: r.runtime,
+        memory: r.memory,
+        error,
+      });
+      if (r.runtime && (!executionTime || r.runtime > executionTime)) {
+        setExecutionTime(r.runtime);
+      }
+      if (r.memory && (!executionMemory || r.memory > executionMemory)) {
+        setExecutionMemory(r.memory);
+      }
+      if (error) {
+        setErrorDetails(error);
+      }
+    }
+    setResults(allResults);
+    setOutput("");
+  };
+
+  const pollContestRun = async (runId, generation, signal) => {
+    for (let poll = 0; poll < CONTEST_RUN_MAX_POLLS; poll++) {
+      if (signal.aborted || generation !== contestRunGenerationRef.current || activeRunIdRef.current !== runId) {
+        return;
+      }
+      await sleep(getContestRunPollDelay(poll));
+      if (signal.aborted || generation !== contestRunGenerationRef.current || activeRunIdRef.current !== runId) {
+        return;
+      }
+      const response = await api.contests.getRun(runId);
+      const payload = response.data || {};
+      if (payload.status === "QUEUED" || payload.status === "RUNNING") {
+        const completed = payload.completedTests;
+        const total = payload.totalTests;
+        setOutput(
+          Number.isFinite(completed) && Number.isFinite(total) && total > 0
+            ? `Running public tests ${completed}/${total}`
+            : payload.status === "QUEUED" ? "Contest run queued" : "Running public tests..."
+        );
+        continue;
+      }
+      if (isTerminalContestRun(payload.status)) {
+        if (payload.status === "FAILED") {
+          setOutput(payload.errorMessage || "Contest run failed. You can retry.");
+          setResults([]);
+          return;
+        }
+        applyContestRunPayload(payload);
+        return;
+      }
+    }
+    setOutput("Contest run is taking longer than expected. You can retry.");
+  };
+
+  const handleContestRun = async () => {
+    if (runLocked) {
+      return;
+    }
+    if (!testCases || testCases.length === 0) {
+      setOutput("No public tests available for this contest problem.");
+      return;
+    }
+    cancelContestRunPolling();
+    const generation = contestRunGenerationRef.current;
+    const controller = new AbortController();
+    contestRunControllerRef.current = controller;
+    setIsLoading(true);
+    setResults([]);
+    setOutput("");
+    setSubmitResult(null);
+    setExecutionTime(null);
+    setExecutionMemory(null);
+    setErrorDetails(null);
+    try {
+      const response = await api.contests.run(contestId, problemId, {
+        code: sourceCode,
+        language: languageNames[languageId] || "Unknown",
+        languageId,
+        codingDurationSeconds: codingDurationSecondsFromElapsedMs(elapsedTime),
+      });
+      if (generation !== contestRunGenerationRef.current) {
+        return;
+      }
+      const runId = response.data?.runId;
+      if (!runId) {
+        setOutput("Contest run was not accepted. Please retry.");
+        return;
+      }
+      activeRunIdRef.current = runId;
+      setOutput("Contest run queued");
+      await pollContestRun(runId, generation, controller.signal);
+    } catch (error) {
+      if (generation !== contestRunGenerationRef.current) {
+        return;
+      }
+      const status = error?.response?.status;
+      if (status === 429) {
+        setOutput(error?.response?.data?.error || "Run is busy. Please retry.");
+      } else if (status === 503) {
+        setOutput(error?.response?.data?.error || "Run service is unavailable. Please retry.");
+      } else if (status === 409) {
+        setOutput("Contest Run is available only while the contest is LIVE.");
+      } else {
+        setOutput("Error running test cases: " + (error.response?.data?.error || error.message || "Unknown error"));
+      }
+      setResults([]);
+    } finally {
+      if (generation === contestRunGenerationRef.current) {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const handleRunAll = async () => {
+    if (runLocked) {
+      return;
+    }
+    if (contestMode) {
+      await handleContestRun();
+      return;
+    }
     if (!testCases || testCases.length === 0) {
       console.warn("No test cases available!");
       setOutput("No test cases available for this problem.");
@@ -517,6 +661,9 @@ const Judge0CodeEditor = ({
 
   // Old single-run handler for normal editor
   const handleSingleRun = async () => {
+    if (customRunLocked) {
+      return;
+    }
     setIsLoading(true);
     setOutput("");
     setErrorDetails(null);
@@ -589,7 +736,14 @@ const Judge0CodeEditor = ({
   };
 
   // Helper to run a single test case (for submit)
-  const handleSubmitSolution = async (publicCases) => {
+  const contestSubmitEnabled = Boolean(contestId) && contestStatus === "LIVE";
+  const submitLocked = contestId ? !contestSubmitEnabled : executionLocked;
+
+  const handleSubmitSolution = async () => {
+    if (submitLocked) {
+      return;
+    }
+    cancelContestRunPolling();
     const submissionGeneration = ++submissionGenerationRef.current;
     pollingControllerRef.current?.abort();
     eventSourceRef.current?.close();
@@ -648,28 +802,20 @@ const Judge0CodeEditor = ({
     setErrorDetails(null);
 
     try {
-
-      const normalizeCases = (cases) => {
-        return (cases || []).map(tc => ({
-          input: tc.input,
-          expectedOutput: tc.expectedOutput ?? tc.output,
-          explanation: tc.explanation
-        }));
-      };
-
       // Create async submission job - only send identifiers and code
 
       // Create async submission job
 
-      const jobRequest = {
-        problemId: problemId,
+      const executionPayload = {
         code: sourceCode,
         language: languageNames[languageId] || "Unknown",
         languageId: languageId,
         codingDurationSeconds: codingDurationSecondsFromElapsedMs(elapsedTime)
       };
 
-      const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
+      const jobResponse = contestId
+        ? await api.contests.submit(contestId, problemId, executionPayload)
+        : await axios.post('/api/submission-jobs', { problemId, ...executionPayload }, auth.getAuthConfig());
       if (submissionGeneration !== submissionGenerationRef.current) return;
       const { jobId } = jobResponse.data;
       activeJobIdRef.current = jobId;
@@ -911,82 +1057,6 @@ const Judge0CodeEditor = ({
     setIsTimerRunning(true);
   };
 
-  // Function to save submission to backend with enhanced details
-  const saveSubmission = async (
-    result, 
-    output, 
-    runtime = null, 
-    memory = null, 
-    statusId = null,
-    stderr = '',
-    errorMessage = '',
-    passedTestCases = 0,
-    totalTestCases = 0,
-    executionDetails = null
-  ) => {
-    try {
-      const token = auth.getToken();
-      if (!token) {
-        return;
-      }
-
-      // Get problem ID from URL or props
-      const problemIdFromUrl = window.location.pathname.split("/").pop();
-      const problemIdToSave = problemId || problemIdFromUrl;
-
-      const submissionData = {
-        problemId: problemIdToSave,
-        code: sourceCode,
-        language: languageNames[languageId] || "Unknown",
-        result: result,
-        output: output,
-        runtime: runtime,
-        memory: memory,
-        statusId: statusId,
-        stderr: stderr,
-        errorMessage: errorMessage,
-        passedTestCases: passedTestCases,
-        totalTestCases: totalTestCases,
-        executionDetails: executionDetails
-      };
-
-      const response = await axios.post("/api/submissions", submissionData, auth.getAuthConfig());
-
-      setSubmissionStatus("saved");
-    } catch (error) {
-      console.error("Error saving submission:", error);
-      
-      // Handle rate limiting and submission limit errors
-      if (error.response && error.response.status === 429) {
-        const errorData = error.response.data;
-        if (errorData && errorData.error) {
-          if (errorData.error === "RATE_LIMIT_EXCEEDED") {
-            const cooldown = errorData.cooldownSeconds || 0;
-            setErrorDetails({
-              type: 'Rate Limit Exceeded',
-              message: `Please wait ${cooldown} seconds before submitting again.`,
-              details: 'This helps prevent abuse and ensures fair usage.'
-            });
-          } else if (errorData.error === "DAILY_LIMIT_EXCEEDED") {
-            setErrorDetails({
-              type: 'Daily Limit Exceeded',
-              message: `You have exceeded your daily submission limit of ${errorData.limit || 100}.`,
-              details: 'Please try again tomorrow.'
-            });
-          } else if (errorData.error === "PROBLEM_LIMIT_EXCEEDED") {
-            setErrorDetails({
-              type: 'Problem Limit Exceeded',
-              message: `You have exceeded your submission limit for this problem (${errorData.limit || 50} per day).`,
-              details: 'Please try again tomorrow or work on other problems.'
-            });
-          }
-        }
-      }
-      
-      setSubmissionStatus("error");
-    }
-  };
-
   useEffect(() => {
     setResults([]);
     setOutput("");
@@ -1054,27 +1124,6 @@ const Judge0CodeEditor = ({
       </div>
     </div>
   );
-  
-  // Get language name for syntax highlighting
-  const getLanguageName = (langId) => {
-    const langMap = {
-      50: 'c',
-      54: 'cpp',
-      62: 'java',
-      71: 'python',
-      63: 'javascript',
-      74: 'typescript',
-      60: 'go',
-      68: 'php',
-      72: 'ruby',
-      73: 'rust',
-      78: 'kotlin',
-      81: 'scala',
-      83: 'swift',
-      51: 'csharp'
-    };
-    return langMap[langId] || 'text';
-  };
 
   return (
     <div className={`max-w-4xl mx-auto mt-8 p-6 rounded-lg shadow-lg ${theme === "light" ? "bg-white text-gray-900" : "bg-gray-900 text-white"}`}>
@@ -1255,11 +1304,11 @@ const Judge0CodeEditor = ({
           <button
             onClick={handleSingleRun}
             className={`w-full py-3 text-lg font-semibold rounded-lg ${
-              isLoading
+              isLoading || customRunLocked
                 ? "bg-green-800 cursor-not-allowed"
                 : "bg-green-500 hover:bg-green-600"
             }`}
-            disabled={isLoading}
+            disabled={isLoading || customRunLocked}
           >
             {isLoading ? "Running..." : "Run Code"}
           </button>
@@ -1291,7 +1340,7 @@ const Judge0CodeEditor = ({
         <>
           <div>{/* Editor stays above */}</div>
 
-          {/* Custom input checkbox and input field */}
+          {!contestMode && (
           <div className="mt-4">
             <label className="flex items-center space-x-2 mb-3">
               <input
@@ -1315,6 +1364,7 @@ const Judge0CodeEditor = ({
               />
             )}
           </div>
+          )}
 
           
           {/* Show message if no test cases */}
@@ -1324,28 +1374,52 @@ const Judge0CodeEditor = ({
             </div>
           )}
           
+          {contestMode && !contestLive && (
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
+              Contest Run and Submit are available only while the contest is LIVE.
+            </div>
+          )}
+          {contestMode && contestLive && (
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
+              Contest Run uses public snapshot tests only. Custom input is disabled during contests.
+            </div>
+          )}
+          {executionLocked && !contestMode && (
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
+              Contest Run and Submit are not available yet. You can still edit code locally.
+            </div>
+          )}
           <div className="flex gap-2 mt-4">
             <button
               onClick={() => {
-                if (useCustomInput) {
+                if (runLocked) {
+                  return;
+                }
+                if (!contestMode && useCustomInput) {
                   handleSingleRun();
                 } else if (testCases && testCases.length > 0) {
                   handleRunAll();
-                } else {
+                } else if (!contestMode) {
                   console.warn("No test cases available, using handleSingleRun");
                   setOutput("No test cases available. Use custom input or check problem configuration.");
                   handleSingleRun();
+                } else {
+                  setOutput("No public tests available for this contest problem.");
                 }
               }}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-green-500 hover:bg-green-600 disabled:bg-green-800 disabled:cursor-not-allowed`}
-              disabled={isLoading}
+              disabled={isLoading || runLocked}
+              title={runLocked ? "Contest run is available only while LIVE" : "Run tests"}
             >
               {isLoading ? "Running..." : `Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
             </button>
             <button
               onClick={() => handleSubmitSolution(testCases || [])}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 disabled:cursor-not-allowed`}
-              disabled={isLoading}
+              disabled={isLoading || submitLocked}
+              title={submitLocked
+                ? (contestId ? "Contest submit is available only while LIVE" : "Contest submit is not available yet")
+                : "Submit"}
             >
               {isLoading ? "Submitting..." : "Submit"}
             </button>

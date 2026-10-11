@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { lazy, Suspense } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -6,8 +6,6 @@ import {
   Navigate,
 } 
 from "react-router-dom";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
 import "./App.css";
 
 // Static imports for above-the-fold components
@@ -18,7 +16,6 @@ import ErrorBoundary from "./Components/ErrorBoundary";
 import SiteFooter from "./Components/SiteFooter";
 import { useAuth, AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
-import { api } from "./apiClient";
 
 // Lazy load route-specific components
 const Judge0CodeEditor = lazy(() => import("./Components/Judge0CodeEditor"));
@@ -39,6 +36,10 @@ const UserStats = lazy(() => import("./Components/UserStats"));
 const Profile = lazy(() => import("./Components/Profile"));
 const PrivacyPage = lazy(() => import("./Components/PrivacyPage"));
 const TermsPage = lazy(() => import("./Components/TermsPage"));
+const ContestList = lazy(() => import("./Components/contests/ContestList"));
+const ContestDetail = lazy(() => import("./Components/contests/ContestDetail"));
+const ContestProblemPage = lazy(() => import("./Components/contests/ContestProblemPage"));
+const ContestForm = lazy(() => import("./Components/admin/contests/ContestForm"));
 
 // Fallback component for Suspense
 function LoadingFallback() {
@@ -157,8 +158,58 @@ function AppContent() {
           element={<Suspense fallback={<LoadingFallback />}><Profile isOpen={true} onClose={() => {}} asPage={true} /></Suspense>}
         />
         <Route
+          path="/contests"
+          element={
+            isAuthenticated ? (
+              <Suspense fallback={<LoadingFallback />}><ContestList /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/contests/:id"
+          element={
+            isAuthenticated ? (
+              <Suspense fallback={<LoadingFallback />}><ContestDetail /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/contests/:contestId/problems/:problemId"
+          element={
+            isAuthenticated ? (
+              <Suspense fallback={<LoadingFallback />}><ContestProblemPage /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
           path="/admin"
           element={<Suspense fallback={<LoadingFallback />}><AdminRoute user={user} /></Suspense>}
+        />
+        <Route
+          path="/admin/contests/new"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/contests/:id"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/batches/:id"

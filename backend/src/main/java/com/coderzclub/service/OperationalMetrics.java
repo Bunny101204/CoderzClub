@@ -92,6 +92,29 @@ public class OperationalMetrics {
     }
     public void duplicateClaim() { Counter.builder("submission.job.duplicate_claim").register(registry).increment(); }
 
+    public void contestScoringProcessed() {
+        Counter.builder("contest.scoring.processed").register(registry).increment();
+    }
+
+    public void contestFirstSolveAwarded() {
+        Counter.builder("contest.scoring.first_solve_awarded").register(registry).increment();
+    }
+
+    public void contestDuplicateSolveIgnored() {
+        Counter.builder("contest.scoring.duplicate_solve_ignored").register(registry).increment();
+    }
+
+    public void contestScoringRepair() {
+        Counter.builder("contest.scoring.repair").register(registry).increment();
+    }
+
+    public void contestLeaderboardCache(String outcome) {
+        Counter.builder("contest.leaderboard.cache")
+            .tag("outcome", bounded(outcome, java.util.Set.of("hit", "miss", "fallback")))
+            .register(registry)
+            .increment();
+    }
+
     public void outboxPublish(String transport, String outcome) {
         Counter.builder("submission.outbox.publish")
             .tag("transport", bounded(transport, OUTBOX_TRANSPORTS))

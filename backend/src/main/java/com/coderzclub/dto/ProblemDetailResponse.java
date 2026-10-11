@@ -1,6 +1,7 @@
 package com.coderzclub.dto;
 
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 
 import java.util.List;
@@ -26,6 +27,7 @@ public class ProblemDetailResponse {
     private String exampleOutput;
     private String exampleExplanation;
     private List<TestCase> publicTestCases;
+    private String availability;
 
     public ProblemDetailResponse() {}
 
@@ -57,6 +59,7 @@ public class ProblemDetailResponse {
                     return sanitized;
                 })
                 .collect(Collectors.toList());
+        this.availability = ProblemAvailability.of(problem).name();
     }
 
     public String getId() { return id; }
@@ -97,4 +100,6 @@ public class ProblemDetailResponse {
     public void setExampleExplanation(String exampleExplanation) { this.exampleExplanation = exampleExplanation; }
     public List<TestCase> getPublicTestCases() { return publicTestCases; }
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
+    public String getAvailability() { return availability; }
+    public void setAvailability(String availability) { this.availability = availability; }
 }

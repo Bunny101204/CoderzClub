@@ -1,5 +1,6 @@
 package com.coderzclub.queue;
 
+import com.coderzclub.config.ContestRunProperties;
 import com.coderzclub.config.SubmissionQueueProperties;
 import com.coderzclub.repository.SubmissionOutboxRepository;
 import com.coderzclub.service.LocalOutboxPublisher;
@@ -29,6 +30,7 @@ class QueueTransportProfileTest {
             .withBean(RabbitAdmin.class, () -> mock(RabbitAdmin.class))
             .withBean(ConnectionFactory.class, () -> mock(ConnectionFactory.class))
             .withBean(SubmissionQueueProperties.class, SubmissionQueueProperties::new)
+            .withBean(ContestRunProperties.class, ContestRunProperties::new)
             .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
             .withBean(OperationalMetrics.class, () -> new OperationalMetrics(new SimpleMeterRegistry()))
             .withUserConfiguration(
@@ -37,7 +39,11 @@ class QueueTransportProfileTest {
                 InMemorySubmissionQueuePublisher.class,
                 InMemorySubmissionQueueConsumer.class,
                 RabbitSubmissionQueuePublisher.class,
-                RabbitSubmissionQueueConsumer.class
+                RabbitSubmissionQueueConsumer.class,
+                InMemoryContestRunPublisher.class,
+                InMemoryContestRunConsumer.class,
+                RabbitContestRunPublisher.class,
+                RabbitContestRunConsumer.class
             );
     }
 
@@ -50,6 +56,9 @@ class QueueTransportProfileTest {
             assertFalse(ctx.containsBean("outboxPublisher"));
             assertFalse(ctx.containsBean("rabbitSubmissionQueuePublisher"));
             assertFalse(ctx.containsBean("rabbitSubmissionQueueConsumer"));
+            assertTrue(ctx.containsBean("inMemoryContestRunPublisher"));
+            assertFalse(ctx.containsBean("rabbitContestRunPublisher"));
+            assertFalse(ctx.containsBean("rabbitContestRunConsumer"));
         });
     }
 
@@ -68,6 +77,8 @@ class QueueTransportProfileTest {
             assertFalse(ctx.containsBean("localOutboxPublisher"));
             assertTrue(ctx.containsBean("outboxPublisher"));
             assertTrue(ctx.containsBean("rabbitSubmissionQueuePublisher"));
+            assertTrue(ctx.containsBean("rabbitContestRunPublisher"));
+            assertFalse(ctx.containsBean("inMemoryContestRunPublisher"));
         });
     }
 
@@ -77,6 +88,7 @@ class QueueTransportProfileTest {
             assertFalse(ctx.containsBean("localOutboxPublisher"));
             assertTrue(ctx.containsBean("outboxPublisher"));
             assertTrue(ctx.containsBean("rabbitSubmissionQueueConsumer"));
+            assertTrue(ctx.containsBean("rabbitContestRunConsumer"));
         });
     }
 }

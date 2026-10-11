@@ -5,6 +5,7 @@ import com.coderzclub.model.Batch;
 import com.coderzclub.model.BatchMember;
 import com.coderzclub.model.BundleAccessGrant;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.ProblemBundle;
 import com.coderzclub.model.User;
 import org.junit.jupiter.api.Test;
@@ -277,12 +278,60 @@ class BundleAccessServiceTest {
             }
             return many;
         });
+        AtomicInteger problemFinds = new AtomicInteger();
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenAnswer(inv -> {
+            problemFinds.incrementAndGet();
+            return List.of();
+        });
         List<ProblemBundle> result = new BundleAccessService(mongo).listAccessibleActiveBundles(user("u1"));
         assertEquals(40, result.size());
         assertEquals(1, memberFinds.get());
         assertEquals(0, batchFinds.get());
         assertEquals(1, grantFinds.get());
         assertEquals(1, bundleFinds.get());
+        assertEquals(1, problemFinds.get());
+    }
+
+    @Test
+    void contestOnlyProblemIsOmittedFromStudentBundleDetailsAndIds() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        ProblemBundle bundle = activeBundle("b1", "PUBLIC");
+        bundle.setProblemIds(List.of("pub", "secret"));
+        when(mongo.findById("b1", ProblemBundle.class)).thenReturn(bundle);
+        Problem visible = new Problem();
+        visible.setId("pub");
+        visible.setTitle("Visible");
+        Problem secret = new Problem();
+        secret.setId("secret");
+        secret.setTitle("Hidden");
+        secret.setAvailability(ProblemAvailability.CONTEST_ONLY);
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenReturn(List.of(visible, secret));
+
+        BundleAccessService service = new BundleAccessService(mongo);
+        ProblemBundle redacted = service.requireAccessibleBundle(user("u1"), "b1");
+        assertEquals(List.of("pub"), redacted.getProblemIds());
+
+        List<Problem> problems = service.problemsForAccessibleBundle(user("u1"), "b1");
+        assertEquals(1, problems.size());
+        assertEquals("pub", problems.get(0).getId());
+    }
+
+    @Test
+    void adminStillSeesContestOnlyBundleProblems() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        ProblemBundle bundle = activeBundle("b1", "PUBLIC");
+        bundle.setProblemIds(List.of("pub", "secret"));
+        when(mongo.findById("b1", ProblemBundle.class)).thenReturn(bundle);
+        Problem visible = new Problem();
+        visible.setId("pub");
+        Problem secret = new Problem();
+        secret.setId("secret");
+        secret.setAvailability(ProblemAvailability.CONTEST_ONLY);
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenReturn(List.of(visible, secret));
+        User admin = user("admin");
+        admin.setRole("ADMIN");
+        List<Problem> problems = new BundleAccessService(mongo).problemsForAccessibleBundle(admin, "b1");
+        assertEquals(2, problems.size());
     }
 
     @Test

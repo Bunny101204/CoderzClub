@@ -4,6 +4,7 @@ import com.coderzclub.model.Submission;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ContestScoringStatus;
 import com.coderzclub.model.UserSolvedProblem;
 import com.coderzclub.repository.SubmissionRepository;
 import com.coderzclub.repository.UserRepository;
@@ -61,6 +62,9 @@ public class SubmissionService {
     @Autowired(required = false)
     private MongoTransactionManager mongoTransactionManager;
 
+    @Autowired(required = false)
+    private ContestScoringService contestScoringService;
+
     /**
      * Create a submission record from a judged job. Idempotent on {@code job.id}:
      * at most one Submission is persisted per SubmissionJob.
@@ -74,6 +78,7 @@ public class SubmissionService {
             if (existing.isPresent()) {
                 recordDuplicateMaterialization();
                 logger.info("Reusing submission {} for job {}", existing.get().getId(), job.getId());
+                ensureContestScoring(existing.get());
                 return existing.get();
             }
 
@@ -111,22 +116,31 @@ public class SubmissionService {
                 .totalTestCases(job.getTotalTests())
                 .executionDetails(buildExecutionDetails(job, storedResults))
                 .codingDurationSeconds(job.getCodingDurationSeconds())
+                .contestId(job.getContestId())
+                .contestSubmittedAt(job.getContestSubmittedAt())
+                .contestProblemSnapshotId(job.getContestProblemSnapshotId())
+                .contestScoringStatus(isPracticeJob(job.getContestId()) ? null : ContestScoringStatus.PENDING)
                 .build();
 
             try {
                 submission = submissionRepository.save(submission);
             } catch (DuplicateKeyException duplicate) {
                 recordDuplicateMaterialization();
-                return submissionRepository.findBySubmissionJobId(job.getId()).orElseThrow(() -> duplicate);
+                Submission raced = submissionRepository.findBySubmissionJobId(job.getId()).orElseThrow(() -> duplicate);
+                ensureContestScoring(raced);
+                return raced;
             }
 
-            if ("ACCEPTED".equals(submission.getResult())) {
-                applyAcceptedSubmission(user, problem, submission);
-                userRepository.findById(user.getId()).ifPresent(leaderboardService::update);
+            if (isPracticeJob(submission)) {
+                if ("ACCEPTED".equals(submission.getResult())) {
+                    applyAcceptedSubmission(user, problem, submission);
+                    userRepository.findById(user.getId()).ifPresent(leaderboardService::update);
+                }
+                userService.updateUserStreak(user.getId());
+                userService.recordFinalSubmission(submission);
+            } else {
+                ensureContestScoring(submission);
             }
-
-            userService.updateUserStreak(user.getId());
-            userService.recordFinalSubmission(submission);
 
             logger.info("Created submission {} from job {} with result {}",
                 submission.getId(), job.getId(), job.getFinalResult());
@@ -135,6 +149,29 @@ public class SubmissionService {
             logger.error("Failed to create submission from job {}", job.getId(), e);
             Optional<Submission> raced = submissionRepository.findBySubmissionJobId(job.getId());
             return raced.orElse(null);
+        }
+    }
+
+    static boolean isPracticeJob(Submission submission) {
+        return submission == null || isPracticeJob(submission.getContestId());
+    }
+
+    static boolean isPracticeJob(String contestId) {
+        return contestId == null || contestId.isBlank();
+    }
+
+    private void ensureContestScoring(Submission submission) {
+        if (contestScoringService == null || isPracticeJob(submission)) {
+            return;
+        }
+        if (submission.getContestScoringStatus() == ContestScoringStatus.APPLIED) {
+            return;
+        }
+        try {
+            contestScoringService.apply(submission);
+        } catch (RuntimeException scoringFailure) {
+            logger.warn("Contest scoring left PENDING for submission {} job {}",
+                submission.getId(), submission.getSubmissionJobId(), scoringFailure);
         }
     }
 

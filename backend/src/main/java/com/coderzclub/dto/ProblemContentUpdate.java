@@ -25,6 +25,7 @@ public class ProblemContentUpdate {
     private Integer estimatedTime;
     private String executionMode;
     private String testcaseVersion;
+    private String availability;
 
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
@@ -64,4 +65,6 @@ public class ProblemContentUpdate {
     public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
     public String getTestcaseVersion() { return testcaseVersion; }
     public void setTestcaseVersion(String testcaseVersion) { this.testcaseVersion = testcaseVersion; }
+    public String getAvailability() { return availability; }
+    public void setAvailability(String availability) { this.availability = availability; }
 }

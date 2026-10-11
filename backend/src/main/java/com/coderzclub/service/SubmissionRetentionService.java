@@ -56,6 +56,9 @@ public class SubmissionRetentionService {
             summary.setAttemptCount(job.getAttemptCount());
             summary.setCreatedAt(job.getCreatedAt());
             summary.setCompletedAt(job.getCompletedAt());
+            summary.setContestId(job.getContestId());
+            summary.setContestSubmittedAt(job.getContestSubmittedAt());
+            summary.setContestProblemSnapshotId(job.getContestProblemSnapshotId());
             summary.setExpireAt(summaryExpiry);
             mongoTemplate.save(summary);
             archivedIds.add(job.getId());

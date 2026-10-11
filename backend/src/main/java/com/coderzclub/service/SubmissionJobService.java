@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -50,6 +51,28 @@ public class SubmissionJobService {
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests,
                                    ExecutionMode executionMode, Integer codingDurationSeconds) {
+        return createJob(userId, problemId, code, language, languageId, testcaseVersion, totalTests,
+            executionMode, codingDurationSeconds, null, null, null);
+    }
+
+    @Transactional
+    public SubmissionJob createJob(String userId, String problemId, String code, String language,
+                                   Integer languageId, String testcaseVersion, int totalTests,
+                                   ExecutionMode executionMode, Integer codingDurationSeconds,
+                                   String contestId, Instant contestSubmittedAt) {
+        return createJob(userId, problemId, code, language, languageId, testcaseVersion, totalTests,
+            executionMode, codingDurationSeconds, contestId, contestSubmittedAt, null);
+    }
+
+    /**
+     * Durable job admission. Contest fields are set only by the contest submit path.
+     */
+    @Transactional
+    public SubmissionJob createJob(String userId, String problemId, String code, String language,
+                                   Integer languageId, String testcaseVersion, int totalTests,
+                                   ExecutionMode executionMode, Integer codingDurationSeconds,
+                                   String contestId, Instant contestSubmittedAt,
+                                   String contestProblemSnapshotId) {
         SubmissionJob job = new SubmissionJob();
         job.setUserId(userId);
         job.setProblemId(problemId);
@@ -68,13 +91,17 @@ public class SubmissionJobService {
         job.setLockedBy(null);
         job.setLockedUntil(null);
         job.setHeartbeatAt(null);
+        job.setContestId(contestId);
+        job.setContestSubmittedAt(contestSubmittedAt);
+        job.setContestProblemSnapshotId(contestProblemSnapshotId);
 
         job = jobRepository.save(job);
         eventService.publish(job, SubmissionJob.JobStatus.QUEUED);
         outboxService.createJobEvent(job.getId());
 
-        logger.info("submission_job_created id={} userId={} problemId={} language={} languageId={} totalTests={} codeLength={}",
-            job.getId(), userId, problemId, language, languageId, job.getTotalTests(), code != null ? code.length() : 0);
+        logger.info("submission_job_created id={} userId={} problemId={} contestId={} language={} languageId={} totalTests={} codeLength={}",
+            job.getId(), userId, problemId, contestId, language, languageId, job.getTotalTests(),
+            code != null ? code.length() : 0);
 
         return job;
     }

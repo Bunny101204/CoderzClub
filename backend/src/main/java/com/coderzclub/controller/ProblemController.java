@@ -16,9 +16,11 @@ import com.coderzclub.service.ExecutionOutcome;
 import com.coderzclub.service.IncompatibleExecutionException;
 import com.coderzclub.service.ProblemExecutionConfigService;
 import com.coderzclub.service.ProblemContentService;
+import com.coderzclub.service.ProblemAccessService;
 import com.coderzclub.service.ProblemRunService;
 import com.coderzclub.service.RunLimitExceededException;
 import com.coderzclub.model.ExecutionMode;
+import com.coderzclub.model.ProblemAvailability;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -68,6 +70,9 @@ public class ProblemController {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private ProblemAccessService problemAccessService;
+
     @GetMapping
     public ResponseEntity<?> getAllProblems(
         @RequestParam(required = false) String difficulty,
@@ -92,6 +97,7 @@ public class ProblemController {
             }
 
             Query query = new Query();
+            problemAccessService.applyPracticeListingFilter(query, currentUser().orElse(null));
             if (difficulty != null) {
                 query.addCriteria(Criteria.where("difficulty").is(difficulty));
             }
@@ -186,7 +192,7 @@ public class ProblemController {
                         problem = problemRepository.findByNumericId(Integer.valueOf(rawId)).orElse(null);
                     } catch (NumberFormatException ignored) { }
                 }
-                if (problem != null) {
+                if (problem != null && problemAccessService.canView(currentUser().orElse(null), problem)) {
                     problem.setHiddenTestCases(null);
                     problems.add(problem);
                 }
@@ -225,6 +231,9 @@ public class ProblemController {
 
         if (problem.isEmpty()) return ResponseEntity.notFound().build();
         Problem p = problem.get();
+        if (!problemAccessService.canView(currentUser().orElse(null), p)) {
+            return ResponseEntity.notFound().build();
+        }
         // Remove hidden testcases from API response
         p.setHiddenTestCases(null);
         return ResponseEntity.ok(p);
@@ -252,6 +261,9 @@ public class ProblemController {
                 return ResponseEntity.badRequest().body(Map.of("error", "numericId must be positive"));
             }
 
+            if (problem.getAvailability() == null) {
+                problem.setAvailability(ProblemAvailability.PUBLIC);
+            }
             submissionValidator.validateProblemTestCases(problem);
             validateExecutionConfig(problem);
         } catch (IllegalArgumentException e) {
@@ -313,6 +325,7 @@ public class ProblemController {
             return ResponseEntity.badRequest().body(Map.of("error", "Problem not found"));
         }
         Problem problem = problemOpt.get();
+        problemAccessService.requirePracticeExecute(userOpt.get(), problem);
         String code = body.get("source_code") == null ? (String) body.get("code") : String.valueOf(body.get("source_code"));
         Object languageRaw = body.get("language_id") != null ? body.get("language_id") : body.get("languageId");
         Integer languageId = languageRaw == null ? null : Integer.parseInt(languageRaw.toString());

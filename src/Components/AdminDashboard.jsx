@@ -7,6 +7,8 @@ import {
   editProblemPath,
   nextPageForFilterChange
 } from "../admin/adminProblems";
+import { api } from "../apiClient";
+import ContestAdminList from "./admin/contests/ContestAdminList";
 
 const AdminDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -82,12 +84,12 @@ const AdminDashboard = () => {
       if (problemTopic && problemTopic !== '') {
         params.append('tags', problemTopic);
       }
-      const response = await fetch(`/api/problems?${params}`);
+      const response = await api.problems.getAll(Object.fromEntries(params.entries()));
       if (seq !== problemFetchSeq.current) {
         return;
       }
-      if (response.ok) {
-        const data = await response.json();
+      if (response.status >= 200 && response.status < 300) {
+        const data = response.data;
         if (seq !== problemFetchSeq.current) {
           return;
         }
@@ -206,7 +208,7 @@ const AdminDashboard = () => {
       if (!res.ok) throw new Error("Failed to delete problem");
       // Refresh the list after deletion
       fetchProblems({ silent: true });
-    } catch (err) {
+    } catch {
       alert("Error deleting problem.");
     }
   };
@@ -247,7 +249,7 @@ const AdminDashboard = () => {
       if (!res.ok) throw new Error("Failed to update bundle status");
       // Refresh the list after update
       fetchBundles();
-    } catch (err) {
+    } catch {
       alert("Error updating bundle status.");
     }
   };
@@ -272,7 +274,7 @@ const AdminDashboard = () => {
       if (!res.ok) throw new Error("Failed to delete bundle");
       // Refresh the list after deletion
       fetchBundles();
-    } catch (err) {
+    } catch {
       alert("Error deleting bundle.");
     }
   };
@@ -333,6 +335,16 @@ const AdminDashboard = () => {
             }`}
           >
             Batches ({batches.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("contests")}
+            className={`px-6 py-3 font-semibold ${
+              activeTab === "contests"
+                ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                : "app-muted hover:text-gray-900 dark:hover:text-white"
+            }`}
+          >
+            Contests
           </button>
         </div>
 
@@ -597,6 +609,10 @@ const AdminDashboard = () => {
               </div>
             )}
           </>
+        )}
+
+        {activeTab === "contests" && (
+          <ContestAdminList />
         )}
 
         {activeTab === "batches" && (

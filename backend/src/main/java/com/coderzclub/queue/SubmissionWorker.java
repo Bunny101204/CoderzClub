@@ -5,9 +5,11 @@ import com.coderzclub.config.SubmissionQueueProperties;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.SubmissionTestResult;
 import com.coderzclub.model.TestCase;
+import com.coderzclub.model.ContestProblemSnapshot;
 import com.coderzclub.model.Problem;
 import com.coderzclub.repository.SubmissionJobRepository;
 import com.coderzclub.repository.ProblemRepository;
+import com.coderzclub.service.ContestProblemSnapshotService;
 import com.coderzclub.repository.SubmissionTestResultRepository;
 import com.coderzclub.service.Judge0ExecutionService;
 import com.coderzclub.service.SubmissionJobLeaseService;
@@ -50,6 +52,9 @@ public class SubmissionWorker {
 
     @Autowired
     private ProblemRepository problemRepository;
+
+    @Autowired
+    private ContestProblemSnapshotService snapshotService;
 
     @Autowired
     private SubmissionTestResultRepository resultRepository;
@@ -163,13 +168,27 @@ public class SubmissionWorker {
         MDC.put("attemptCount", String.valueOf(job.getAttemptCount()));
 
         try {
-            Problem problem = problemRepository.findById(job.getProblemId())
-                .orElseThrow(() -> new IllegalStateException("Problem not found for submission job"));
-            List<SubmissionJob.TestCase> publicTests = convert(problem.getPublicTestCases());
-            List<SubmissionJob.TestCase> hiddenTests = convert(problem.getHiddenTestCases());
+            List<SubmissionJob.TestCase> publicTests;
+            List<SubmissionJob.TestCase> hiddenTests;
+            com.coderzclub.model.ExecutionMode executionMode = job.getExecutionMode();
+            String testcaseVersion = job.getTestcaseVersion();
+            if (job.getContestId() != null && !job.getContestId().isBlank()) {
+                ContestProblemSnapshot snapshot = snapshotService.findById(job.getContestProblemSnapshotId());
+                if (snapshot == null) {
+                    throw new IllegalStateException("Contest problem snapshot not found for submission job");
+                }
+                publicTests = convert(snapshot.getPublicTestCases());
+                hiddenTests = convert(snapshot.getHiddenTestCases());
+                executionMode = snapshot.getExecutionMode();
+                testcaseVersion = snapshot.getTestcaseVersion();
+            } else {
+                Problem problem = problemRepository.findById(job.getProblemId())
+                    .orElseThrow(() -> new IllegalStateException("Problem not found for submission job"));
+                publicTests = convert(problem.getPublicTestCases());
+                hiddenTests = convert(problem.getHiddenTestCases());
+            }
             ExecutionOutcome outcome = executionService.executeTestCases(
-                job.getCode(), job.getLanguageId(), publicTests, hiddenTests, job.getExecutionMode(),
-                job.getTestcaseVersion());
+                job.getCode(), job.getLanguageId(), publicTests, hiddenTests, executionMode, testcaseVersion);
             List<SubmissionJob.TestResult> results = outcome.getResults();
             logger.info("job_execution_strategy jobId={} configured={} used={} logicalTestcases={} providerExecutions={} fallbackReason={}",
                 jobId, outcome.getConfiguredMode(), outcome.getExecutionModeUsed(),

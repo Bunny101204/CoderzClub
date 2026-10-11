@@ -7,6 +7,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
+import com.coderzclub.service.ContestAdmissionException;
+import com.coderzclub.service.SubmissionAdmissionHttpException;
 
 import java.util.Map;
 
@@ -31,5 +33,15 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
+    }
+
+    @ExceptionHandler(ContestAdmissionException.class)
+    public ResponseEntity<Map<String, Object>> handleContestAdmission(ContestAdmissionException ex) {
+        return ResponseEntity.status(ex.getStatus()).body(Map.of("error", ex.getError()));
+    }
+
+    @ExceptionHandler(SubmissionAdmissionHttpException.class)
+    public ResponseEntity<Map<String, Object>> handleSubmissionAdmission(SubmissionAdmissionHttpException ex) {
+        return ResponseEntity.status(ex.getStatus()).body(ex.getBody());
     }
 }

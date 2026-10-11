@@ -11,7 +11,15 @@ const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => {
+    if (path === "/contests") {
+      return location.pathname === "/contests" || location.pathname.startsWith("/contests/");
+    }
+    if (path === "/admin") {
+      return location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+    }
+    return location.pathname === path;
+  };
   const navClass = (path) =>
     `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
       isActive(path)
@@ -33,6 +41,7 @@ const Header = () => {
           {isAuthenticated && (
             <nav className="hidden md:flex items-center space-x-2" aria-label="Main">
               <Link to="/" className={navClass('/')}>Problems</Link>
+              <Link to="/contests" className={navClass('/contests')}>Contests</Link>
               <Link to="/bundles" className={navClass('/bundles')}>Bundles</Link>
               <Link to="/editor" className={navClass('/editor')}>Editor</Link>
               <Link to="/leaderboard" className={navClass('/leaderboard')}>Leaderboard</Link>

@@ -4,39 +4,21 @@ import Judge0CodeEditor from "./Judge0CodeEditor";
 import ProblemSubmissionHistory from "./ProblemSubmissionHistory";
 import { BackArrowIcon } from "../icons/AppIcons.jsx";
 
-const ProblemPageNew = ({ problems }) => {
-  const { id } = useParams();
-  const [problem, setProblem] = useState(null);
-  const [loading, setLoading] = useState(true);
+export function ProblemWorkspace({
+  problem,
+  backTo = "/home",
+  backLabel = "Back to problems",
+  banner = null,
+  executionLocked = false,
+  contestId = null,
+  contestStatus = null,
+  showSubmissions = true,
+}) {
   const [leftWidth, setLeftWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const [contentTab, setContentTab] = useState("problem");
   const [submissionsOpened, setSubmissionsOpened] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-
-  useEffect(() => {
-    if (problems && problems.length > 0) {
-      const found = problems.find((p) => p.id === id);
-      setProblem(found);
-      setLoading(false);
-    } else {
-      fetchProblem();
-    }
-  }, [id, problems]);
-
-  const fetchProblem = async () => {
-    try {
-      const response = await fetch(`/api/problems/${id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setProblem(data);
-      }
-    } catch (error) {
-      console.error("Error fetching problem:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleMouseDown = (e) => {
     setIsDragging(true);
@@ -76,32 +58,6 @@ const ProblemPageNew = ({ problems }) => {
     };
   }, [isDragging]);
 
-  if (loading) {
-    return (
-      <div className="app-shell flex items-center justify-center">
-        <div className="text-xl">Loading problem...</div>
-      </div>
-    );
-  }
-
-  if (!problem) {
-    return (
-      <div className="app-shell flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-xl mb-4">Problem not found</div>
-          <Link
-            to="/home"
-            aria-label="Back to problems"
-            title="Back to problems"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg app-btn-secondary"
-          >
-            <BackArrowIcon className="h-5 w-5" />
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   const isStdinMode = problem.executionMode !== "FUNCTION_HARNESS_BATCH";
   const tabClass = (name) =>
     `px-4 py-2 font-semibold ${
@@ -120,30 +76,33 @@ const ProblemPageNew = ({ problems }) => {
           <div className="p-6 max-w-full">
             <div className="flex items-center gap-2 mb-3">
               <Link
-                to="/home"
-                aria-label="Back to problems"
-                title="Back to problems"
+                to={backTo}
+                aria-label={backLabel}
+                title={backLabel}
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg app-btn-secondary"
               >
                 <BackArrowIcon className="h-5 w-5" />
               </Link>
               <h1 className="text-3xl font-bold m-0">{problem.title}</h1>
             </div>
-            <div className="flex mb-6 border-b border-gray-200 dark:border-gray-700">
-              <button type="button" className={tabClass("problem")} onClick={() => setContentTab("problem")}>
-                Problem
-              </button>
-              <button
-                type="button"
-                className={tabClass("submissions")}
-                onClick={() => {
-                  setSubmissionsOpened(true);
-                  setContentTab("submissions");
-                }}
-              >
-                Submissions
-              </button>
-            </div>
+            {banner}
+            {showSubmissions && (
+              <div className="flex mb-6 border-b border-gray-200 dark:border-gray-700">
+                <button type="button" className={tabClass("problem")} onClick={() => setContentTab("problem")}>
+                  Problem
+                </button>
+                <button
+                  type="button"
+                  className={tabClass("submissions")}
+                  onClick={() => {
+                    setSubmissionsOpened(true);
+                    setContentTab("submissions");
+                  }}
+                >
+                  Submissions
+                </button>
+              </div>
+            )}
 
             {contentTab === "problem" && (
               <>
@@ -305,7 +264,7 @@ const ProblemPageNew = ({ problems }) => {
               </>
             )}
 
-            {submissionsOpened && (
+            {showSubmissions && submissionsOpened && (
               <div className={contentTab === "submissions" ? "" : "hidden"}>
                 <ProblemSubmissionHistory
                   problemId={problem.id}
@@ -341,6 +300,9 @@ const ProblemPageNew = ({ problems }) => {
               parameters={problem.parameters || []}
               problemId={problem.id}
               executionMode={problem.executionMode || "STDIN_STDOUT"}
+              executionLocked={executionLocked}
+              contestId={contestId}
+              contestStatus={contestStatus}
               onSubmissionSuccess={() => {
                 setHistoryRefreshKey((current) => current + 1);
               }}
@@ -350,6 +312,64 @@ const ProblemPageNew = ({ problems }) => {
       </div>
     </div>
   );
+}
+
+const ProblemPageNew = ({ problems }) => {
+  const { id } = useParams();
+  const [problem, setProblem] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (problems && problems.length > 0) {
+      const found = problems.find((p) => p.id === id);
+      setProblem(found);
+      setLoading(false);
+    } else {
+      fetchProblem();
+    }
+  }, [id, problems]);
+
+  const fetchProblem = async () => {
+    try {
+      const response = await fetch(`/api/problems/${id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setProblem(data);
+      }
+    } catch (error) {
+      console.error("Error fetching problem:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="app-shell flex items-center justify-center">
+        <div className="text-xl">Loading problem...</div>
+      </div>
+    );
+  }
+
+  if (!problem) {
+    return (
+      <div className="app-shell flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-xl mb-4">Problem not found</div>
+          <Link
+            to="/home"
+            aria-label="Back to problems"
+            title="Back to problems"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg app-btn-secondary"
+          >
+            <BackArrowIcon className="h-5 w-5" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return <ProblemWorkspace problem={problem} />;
 };
 
 export default ProblemPageNew;

@@ -1,5 +1,6 @@
 package com.coderzclub.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import jakarta.validation.constraints.Positive;
@@ -58,6 +59,12 @@ public class Problem {
     private int points; // Points awarded for solving this problem
     private int estimatedTime; // Estimated time to solve in minutes
     private String category; // ALGORITHMS, DATA_STRUCTURES, SYSTEM_DESIGN, etc.
+
+    /**
+     * Practice-bank vs contest-exclusive. Null on legacy documents means PUBLIC.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private ProblemAvailability availability;
 
     /**
      * Gets the list of parameters for the function.
@@ -166,4 +173,7 @@ public class Problem {
     
     public String getExampleExplanation() { return exampleExplanation; }
     public void setExampleExplanation(String exampleExplanation) { this.exampleExplanation = exampleExplanation; }
+
+    public ProblemAvailability getAvailability() { return availability; }
+    public void setAvailability(ProblemAvailability availability) { this.availability = availability; }
 } 

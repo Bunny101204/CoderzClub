@@ -21,6 +21,12 @@ class OperationalMetricsPhase4Test {
         metrics.ambiguousExecutionFailure("http_timeout");
         metrics.duplicateSubmissionPrevented();
         metrics.duplicateClaim();
+        metrics.contestScoringProcessed();
+        metrics.contestFirstSolveAwarded();
+        metrics.contestDuplicateSolveIgnored();
+        metrics.contestScoringRepair();
+        metrics.contestLeaderboardCache("hit");
+        metrics.contestLeaderboardCache("miss");
         metrics.heartbeatFailure();
         metrics.providerInflightIncrement();
         assertEquals(1, metrics.providerInflight());
@@ -30,5 +36,7 @@ class OperationalMetricsPhase4Test {
         assertEquals(1, registry.find("judge0.provider.timeout").counter().count());
         assertEquals(1, registry.find("judge0.execution.ambiguous").counter().count());
         assertEquals(1, registry.find("submission.materialization.duplicate_prevented").counter().count());
+        assertEquals(1, registry.find("contest.scoring.processed").counter().count());
+        assertEquals(1, registry.find("contest.leaderboard.cache").tag("outcome", "hit").counter().count());
     }
 }

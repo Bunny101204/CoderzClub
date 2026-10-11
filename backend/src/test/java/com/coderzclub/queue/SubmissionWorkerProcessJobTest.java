@@ -1,10 +1,13 @@
 package com.coderzclub.queue;
 
 import com.coderzclub.config.WorkerProperties;
+import com.coderzclub.model.ContestProblemSnapshot;
+import com.coderzclub.model.ExecutionMode;
 import com.coderzclub.model.Problem;
 import com.coderzclub.model.Submission;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.TestCase;
+import com.coderzclub.service.ContestProblemSnapshotService;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.SubmissionJobRepository;
 import com.coderzclub.repository.SubmissionTestResultRepository;
@@ -49,6 +52,7 @@ class SubmissionWorkerProcessJobTest {
     @Mock private SubmissionQueueConsumer consumer;
     @Mock private SubmissionJobRepository jobRepository;
     @Mock private ProblemRepository problemRepository;
+    @Mock private ContestProblemSnapshotService snapshotService;
     @Mock private SubmissionTestResultRepository resultRepository;
     @Mock private SubmissionJobLeaseService leaseService;
     @Mock private Judge0ExecutionService executionService;
@@ -85,6 +89,8 @@ class SubmissionWorkerProcessJobTest {
 
         assertTrue(executing.await(0, TimeUnit.MILLISECONDS));
         verify(leaseService, atLeastOnce()).heartbeat(eq("job-1"), anyString(), eq(180L));
+        verify(snapshotService, never()).findById(any());
+        verify(problemRepository).findById("problem-1");
     }
 
     @Test
@@ -112,7 +118,66 @@ class SubmissionWorkerProcessJobTest {
         verify(executionService, never()).executeTestCases(any(), any(), any(), any(), any(), any());
     }
 
-    private void stubOwnedJob() {
+    @Test
+    void contestJobExecutesSnapshotTestsNotMutableProblem() {
+        SubmissionJob job = stubOwnedJob();
+        job.setContestId("contest-1");
+        job.setContestProblemSnapshotId("snap-1");
+        job.setContestSubmittedAt(java.time.Instant.parse("2026-06-01T11:59:59.900Z"));
+        job.setExecutionMode(ExecutionMode.STANDARD_PER_CASE);
+        job.setTestcaseVersion("v1");
+        ContestProblemSnapshot snapshot = new ContestProblemSnapshot();
+        snapshot.setId("snap-1");
+        snapshot.setProblemId("problem-1");
+        snapshot.setExecutionMode(ExecutionMode.STANDARD_PER_CASE);
+        snapshot.setTestcaseVersion("v1");
+        snapshot.setPublicTestCases(List.of(new TestCase("A-in", "A-out", null)));
+        snapshot.setHiddenTestCases(List.of(new TestCase("A-hidden-in", "A-hidden-out", null)));
+        when(snapshotService.findById("snap-1")).thenReturn(snapshot);
+        Problem mutated = new Problem();
+        mutated.setId("problem-1");
+        mutated.setPublicTestCases(List.of(new TestCase("B-in", "B-out", null)));
+        mutated.setHiddenTestCases(List.of());
+        when(problemRepository.findById("problem-1")).thenReturn(Optional.of(mutated));
+        when(executionService.executeTestCases(any(), any(), any(), any(), any(), any()))
+            .thenReturn(acceptedOutcome());
+        when(leaseService.isOwned(anyString(), anyString())).thenReturn(true);
+        when(leaseService.updateProgressIfOwned(anyString(), anyString(), anyInt())).thenReturn(true);
+        when(leaseService.persistJudgementIfOwned(anyString(), anyString(), any())).thenReturn(true);
+        when(submissionService.createSubmissionFromJob(any())).thenReturn(
+            Submission.builder().id("sub-1").contestId("contest-1").contestProblemSnapshotId("snap-1").build());
+        when(leaseService.completeIfOwned(anyString(), anyString(), any())).thenReturn(true);
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.ACK, worker.processJob("job-1"));
+
+        org.mockito.ArgumentCaptor<List<SubmissionJob.TestCase>> publicTests =
+            org.mockito.ArgumentCaptor.forClass(List.class);
+        org.mockito.ArgumentCaptor<List<SubmissionJob.TestCase>> hiddenTests =
+            org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(executionService).executeTestCases(any(), any(), publicTests.capture(), hiddenTests.capture(),
+            eq(ExecutionMode.STANDARD_PER_CASE), eq("v1"));
+        assertEquals("A-in", publicTests.getValue().get(0).getInput());
+        assertEquals("A-out", publicTests.getValue().get(0).getExpectedOutput());
+        assertEquals("A-hidden-in", hiddenTests.getValue().get(0).getInput());
+        verify(problemRepository, never()).findById("problem-1");
+    }
+
+    @Test
+    void missingContestSnapshotDoesNotFallBackToCurrentProblem() {
+        SubmissionJob job = stubOwnedJob();
+        job.setContestId("contest-1");
+        job.setContestProblemSnapshotId("snap-missing");
+        job.setMaxAttempts(1);
+        when(snapshotService.findById("snap-missing")).thenReturn(null);
+        when(leaseService.retryIfOwned(anyString(), anyString(), anyString(), any())).thenReturn(true);
+
+        worker.processJob("job-1");
+
+        verify(executionService, never()).executeTestCases(any(), any(), any(), any(), any(), any());
+        verify(problemRepository, never()).findById(anyString());
+    }
+
+    private SubmissionJob stubOwnedJob() {
         SubmissionJob job = new SubmissionJob();
         job.setId("job-1");
         job.setUserId("user-1");
@@ -127,6 +192,7 @@ class SubmissionWorkerProcessJobTest {
         problem.setHiddenTestCases(List.of());
         when(problemRepository.findById("problem-1")).thenReturn(Optional.of(problem));
         when(leaseService.heartbeat(anyString(), anyString(), anyLong())).thenReturn(true);
+        return job;
     }
 
     private static ExecutionOutcome acceptedOutcome() {

@@ -3,6 +3,7 @@ package com.coderzclub.service;
 import com.coderzclub.dto.ProblemContentUpdate;
 import com.coderzclub.model.ExecutionMode;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +28,29 @@ class ProblemContentServiceTest {
         assertEquals("secret", problem.getHiddenTestCases().get(0).getInput());
         assertEquals(ExecutionMode.STANDARD_PER_CASE, problem.getExecutionMode());
         assertEquals("Keep me", problem.getCategory());
+    }
+
+    @Test
+    void omittedAvailabilityIsPreserved() {
+        Problem problem = seeded();
+        problem.setAvailability(ProblemAvailability.CONTEST_ONLY);
+        ProblemContentUpdate update = new ProblemContentUpdate();
+        update.setTitle("New title");
+        service.apply(problem, update);
+        assertEquals(ProblemAvailability.CONTEST_ONLY, problem.getAvailability());
+    }
+
+    @Test
+    void availabilityCanBeSetAndInvalidValuesAreRejected() {
+        Problem problem = seeded();
+        ProblemContentUpdate update = new ProblemContentUpdate();
+        update.setAvailability("CONTEST_ONLY");
+        service.apply(problem, update);
+        assertEquals(ProblemAvailability.CONTEST_ONLY, problem.getAvailability());
+        ProblemContentUpdate invalid = new ProblemContentUpdate();
+        invalid.setAvailability("HIDDEN");
+        assertThrows(IllegalArgumentException.class, () -> service.apply(problem, invalid));
+        assertEquals(ProblemAvailability.CONTEST_ONLY, problem.getAvailability());
     }
 
     @Test

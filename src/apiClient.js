@@ -186,6 +186,13 @@ export const api = {
   problems: {
     getAll: (params) => apiClient.get('/api/problems', { params }),
     getById: (id) => apiClient.get(`/api/problems/${id}`),
+    getByIds: (ids) => {
+      const params = new URLSearchParams();
+      (ids || []).forEach((id) => {
+        if (id) params.append('ids', id);
+      });
+      return apiClient.get('/api/problems/by-ids', { params });
+    },
     getAdminById: (id) => apiClient.get(`/api/problems/${id}/admin`),
     create: (problem) => apiClient.post('/api/problems', problem),
     updateContent: (id, problem) => apiClient.patch(`/api/problems/${id}/content`, problem),
@@ -229,6 +236,76 @@ export const api = {
   judge0: {
     execute: (payload) => apiClient.post('/api/judge0/execute', payload),
   },
+
+  adminBatches: {
+    list: (params) => apiClient.get('/api/admin/batches', { params }),
+    get: (id) => apiClient.get(`/api/admin/batches/${id}`),
+  },
+
+  adminContests: {
+    list: (params) => apiClient.get('/api/admin/contests', { params }),
+    get: (id) => apiClient.get(`/api/admin/contests/${id}`),
+    create: (body) => apiClient.post('/api/admin/contests', body),
+    update: (id, body) => apiClient.patch(`/api/admin/contests/${id}`, body),
+    publish: (id) => apiClient.post(`/api/admin/contests/${id}/publish`),
+    unpublish: (id) => apiClient.post(`/api/admin/contests/${id}/unpublish`),
+    delete: (id) => apiClient.delete(`/api/admin/contests/${id}`),
+  },
+
+  contests: {
+    list: (params) => apiClient.get('/api/contests', { params }),
+    get: (id) => apiClient.get(`/api/contests/${id}`),
+    getProblem: (contestId, problemId) => apiClient.get(
+      `/api/contests/${contestId}/problems/${problemId}`
+    ),
+    getLeaderboard: (contestId, params) => apiClient.get(
+      `/api/contests/${contestId}/leaderboard`,
+      { params }
+    ),
+    submit: (contestId, problemId, payload) => apiClient.post(
+      `/api/contests/${contestId}/problems/${problemId}/submission-jobs`,
+      payload
+    ),
+    run: (contestId, problemId, payload) => apiClient.post(
+      `/api/contests/${contestId}/problems/${problemId}/runs`,
+      payload
+    ),
+    getRun: (runId) => apiClient.get(`/api/contest-runs/${runId}`),
+  },
 };
+
+function isSafeBusinessMessage(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const text = value.trim();
+  if (!text) {
+    return false;
+  }
+  if (text.includes("\n") || text.includes("\t") || text.length > 300) {
+    return false;
+  }
+  if (/\bjava\.|Exception\b|\bat com\./.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+export function apiErrorMessage(error, fallback = "Request failed") {
+  const data = error?.response?.data;
+  if (isSafeBusinessMessage(data)) {
+    return data.trim();
+  }
+  if (isSafeBusinessMessage(data?.error)) {
+    return data.error.trim();
+  }
+  if (isSafeBusinessMessage(data?.message)) {
+    return data.message.trim();
+  }
+  if (!error?.response && isSafeBusinessMessage(error?.message) && !/^request failed with status code/i.test(error.message)) {
+    return error.message.trim();
+  }
+  return fallback;
+}
 
 export default apiClient;

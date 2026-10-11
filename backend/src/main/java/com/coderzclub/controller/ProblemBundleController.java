@@ -58,9 +58,11 @@ public class ProblemBundleController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ProblemBundle> getBundleById(@PathVariable String id) {
-        ProblemBundle bundle = bundleAccessService.requireAccessibleBundle(currentUser().orElse(null), id);
+        User viewer = currentUser().orElse(null);
+        ProblemBundle bundle = bundleAccessService.requireAccessibleBundle(viewer, id);
         ProblemBundle normalized = problemBundleService.getBundleById(id);
-        return ResponseEntity.ok(normalized != null ? normalized : bundle);
+        ProblemBundle response = normalized != null ? normalized : bundle;
+        return ResponseEntity.ok(bundleAccessService.redactContestOnlyProblemIds(viewer, response));
     }
 
     @GetMapping("/{id}/problems")

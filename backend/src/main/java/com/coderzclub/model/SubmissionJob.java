@@ -6,6 +6,8 @@ import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.coderzclub.service.CodingDuration;
+import org.springframework.data.mongodb.core.mapping.Field;
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +62,16 @@ public class SubmissionJob {
     private Integer completedTests = 0;
     private Integer totalTests = 0;
     private String submissionId;
+
+    /** Canonical contest id when admitted via the contest submit endpoint; omitted for practice. */
+    @Field(write = Field.Write.NON_NULL)
+    private String contestId;
+    /** Server Clock instant captured once at contest LIVE admission; omitted for practice. */
+    @Field(write = Field.Write.NON_NULL)
+    private Instant contestSubmittedAt;
+    /** Immutable contest problem snapshot judged for this job; omitted for practice. */
+    @Field(write = Field.Write.NON_NULL)
+    private String contestProblemSnapshotId;
 
     // For observability
     private Map<String, Object> metadata;
@@ -205,6 +217,19 @@ public class SubmissionJob {
 
     public String getSubmissionId() { return submissionId; }
     public void setSubmissionId(String submissionId) { this.submissionId = submissionId; }
+
+    public String getContestId() { return contestId; }
+    public void setContestId(String contestId) { this.contestId = contestId; }
+
+    public Instant getContestSubmittedAt() { return contestSubmittedAt; }
+    public void setContestSubmittedAt(Instant contestSubmittedAt) {
+        this.contestSubmittedAt = contestSubmittedAt;
+    }
+
+    public String getContestProblemSnapshotId() { return contestProblemSnapshotId; }
+    public void setContestProblemSnapshotId(String contestProblemSnapshotId) {
+        this.contestProblemSnapshotId = contestProblemSnapshotId;
+    }
 
     public String getLockedBy() { return lockedBy; }
     public void setLockedBy(String lockedBy) { this.lockedBy = lockedBy; }

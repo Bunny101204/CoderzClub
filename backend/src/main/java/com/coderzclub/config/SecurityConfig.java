@@ -74,6 +74,8 @@ public class SecurityConfig {
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/submissions/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/api/contests", "/api/contests/**").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/api/contest-runs", "/api/contest-runs/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )

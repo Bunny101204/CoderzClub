@@ -4,6 +4,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.time.Instant;
 import java.util.Date;
 
 @Document(collection = "submission_job_summaries")
@@ -20,6 +21,9 @@ public class SubmissionJobSummary {
     private Integer attemptCount;
     private Date createdAt;
     private Date completedAt;
+    private String contestId;
+    private Instant contestSubmittedAt;
+    private String contestProblemSnapshotId;
     @Indexed(expireAfter = "0")
     private Date expireAt;
 
@@ -49,4 +53,14 @@ public class SubmissionJobSummary {
     public void setCompletedAt(Date value) { completedAt = value; }
     public Date getExpireAt() { return expireAt; }
     public void setExpireAt(Date value) { expireAt = value; }
+    public String getContestId() { return contestId; }
+    public void setContestId(String contestId) { this.contestId = contestId; }
+    public Instant getContestSubmittedAt() { return contestSubmittedAt; }
+    public void setContestSubmittedAt(Instant contestSubmittedAt) {
+        this.contestSubmittedAt = contestSubmittedAt;
+    }
+    public String getContestProblemSnapshotId() { return contestProblemSnapshotId; }
+    public void setContestProblemSnapshotId(String contestProblemSnapshotId) {
+        this.contestProblemSnapshotId = contestProblemSnapshotId;
+    }
 }

@@ -10,6 +10,7 @@ import com.coderzclub.model.Problem;
 import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionValidationService;
+import com.coderzclub.service.ProblemAccessService;
 import com.coderzclub.service.UserProgressService;
 import com.coderzclub.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,9 @@ public class SubmissionController {
     @Autowired
     private UserProgressService userProgressService;
 
+    @Autowired
+    private ProblemAccessService problemAccessService;
+
     @PostMapping
     public ResponseEntity<?> submitSolution(@RequestBody SubmissionRequest request) {
         try {
@@ -70,6 +74,7 @@ public class SubmissionController {
             }
             
             Problem problem = problemOpt.get();
+            problemAccessService.requirePracticeExecute(user, problem);
             
             SubmissionLimitDecision decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), problem.getId());
             if (!decision.isAllowed()) {
@@ -142,6 +147,8 @@ public class SubmissionController {
             
             return ResponseEntity.ok(submission);
             
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error saving submission: " + e.getMessage());
         }

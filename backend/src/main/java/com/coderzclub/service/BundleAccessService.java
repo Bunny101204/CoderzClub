@@ -4,6 +4,7 @@ import com.coderzclub.model.Batch;
 import com.coderzclub.model.BatchMember;
 import com.coderzclub.model.BundleAccessGrant;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.ProblemBundle;
 import com.coderzclub.model.User;
 import org.springframework.dao.DuplicateKeyException;
@@ -75,7 +76,7 @@ public class BundleAccessService {
         if (bundle == null || !canAccess(user, bundle)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Bundle not found");
         }
-        return bundle;
+        return redactContestOnlyProblemIds(user, bundle);
     }
 
     public List<ProblemBundle> listAccessibleActiveBundles(User user) {
@@ -97,7 +98,9 @@ public class BundleAccessService {
             access
         ));
         query.with(Sort.by(Sort.Direction.DESC, "createdAt"));
-        return mongoTemplate.find(query, ProblemBundle.class);
+        List<ProblemBundle> bundles = mongoTemplate.find(query, ProblemBundle.class);
+        redactContestOnlyProblemIds(user, bundles);
+        return bundles;
     }
 
     public Set<String> grantedRestrictedBundleIds(String userId) {
@@ -253,13 +256,50 @@ public class BundleAccessService {
         List<Problem> found = mongoTemplate.find(Query.query(Criteria.where("_id").in(ids)), Problem.class);
         Map<String, Problem> byId = found.stream().collect(Collectors.toMap(Problem::getId, p -> p, (a, b) -> a));
         List<Problem> ordered = new ArrayList<>();
+        boolean admin = isAdmin(user);
         for (String id : ids) {
             Problem problem = byId.get(id);
-            if (problem != null) {
+            if (problem != null && (admin || ProblemAvailability.isPublic(problem))) {
                 ordered.add(problem);
             }
         }
         return ordered;
+    }
+
+    public ProblemBundle redactContestOnlyProblemIds(User user, ProblemBundle bundle) {
+        if (bundle == null) {
+            return null;
+        }
+        redactContestOnlyProblemIds(user, List.of(bundle));
+        return bundle;
+    }
+
+    private void redactContestOnlyProblemIds(User user, List<ProblemBundle> bundles) {
+        if (isAdmin(user) || bundles == null || bundles.isEmpty()) {
+            return;
+        }
+        Set<String> allIds = new HashSet<>();
+        for (ProblemBundle bundle : bundles) {
+            if (bundle.getProblemIds() != null) {
+                allIds.addAll(bundle.getProblemIds());
+            }
+        }
+        if (allIds.isEmpty()) {
+            return;
+        }
+        List<Problem> found = mongoTemplate.find(Query.query(Criteria.where("_id").in(allIds)), Problem.class);
+        Set<String> publicIds = found.stream()
+            .filter(ProblemAvailability::isPublic)
+            .map(Problem::getId)
+            .collect(Collectors.toSet());
+        for (ProblemBundle bundle : bundles) {
+            if (bundle.getProblemIds() == null) {
+                continue;
+            }
+            List<String> visible = bundle.getProblemIds().stream().filter(publicIds::contains).toList();
+            bundle.setProblemIds(visible);
+            bundle.setTotalProblems(visible.size());
+        }
     }
 
     private ProblemBundle requireBundle(String bundleId) {
