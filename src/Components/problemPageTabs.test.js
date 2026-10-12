@@ -27,17 +27,47 @@ test("history is not fetched until the Submissions tab is opened", () => {
   assert.equal(page.includes("<ProblemSubmissionHistory") && page.includes("enabled={contentTab === \"submissions\"}"), true);
 });
 
+function sliceBetween(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.ok(start >= 0, startMarker);
+  assert.ok(end > start, endMarker);
+  return source.slice(start, end);
+}
+
 test("inline history is not rendered inside the Problem tab", () => {
-  assert.doesNotMatch(page, /contentTab === "problem"[\s\S]*ProblemSubmissionHistory/);
+  const problemTab = sliceBetween(
+    page,
+    '{contentTab === "problem" && (',
+    "{showSubmissions && submissionsOpened && ("
+  );
+  assert.equal(problemTab.includes("ProblemSubmissionHistory"), false);
+  const submissionsPanel = sliceBetween(
+    page,
+    "{showSubmissions && submissionsOpened && (",
+    "<Judge0CodeEditor"
+  );
+  assert.match(submissionsPanel, /<ProblemSubmissionHistory/);
+  assert.match(submissionsPanel, /enabled=\{contentTab === "submissions"\}/);
 });
 
 test("editor stays mounted while switching tabs", () => {
-  const editorIndex = page.indexOf("<Judge0CodeEditor");
-  const tabIndex = page.indexOf("contentTab === \"submissions\"");
-  assert.ok(editorIndex > 0);
-  assert.ok(tabIndex > 0);
-  assert.match(page, /hidden/);
-  assert.doesNotMatch(page, /contentTab === "problem"[\s\S]*Judge0CodeEditor/);
+  const problemTab = sliceBetween(
+    page,
+    '{contentTab === "problem" && (',
+    "{showSubmissions && submissionsOpened && ("
+  );
+  const submissionsPanel = sliceBetween(
+    page,
+    "{showSubmissions && submissionsOpened && (",
+    "<Judge0CodeEditor"
+  );
+  assert.equal(problemTab.includes("Judge0CodeEditor"), false);
+  assert.equal(submissionsPanel.includes("<Judge0CodeEditor"), false);
+  assert.match(submissionsPanel, /contentTab === "submissions" \? "" : "hidden"/);
+  const editorAt = page.indexOf("<Judge0CodeEditor");
+  assert.ok(editorAt > page.indexOf("{showSubmissions && submissionsOpened && ("));
+  assert.doesNotMatch(page.slice(editorAt - 180, editorAt), /contentTab ===/);
 });
 
 test("compact back arrow sits before the title", () => {

@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { formatCodingDuration } from "../execution/codingDuration.js";
-
-function formatMemory(bytes) {
-  if (bytes == null) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
+import {
+  formatSubmissionMemory,
+  formatSubmissionRuntime,
+  formatSubmissionTimestamp,
+} from "../execution/submissionMetrics.js";
 
 function verdictClass(verdict) {
   if (verdict === "ACCEPTED") return "text-green-700 dark:text-green-400";
@@ -74,40 +72,25 @@ const ProblemSubmissionHistory = ({ problemId, numericId, enabled = true, refres
         <div className="app-muted text-sm">No submissions yet.</div>
       )}
       {submissions.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead>
-              <tr className="app-muted">
-                <th className="py-2 pr-3">When</th>
-                <th className="py-2 pr-3">Language</th>
-                <th className="py-2 pr-3">Verdict</th>
-                <th className="py-2 pr-3">Runtime</th>
-                <th className="py-2 pr-3">Coding time</th>
-                <th className="py-2 pr-3">Memory</th>
-              </tr>
-            </thead>
-            <tbody>
-              {submissions.map((submission) => {
-                const verdict = submission.result || submission.verdict || "UNKNOWN";
-                return (
-                  <tr
-                    key={submission.id}
-                    className="border-t border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900/60"
-                    onClick={() => setSelected(submission)}
-                  >
-                    <td className="py-2 pr-3">
-                      {submission.createdAt ? new Date(submission.createdAt).toLocaleString() : "—"}
-                    </td>
-                    <td className="py-2 pr-3">{submission.language || "—"}</td>
-                    <td className={`py-2 pr-3 font-semibold ${verdictClass(verdict)}`}>{verdict}</td>
-                    <td className="py-2 pr-3">{submission.runtime != null ? `${submission.runtime} ms` : "—"}</td>
-                    <td className="py-2 pr-3">{formatCodingDuration(submission.codingDurationSeconds)}</td>
-                    <td className="py-2 pr-3">{formatMemory(submission.memory)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="text-sm">
+          {submissions.map((submission) => {
+            const verdict = submission.result || submission.verdict || "UNKNOWN";
+            return (
+              <button
+                key={submission.id}
+                type="button"
+                className="block w-full text-left border-t border-gray-200 dark:border-gray-700 py-2 hover:bg-gray-100 dark:hover:bg-gray-900/60"
+                onClick={() => setSelected(submission)}
+              >
+                <div className={`font-semibold ${verdictClass(verdict)}`}>{verdict}</div>
+                <div>{submission.language || "—"}</div>
+                <div>Runtime: {formatSubmissionRuntime(submission.runtime)}</div>
+                <div>Memory: {formatSubmissionMemory(submission.memory)}</div>
+                <div>Submitted: {formatSubmissionTimestamp(submission.createdAt)}</div>
+                <div className="app-muted">Coding time: {formatCodingDuration(submission.codingDurationSeconds)}</div>
+              </button>
+            );
+          })}
         </div>
       )}
       {hasNext && (
