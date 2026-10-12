@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "contest.run")
 public class ContestRunProperties {
     private boolean enabled = true;
+    /** Mongo TTL for the ephemeral run document. This is not the queue-age execution cutoff. */
     private int jobTtlMinutes = 45;
     private long leaseDurationSeconds = 180;
     private int maxAttempts = 2;
@@ -64,6 +65,10 @@ public class ContestRunProperties {
         private int maxLength = 200;
         private int maxDepth = 200;
         private int admissionMaxDepth = 50;
+        /**
+         * Advisory admission cutoff and the worker's queue-age cutoff, both measured from
+         * the original {@code ContestRunJob.createdAt}. Not the Mongo TTL.
+         */
         private long admissionMaxOldestAgeSeconds = 90;
         private long retryDelayMs = 5000L;
 

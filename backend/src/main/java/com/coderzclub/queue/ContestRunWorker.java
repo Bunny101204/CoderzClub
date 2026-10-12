@@ -20,6 +20,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -35,9 +36,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Profile("worker")
 public class ContestRunWorker {
     private static final Logger logger = LoggerFactory.getLogger(ContestRunWorker.class);
+    static final String RUN_EXPIRED = "RUN_EXPIRED";
+    static final String RUN_EXPIRED_MESSAGE = "Run waited too long. Please run again.";
 
     private final ContestRunConsumer consumer;
     private final ContestRunProperties properties;
+    private final Clock clock;
     private final MongoTemplate mongoTemplate;
     private final ContestRunLeaseService leaseService;
     private final ContestProblemSnapshotService snapshotService;
@@ -49,6 +53,7 @@ public class ContestRunWorker {
     public ContestRunWorker(
         ContestRunConsumer consumer,
         ContestRunProperties properties,
+        Clock clock,
         MongoTemplate mongoTemplate,
         ContestRunLeaseService leaseService,
         ContestProblemSnapshotService snapshotService,
@@ -57,6 +62,7 @@ public class ContestRunWorker {
     ) {
         this.consumer = consumer;
         this.properties = properties;
+        this.clock = clock;
         this.mongoTemplate = mongoTemplate;
         this.leaseService = leaseService;
         this.snapshotService = snapshotService;
@@ -100,7 +106,40 @@ public class ContestRunWorker {
         if (existing.isTerminal()) {
             return SubmissionQueueConsumer.MessageDisposition.ACK;
         }
+        if (queueExpired(existing)) {
+            return expireWaitingRun(runId);
+        }
         return process(runId);
+    }
+
+    /**
+     * Queue-age expiry for a run that is still waiting. A live execution lease is left alone.
+     */
+    private SubmissionQueueConsumer.MessageDisposition expireWaitingRun(String runId) {
+        if (leaseService.failIfQueueExpired(runId, RUN_EXPIRED, RUN_EXPIRED_MESSAGE)) {
+            metrics.failed("queue_expired");
+            logger.info("contest_run_queue_expired runId={}", runId);
+            return SubmissionQueueConsumer.MessageDisposition.ACK;
+        }
+        ContestRunJob current = mongoTemplate.findById(runId, ContestRunJob.class);
+        if (current == null || current.isTerminal()) {
+            return SubmissionQueueConsumer.MessageDisposition.ACK;
+        }
+        if (current.getStatus() == ContestRunJob.Status.QUEUED) {
+            logger.warn("contest_run_queue_expire_retry runId={}", runId);
+            return SubmissionQueueConsumer.MessageDisposition.RETRY;
+        }
+        logger.info("contest_run_queue_age_elapsed_while_running runId={}", runId);
+        return SubmissionQueueConsumer.MessageDisposition.ACK;
+    }
+
+    private boolean queueExpired(ContestRunJob job) {
+        if (job.getCreatedAt() == null) {
+            return false;
+        }
+        long maxAgeMillis = properties.getQueue().getAdmissionMaxOldestAgeSeconds() * 1000L;
+        long ageMillis = clock.millis() - job.getCreatedAt().getTime();
+        return ageMillis > maxAgeMillis;
     }
 
     SubmissionQueueConsumer.MessageDisposition process(String runId) {
@@ -173,11 +212,15 @@ public class ContestRunWorker {
             int attempts = job.getAttemptCount() == null ? 1 : job.getAttemptCount();
             int max = job.getMaxAttempts() == null ? properties.getMaxAttempts() : job.getMaxAttempts();
             if (attempts < max) {
+                if (!leaseService.releaseToQueuedIfOwned(runId, workerId)) {
+                    logger.warn("contest_run_retry_not_owned attempt={}", attempts);
+                    return SubmissionQueueConsumer.MessageDisposition.ACK;
+                }
                 logger.warn("contest_run_retryable_failure attempt={}", attempts);
                 return SubmissionQueueConsumer.MessageDisposition.RETRY;
             }
             leaseService.failIfOwned(runId, workerId, "EXECUTION_FAILED", "Run failed");
-            metrics.failed("EXECUTION_FAILED");
+            metrics.failed("max_attempts");
             return SubmissionQueueConsumer.MessageDisposition.ACK;
         } finally {
             if (heartbeat != null) {
@@ -192,6 +235,13 @@ public class ContestRunWorker {
             return;
         }
         for (ContestRunJob job : leaseService.findExpiredRunning(25)) {
+            if (queueExpired(job)) {
+                if (leaseService.failIfQueueExpired(job.getId(), RUN_EXPIRED, RUN_EXPIRED_MESSAGE)) {
+                    metrics.failed("queue_expired");
+                    logger.info("contest_run_queue_expired runId={}", job.getId());
+                }
+                continue;
+            }
             int attempts = job.getAttemptCount() == null ? 0 : job.getAttemptCount();
             int max = job.getMaxAttempts() == null ? properties.getMaxAttempts() : job.getMaxAttempts();
             if (attempts >= max) {

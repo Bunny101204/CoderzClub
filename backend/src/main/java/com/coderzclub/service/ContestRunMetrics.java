@@ -17,6 +17,11 @@ public class ContestRunMetrics {
         "NO_PUBLIC_TESTS",
         "QUEUE_DEPTH",
         "QUEUE_AGE",
+        "queue_depth",
+        "queue_age",
+        "queue_capacity",
+        "broker_unavailable",
+        "rate_limit",
         "QUEUE_UNAVAILABLE",
         "DISABLED",
         "COOLDOWN",
@@ -27,7 +32,10 @@ public class ContestRunMetrics {
         "INCOMPATIBLE",
         "SNAPSHOT_MISSING",
         "LEASE_EXPIRED",
-        "EXECUTION_FAILED"
+        "EXECUTION_FAILED",
+        "queue_expired",
+        "execution",
+        "max_attempts"
     );
 
     private final MeterRegistry registry;

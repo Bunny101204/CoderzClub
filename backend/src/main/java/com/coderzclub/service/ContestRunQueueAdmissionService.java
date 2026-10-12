@@ -25,6 +25,12 @@ public class ContestRunQueueAdmissionService {
         this.properties = properties;
     }
 
+    /**
+     * Advisory pre-publish check. Depth is a separate read — the Rabbit management/passive
+     * declare count when available, otherwise a Mongo count of QUEUED and RUNNING jobs —
+     * and it is not atomic with publish. Several API instances can all observe depth below
+     * the limit and publish. {@code x-max-length} with {@code reject-publish} is the hard bound.
+     */
     public Admission check() {
         if (!properties.isEnabled()) {
             return new Admission(false, -1, -1, "DISABLED");

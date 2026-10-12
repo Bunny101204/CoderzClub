@@ -7,6 +7,7 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.service.ContestAdmissionException;
 import com.coderzclub.service.ContestRunAdmissionService;
 import com.coderzclub.service.ContestRunQueryService;
+import com.coderzclub.service.SubmissionAdmissionHttpException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -114,6 +117,40 @@ class ContestRunControllerTest {
         verify(admissionService).admit(eq(alice), eq("c1"), eq("p1"), captor.capture());
         assertEquals("print(1)", captor.getValue().getCode());
         assertEquals(71, captor.getValue().getLanguageId());
+    }
+
+    @Test
+    void capacityRejectionIs429WithoutBrokerText() throws Exception {
+        User alice = user("u1", "alice");
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(alice));
+        when(admissionService.admit(eq(alice), eq("c1"), eq("p1"), any()))
+            .thenThrow(new SubmissionAdmissionHttpException(HttpStatus.TOO_MANY_REQUESTS, Map.of(
+                "error", "Run is busy. Please retry.",
+                "reason", "QUEUE_CAPACITY"
+            )));
+        mockMvc.perform(post("/api/contests/c1/problems/p1/runs")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isTooManyRequests())
+            .andExpect(jsonPath("$.error").value("Run is busy. Please retry."))
+            .andExpect(jsonPath("$.reason").value("QUEUE_CAPACITY"));
+    }
+
+    @Test
+    void brokerUnavailableIs503WithoutBrokerText() throws Exception {
+        User alice = user("u1", "alice");
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(alice));
+        when(admissionService.admit(eq(alice), eq("c1"), eq("p1"), any()))
+            .thenThrow(new SubmissionAdmissionHttpException(HttpStatus.SERVICE_UNAVAILABLE, Map.of(
+                "error", "Run service is unavailable. Please retry.",
+                "reason", "BROKER_UNAVAILABLE"
+            )));
+        mockMvc.perform(post("/api/contests/c1/problems/p1/runs")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value("Run service is unavailable. Please retry."))
+            .andExpect(jsonPath("$.reason").value("BROKER_UNAVAILABLE"));
     }
 
     @Test

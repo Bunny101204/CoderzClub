@@ -38,6 +38,10 @@ public class ContestRunJob {
     private Integer completedTests;
     private Integer totalTests;
     private List<PublicTestResult> publicResults = new ArrayList<>();
+    /**
+     * Mongo TTL deletion time. Queue max age decides whether a waiting run is still worth
+     * executing; this field only removes the ephemeral document later.
+     */
     @Indexed(expireAfter = "0")
     private Date expiresAt;
 

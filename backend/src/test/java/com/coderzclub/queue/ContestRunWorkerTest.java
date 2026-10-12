@@ -17,6 +17,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,10 +34,13 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ContestRunWorkerTest {
+    private static final Instant T0 = Instant.parse("2026-06-01T14:00:00Z");
+
     private ContestRunConsumer consumer;
     private MongoTemplate mongo;
     private ContestRunLeaseService leaseService;
@@ -47,9 +55,16 @@ class ContestRunWorkerTest {
         leaseService = mock(ContestRunLeaseService.class);
         snapshotService = mock(ContestProblemSnapshotService.class);
         executionService = mock(Judge0ExecutionService.class);
-        worker = new ContestRunWorker(
+        worker = workerWith(Clock.systemUTC());
+    }
+
+    private ContestRunWorker workerWith(Clock clock) {
+        ContestRunProperties properties = new ContestRunProperties();
+        properties.getQueue().setAdmissionMaxOldestAgeSeconds(90);
+        return new ContestRunWorker(
             consumer,
-            new ContestRunProperties(),
+            properties,
+            clock,
             mongo,
             leaseService,
             snapshotService,
@@ -125,6 +140,151 @@ class ContestRunWorkerTest {
     }
 
     @Test
+    void staleQueuedRunExpiresWithoutJudge0() {
+        MutableClock clock = new MutableClock(T0.plusSeconds(91));
+        worker = workerWith(clock);
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        when(mongo.findById("run-1", ContestRunJob.class)).thenReturn(job);
+        when(leaseService.failIfQueueExpired("run-1", ContestRunWorker.RUN_EXPIRED, ContestRunWorker.RUN_EXPIRED_MESSAGE))
+            .thenReturn(true);
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.ACK, worker.handleMessage("run-1"));
+
+        verify(executionService, never()).executeTestCases(any(), any(), any(), any(), any(), any());
+        verify(leaseService, never()).claim(any(), any());
+        verify(leaseService).failIfQueueExpired(
+            "run-1", ContestRunWorker.RUN_EXPIRED, ContestRunWorker.RUN_EXPIRED_MESSAGE);
+        assertEquals(Date.from(T0), job.getCreatedAt());
+    }
+
+    @Test
+    void freshQueuedRunExecutesSnapshot() {
+        worker = workerWith(new MutableClock(T0.plusSeconds(30)));
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        when(mongo.findById("run-1", ContestRunJob.class)).thenReturn(job);
+        when(leaseService.claim(eq("run-1"), anyString())).thenReturn(Optional.of(running(job)));
+        when(leaseService.isOwned(eq("run-1"), anyString())).thenReturn(true);
+        when(leaseService.completeIfOwned(eq("run-1"), anyString(), anyList(), eq(1))).thenReturn(true);
+        when(snapshotService.findById("snap-1")).thenReturn(snapshotA());
+        when(executionService.executeTestCases(any(), any(), any(), any(), any(), any())).thenReturn(passedOutcome());
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.ACK, worker.handleMessage("run-1"));
+
+        verify(leaseService, never()).failIfQueueExpired(any(), any(), any());
+        verify(leaseService).claim(eq("run-1"), anyString());
+        verify(executionService).executeTestCases(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void retryAfterMaxQueueAgeExpiresWithoutAnotherExecution() {
+        MutableClock clock = new MutableClock(T0.plusSeconds(30));
+        worker = workerWith(clock);
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        job.setMaxAttempts(2);
+        when(mongo.findById("run-1", ContestRunJob.class)).thenReturn(job);
+        when(leaseService.claim(eq("run-1"), anyString())).thenReturn(Optional.of(running(job)));
+        when(snapshotService.findById("snap-1")).thenReturn(snapshotA());
+        when(executionService.executeTestCases(any(), any(), any(), any(), any(), any()))
+            .thenThrow(new RuntimeException("temporary"));
+        when(leaseService.releaseToQueuedIfOwned(eq("run-1"), anyString())).thenReturn(true);
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.RETRY, worker.handleMessage("run-1"));
+        assertEquals(Date.from(T0), job.getCreatedAt());
+        verify(leaseService).releaseToQueuedIfOwned(eq("run-1"), anyString());
+
+        clock.set(T0.plusSeconds(91));
+        job.setStatus(ContestRunJob.Status.QUEUED);
+        when(leaseService.failIfQueueExpired("run-1", ContestRunWorker.RUN_EXPIRED, ContestRunWorker.RUN_EXPIRED_MESSAGE))
+            .thenReturn(true);
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.ACK, worker.handleMessage("run-1"));
+
+        verify(executionService, times(1)).executeTestCases(any(), any(), any(), any(), any(), any());
+        verify(leaseService, times(1)).claim(any(), any());
+        verify(leaseService).failIfQueueExpired(
+            "run-1", ContestRunWorker.RUN_EXPIRED, ContestRunWorker.RUN_EXPIRED_MESSAGE);
+        assertEquals(Date.from(T0), job.getCreatedAt());
+    }
+
+    @Test
+    void runThatStartedFreshCompletesAfterQueueAgeElapses() {
+        MutableClock clock = new MutableClock(T0.plusSeconds(30));
+        worker = workerWith(clock);
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        when(mongo.findById("run-1", ContestRunJob.class)).thenReturn(job);
+        when(leaseService.claim(eq("run-1"), anyString())).thenReturn(Optional.of(running(job)));
+        when(leaseService.isOwned(eq("run-1"), anyString())).thenReturn(true);
+        when(leaseService.completeIfOwned(eq("run-1"), anyString(), anyList(), eq(1))).thenReturn(true);
+        when(snapshotService.findById("snap-1")).thenReturn(snapshotA());
+        when(executionService.executeTestCases(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            clock.set(T0.plusSeconds(120));
+            return passedOutcome();
+        });
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.ACK, worker.handleMessage("run-1"));
+
+        verify(leaseService, never()).failIfQueueExpired(any(), any(), any());
+        verify(executionService).executeTestCases(any(), any(), any(), any(), any(), any());
+        verify(leaseService).completeIfOwned(eq("run-1"), anyString(), anyList(), eq(1));
+    }
+
+    @Test
+    void laterDeliveryDoesNotFailAnActiveRun() {
+        worker = workerWith(new MutableClock(T0.plusSeconds(91)));
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        job.setStatus(ContestRunJob.Status.RUNNING);
+        when(mongo.findById("run-1", ContestRunJob.class)).thenReturn(job);
+        when(leaseService.failIfQueueExpired(eq("run-1"), eq(ContestRunWorker.RUN_EXPIRED), anyString()))
+            .thenReturn(false);
+
+        assertEquals(SubmissionQueueConsumer.MessageDisposition.ACK, worker.handleMessage("run-1"));
+
+        verify(executionService, never()).executeTestCases(any(), any(), any(), any(), any(), any());
+        verify(leaseService, never()).claim(any(), any());
+        verify(leaseService, never()).failIfOwned(any(), any(), any(), any());
+    }
+
+    @Test
+    void expiredLeaseRecoveryExpiresStaleRunWithoutExecution() {
+        worker = workerWith(new MutableClock(T0.plusSeconds(91)));
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        job.setStatus(ContestRunJob.Status.RUNNING);
+        when(leaseService.findExpiredRunning(25)).thenReturn(List.of(job));
+        when(leaseService.failIfQueueExpired("run-1", ContestRunWorker.RUN_EXPIRED, ContestRunWorker.RUN_EXPIRED_MESSAGE))
+            .thenReturn(true);
+
+        worker.recoverExpiredLeases();
+
+        verify(leaseService).failIfQueueExpired(
+            "run-1", ContestRunWorker.RUN_EXPIRED, ContestRunWorker.RUN_EXPIRED_MESSAGE);
+        verify(leaseService, never()).failExpired(any(), any(), any());
+        verify(executionService, never()).executeTestCases(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void expiredLeaseRecoveryKeepsFreshTimeoutBehavior() {
+        worker = workerWith(new MutableClock(T0.plusSeconds(30)));
+        ContestRunJob job = queuedJob();
+        job.setCreatedAt(Date.from(T0));
+        job.setStatus(ContestRunJob.Status.RUNNING);
+        job.setAttemptCount(2);
+        job.setMaxAttempts(2);
+        when(leaseService.findExpiredRunning(25)).thenReturn(List.of(job));
+
+        worker.recoverExpiredLeases();
+
+        verify(leaseService, never()).failIfQueueExpired(any(), any(), any());
+        verify(leaseService).failExpired(eq("run-1"), eq("LEASE_EXPIRED"), anyString());
+        verify(executionService, never()).executeTestCases(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void workerDoesNotDependOnScoringOrLiveProblem() {
         java.util.Arrays.stream(ContestRunWorker.class.getDeclaredFields()).forEach(field -> {
             String name = field.getType().getName();
@@ -132,6 +292,7 @@ class ContestRunWorkerTest {
             assertTrue(!name.contains("SubmissionService"), name);
             assertTrue(!name.contains("ContestScoringService"), name);
             assertTrue(!name.contains("ContestLeaderboard"), name);
+            assertTrue(!name.contains("ContestAccessService"), name);
         });
     }
 
@@ -151,6 +312,44 @@ class ContestRunWorkerTest {
         job.setStatus(ContestRunJob.Status.RUNNING);
         job.setAttemptCount(1);
         return job;
+    }
+
+    private static ExecutionOutcome passedOutcome() {
+        ExecutionOutcome outcome = new ExecutionOutcome();
+        SubmissionJob.TestResult result = new SubmissionJob.TestResult();
+        result.setInput("A");
+        result.setExpectedOutput("A");
+        result.setActualOutput("A");
+        result.setPassed(true);
+        outcome.setResults(List.of(result));
+        return outcome;
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private void set(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
     }
 
     private static ContestProblemSnapshot snapshotA() {

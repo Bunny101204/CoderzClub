@@ -19,6 +19,12 @@ public class RabbitContestRunQueueConfig {
         return new DirectExchange(properties.getQueue().getExchange(), true, false);
     }
 
+    /**
+     * Hard capacity for this contest-run queue only. {@code x-max-length} limits ready
+     * messages; unacked deliveries do not count, and worker prefetch/concurrency bounds
+     * those. {@code x-overflow=reject-publish} nacks the publish so it is not a 202.
+     * The scored submission queue is declared separately and is not given this policy here.
+     */
     @Bean
     public Queue contestRunQueue(ContestRunProperties properties) {
         ContestRunProperties.Queue queue = properties.getQueue();

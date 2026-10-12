@@ -22,13 +22,15 @@ if (!Number.isInteger(USER_COUNT) || USER_COUNT < 1) {
   throw new Error('K6_USER_COUNT must be a positive integer');
 }
 
+const admissionAttempts = new Counter('contest_run_admission_attempts');
 const admissionMs = new Trend('contest_run_admission_ms', true);
 const completionMs = new Trend('contest_run_completion_ms', true);
 const admittedRuns = new Counter('contest_runs_admitted');
 const completedRuns = new Counter('contest_runs_completed');
 const failedRuns = new Counter('contest_runs_failed');
-const response429 = new Counter('contest_run_http_429');
-const response503 = new Counter('contest_run_http_503');
+const expiredRuns = new Counter('contest_runs_run_expired');
+const backpressure429 = new Counter('contest_run_backpressure_429');
+const unavailable503 = new Counter('contest_run_unavailable_503');
 
 export const options = {
   scenarios: {
@@ -39,6 +41,8 @@ export const options = {
       maxDuration: '8m',
     },
   },
+  // A 429 from queue capacity is expected backpressure under overload.
+  // It is counted above and is not a failing threshold.
   thresholds: {
     contest_run_admission_ms: ['p(95)<2000'],
   },
@@ -99,6 +103,7 @@ export default function (data) {
   }
 
   const startedAt = Date.now();
+  admissionAttempts.add(1);
   const create = http.post(
     `${BASE_URL}/api/contests/${CONTEST_ID}/problems/${PROBLEM_ID}/runs`,
     JSON.stringify({
@@ -114,11 +119,11 @@ export default function (data) {
 
   admissionMs.add(create.timings.duration);
   if (create.status === 429) {
-    response429.add(1);
+    backpressure429.add(1);
     return;
   }
   if (create.status === 503) {
-    response503.add(1);
+    unavailable503.add(1);
     return;
   }
 
@@ -151,8 +156,12 @@ export default function (data) {
       return;
     }
     if (job.status === 'FAILED') {
-      failedRuns.add(1);
       completionMs.add(Date.now() - startedAt);
+      if (job.errorCode === 'RUN_EXPIRED') {
+        expiredRuns.add(1);
+        return;
+      }
+      failedRuns.add(1);
       return;
     }
   }

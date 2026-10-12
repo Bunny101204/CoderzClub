@@ -14,6 +14,7 @@ import com.coderzclub.model.Problem;
 import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 import com.coderzclub.model.User;
+import com.coderzclub.queue.ContestRunPublishRejectedException;
 import com.coderzclub.queue.ContestRunPublisher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,12 +27,15 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -51,6 +55,7 @@ class ContestRunAdmissionServiceTest {
     private ContestRunQueueAdmissionService queueAdmissionService;
     private SubmissionLimitService submissionLimitService;
     private ContestRunPublisher publisher;
+    private SimpleMeterRegistry registry;
     private ContestRunMetrics metrics;
 
     @BeforeEach
@@ -64,7 +69,8 @@ class ContestRunAdmissionServiceTest {
         queueAdmissionService = mock(ContestRunQueueAdmissionService.class);
         submissionLimitService = mock(SubmissionLimitService.class);
         publisher = mock(ContestRunPublisher.class);
-        metrics = new ContestRunMetrics(new SimpleMeterRegistry());
+        registry = new SimpleMeterRegistry();
+        metrics = new ContestRunMetrics(registry);
     }
 
     @Test
@@ -192,6 +198,7 @@ class ContestRunAdmissionServiceTest {
         verify(submissionLimitService, never()).tryAcquireRunSlot(any(), any());
         verify(publisher, never()).publishRun(any());
         verify(mongo, never()).save(any(ContestRunJob.class));
+        assertEquals(1.0, registry.get("contest.run.rejected").tag("reason", "queue_depth").counter().count());
     }
 
     @Test
@@ -226,12 +233,28 @@ class ContestRunAdmissionServiceTest {
         ContestRunAdmissionService service = serviceAt(LIVE);
         stubHappyPath(liveContest(), publicProblem("p1"));
         stubActiveMember("b1", "u1");
+        List<String> steps = new ArrayList<>();
+        when(queueAdmissionService.check()).thenAnswer(invocation -> {
+            steps.add("queue");
+            return new ContestRunQueueAdmissionService.Admission(true, 0, 0, "none");
+        });
+        when(submissionLimitService.tryAcquireRunSlot(any(), any())).thenAnswer(invocation -> {
+            steps.add("redis");
+            return SubmissionLimitDecision.allowed();
+        });
+        when(mongo.save(any(ContestRunJob.class))).thenAnswer(invocation -> {
+            steps.add("save");
+            ContestRunJob saved = invocation.getArgument(0);
+            saved.setId("run-1");
+            return saved;
+        });
+        doAnswer(invocation -> {
+            steps.add("publish");
+            return null;
+        }).when(publisher).publishRun("run-1");
         ContestRunJob job = service.admit(user("u1"), "c1", "p1", request());
         assertEquals("run-1", job.getId());
-        verify(queueAdmissionService).check();
-        verify(submissionLimitService).tryAcquireRunSlot("u1", "p1");
-        verify(publisher).publishRun("run-1");
-        verify(mongo).save(any(ContestRunJob.class));
+        assertEquals(List.of("queue", "redis", "save", "publish"), steps);
     }
 
     @Test
@@ -243,7 +266,30 @@ class ContestRunAdmissionServiceTest {
         SubmissionAdmissionHttpException ex = assertThrows(SubmissionAdmissionHttpException.class,
             () -> service.admit(user("u1"), "c1", "p1", request()));
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, ex.getStatus());
+        assertEquals("Run service is unavailable. Please retry.", ex.getBody().get("error"));
+        assertEquals("BROKER_UNAVAILABLE", ex.getBody().get("reason"));
+        assertFalse(String.valueOf(ex.getBody()).contains("broker down"));
+        verify(mongo).save(any(ContestRunJob.class));
         verify(mongo).remove(any(ContestRunJob.class));
+        assertEquals(1.0, registry.get("contest.run.rejected").tag("reason", "broker_unavailable").counter().count());
+    }
+
+    @Test
+    void capacityRejectionDeletesJobAndReturnsBusy() {
+        ContestRunAdmissionService service = serviceAt(LIVE);
+        stubHappyPath(liveContest(), publicProblem("p1"));
+        stubActiveMember("b1", "u1");
+        org.mockito.Mockito.doThrow(new ContestRunPublishRejectedException()).when(publisher).publishRun("run-1");
+        SubmissionAdmissionHttpException ex = assertThrows(SubmissionAdmissionHttpException.class,
+            () -> service.admit(user("u1"), "c1", "p1", request()));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
+        assertEquals("Run is busy. Please retry.", ex.getBody().get("error"));
+        assertEquals("QUEUE_CAPACITY", ex.getBody().get("reason"));
+        assertFalse(String.valueOf(ex.getBody()).contains("rejected publish"));
+        verify(submissionLimitService).tryAcquireRunSlot("u1", "p1");
+        verify(mongo).save(any(ContestRunJob.class));
+        verify(mongo).remove(any(ContestRunJob.class));
+        assertEquals(1.0, registry.get("contest.run.rejected").tag("reason", "queue_capacity").counter().count());
     }
 
     @Test

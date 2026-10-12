@@ -210,7 +210,8 @@ ensureIndex(db.submissions, { "contestScoringStatus": 1, "createdAt": 1 }, {
   partialFilterExpression: { "contestScoringStatus": "PENDING" }
 });
 // contest_run_jobs GET /api/contest-runs/{runId} and worker claim use _id (default).
-// TTL cleanup: Mongo TTL monitor deletes documents when expiresAt is in the past.
+// TTL cleanup: Mongo deletes the ephemeral document after expiresAt.
+// This is not the queue-age cutoff that skips Judge0 for a run that waited too long.
 ensureIndex(db.contest_run_jobs, { "expiresAt": 1 }, {
   name: "expiresAt_ttl_idx",
   expireAfterSeconds: 0

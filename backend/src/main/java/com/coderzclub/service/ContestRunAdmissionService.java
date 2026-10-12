@@ -10,6 +10,7 @@ import com.coderzclub.model.ContestStatus;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.TestCase;
 import com.coderzclub.model.User;
+import com.coderzclub.queue.ContestRunPublishRejectedException;
 import com.coderzclub.queue.ContestRunPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -172,13 +173,22 @@ public class ContestRunAdmissionService {
 
         try {
             publisher.publishRun(job.getId());
+        } catch (ContestRunPublishRejectedException capacityRejection) {
+            mongoTemplate.remove(job);
+            metrics.rejected("queue_capacity");
+            logger.warn("contest_run_publish_rejected reason=queue_capacity runId={}", job.getId());
+            throw new SubmissionAdmissionHttpException(HttpStatus.TOO_MANY_REQUESTS, Map.of(
+                "error", "Run is busy. Please retry.",
+                "reason", "QUEUE_CAPACITY",
+                "retryAfterSeconds", 5
+            ));
         } catch (Exception publishFailure) {
             mongoTemplate.remove(job);
-            metrics.rejected("PUBLISH_FAILED");
-            logger.warn("contest_run_publish_failed contestId={} problemId={}", contest.getId(), canonicalProblemId);
+            metrics.rejected("broker_unavailable");
+            logger.warn("contest_run_publish_failed reason=broker_unavailable runId={}", job.getId());
             throw new SubmissionAdmissionHttpException(HttpStatus.SERVICE_UNAVAILABLE, Map.of(
                 "error", "Run service is unavailable. Please retry.",
-                "reason", "PUBLISH_FAILED"
+                "reason", "BROKER_UNAVAILABLE"
             ));
         }
 
@@ -192,7 +202,9 @@ public class ContestRunAdmissionService {
         if (admission.allowed()) {
             return;
         }
-        metrics.rejected(admission.reason());
+        metrics.rejected(metricReason(admission.reason()));
+        logger.info("contest_run_queue_rejected reason={} depth={} oldestAgeSeconds={}",
+            admission.reason(), admission.depth(), admission.oldestAgeSeconds());
         HttpStatus status = "QUEUE_UNAVAILABLE".equals(admission.reason()) || "DISABLED".equals(admission.reason())
             ? HttpStatus.SERVICE_UNAVAILABLE
             : HttpStatus.TOO_MANY_REQUESTS;
@@ -201,6 +213,16 @@ public class ContestRunAdmissionService {
             "reason", admission.reason(),
             "retryAfterSeconds", 5
         ));
+    }
+
+    private static String metricReason(String admissionReason) {
+        if ("QUEUE_DEPTH".equals(admissionReason)) {
+            return "queue_depth";
+        }
+        if ("QUEUE_AGE".equals(admissionReason)) {
+            return "queue_age";
+        }
+        return admissionReason;
     }
 
     private void requireRunSlot(String userId, String resourceId) {

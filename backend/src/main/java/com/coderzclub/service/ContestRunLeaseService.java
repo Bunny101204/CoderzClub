@@ -101,6 +101,52 @@ public class ContestRunLeaseService {
         return mongoTemplate.updateFirst(query, update, ContestRunJob.class).getModifiedCount() == 1;
     }
 
+    /**
+     * Fails a run that is still waiting: QUEUED, or RUNNING whose lease has already expired.
+     * A live RUNNING lease and any terminal status are left unchanged.
+     * {@code createdAt} is not modified.
+     */
+    public boolean failIfQueueExpired(String runId, String errorCode, String errorMessage) {
+        Date now = new Date();
+        Query query = Query.query(new Criteria().andOperator(
+            Criteria.where("_id").is(runId),
+            new Criteria().orOperator(
+                Criteria.where("status").is(ContestRunJob.Status.QUEUED),
+                new Criteria().andOperator(
+                    Criteria.where("status").is(ContestRunJob.Status.RUNNING),
+                    Criteria.where("leaseExpiresAt").lte(now)
+                )
+            )
+        ));
+        Update update = new Update()
+            .set("status", ContestRunJob.Status.FAILED)
+            .set("errorCode", errorCode)
+            .set("errorMessage", safeMessage(errorMessage))
+            .set("completedAt", now)
+            .set("lockedBy", null)
+            .set("leaseExpiresAt", null)
+            .set("expiresAt", new Date(now.getTime() + ttlMillis()));
+        return mongoTemplate.updateFirst(query, update, ContestRunJob.class).getModifiedCount() == 1;
+    }
+
+    /**
+     * Returns an owned run to QUEUED so a redelivery can expire or claim it.
+     * Does not change {@code createdAt} or {@code attemptCount}.
+     */
+    public boolean releaseToQueuedIfOwned(String runId, String workerId) {
+        Date now = new Date();
+        Query query = Query.query(Criteria.where("_id").is(runId)
+            .and("status").is(ContestRunJob.Status.RUNNING)
+            .and("lockedBy").is(workerId)
+            .and("leaseExpiresAt").gt(now));
+        Update update = new Update()
+            .set("status", ContestRunJob.Status.QUEUED)
+            .set("lockedBy", null)
+            .set("leaseExpiresAt", null)
+            .set("startedAt", null);
+        return mongoTemplate.updateFirst(query, update, ContestRunJob.class).getModifiedCount() == 1;
+    }
+
     public boolean failExpired(String runId, String errorCode, String errorMessage) {
         Date now = new Date();
         Query query = Query.query(Criteria.where("_id").is(runId)

@@ -13,6 +13,13 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Publishes a contest run and waits for the correlated publisher confirm.
+ * Spring AMQP 3.1 completes {@link CorrelationData#getFuture()} from the broker ack/nack.
+ * {@code x-overflow=reject-publish} is a basic.nack with no cause. A nack that carries a
+ * cause is a channel shutdown, which is broker unavailability rather than capacity.
+ * Only {@code ack=true} is a successful publish.
+ */
 @Component
 @Profile("!local")
 public class RabbitContestRunPublisher implements ContestRunPublisher {
@@ -31,29 +38,57 @@ public class RabbitContestRunPublisher implements ContestRunPublisher {
     public void publishRun(String runId) {
         ContestRunProperties.Queue queue = properties.getQueue();
         if (!canAccept()) {
-            throw new IllegalStateException("Contest run queue is at capacity");
+            throw new ContestRunPublishRejectedException();
         }
         CorrelationData correlation = new CorrelationData(runId == null ? UUID.randomUUID().toString() : runId);
-        rabbitTemplate.convertAndSend(queue.getExchange(), queue.getRoutingKey(), runId, message -> {
-            message.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
-            String correlationId = MDC.get("correlationId");
-            if (correlationId != null) {
-                message.getMessageProperties().setHeader("X-Correlation-ID", correlationId);
-            }
-            return message;
-        }, correlation);
         try {
-            CorrelationData.Confirm confirm = correlation.getFuture().get(10, TimeUnit.SECONDS);
-            if (confirm == null || !confirm.isAck()) {
-                throw new IllegalStateException(confirm == null ? "No publisher confirm" : String.valueOf(confirm.getReason()));
-            }
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalStateException("Contest run publish was not confirmed", e);
+            rabbitTemplate.convertAndSend(queue.getExchange(), queue.getRoutingKey(), runId, message -> {
+                message.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+                String correlationId = MDC.get("correlationId");
+                if (correlationId != null) {
+                    message.getMessageProperties().setHeader("X-Correlation-ID", correlationId);
+                }
+                return message;
+            }, correlation);
+        } catch (RuntimeException sendFailure) {
+            throw new IllegalStateException("Contest run publish was not confirmed", sendFailure);
+        }
+        CorrelationData.Confirm confirm = awaitConfirm(correlation);
+        if (confirm != null && confirm.isAck()) {
+            return;
+        }
+        if (isCapacityRejection(confirm)) {
+            throw new ContestRunPublishRejectedException();
+        }
+        throw new IllegalStateException("Contest run publish was not confirmed");
+    }
+
+    private CorrelationData.Confirm awaitConfirm(CorrelationData correlation) {
+        try {
+            return correlation.getFuture().get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Contest run publish was not confirmed", interrupted);
+        } catch (Exception waitFailure) {
+            throw new IllegalStateException("Contest run publish was not confirmed", waitFailure);
         }
     }
 
+    /**
+     * Reject-publish nacks have a null cause. Channel shutdown nacks carry the shutdown text.
+     * A literal {@code nack} cause is treated as capacity so a broker reason string is never required.
+     */
+    static boolean isCapacityRejection(CorrelationData.Confirm confirm) {
+        if (confirm == null || confirm.isAck()) {
+            return false;
+        }
+        String reason = confirm.getReason();
+        return reason == null || reason.isBlank() || "nack".equalsIgnoreCase(reason.trim());
+    }
+
+    /**
+     * Advisory snapshot. The broker max-length confirm is the distributed bound.
+     */
     private boolean canAccept() {
         int maxDepth = properties.getQueue().getMaxDepth();
         if (maxDepth <= 0) {
