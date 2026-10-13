@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { useNavigate, useParams } from "react-router-dom";
 import { selectableExecutionModes, helpForExecutionMode } from "./executionModes";
 import TestcaseFileImport from "./TestcaseFileImport";
@@ -55,7 +56,7 @@ const AddProblemNew = () => {
     const load = async () => {
       try {
         const token = localStorage.getItem("jwtToken");
-        const response = await fetch(`/api/problems/${editId}/admin`, {
+        const response = await apiFetch(`/api/problems/${editId}/admin`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!response.ok) {
@@ -89,7 +90,7 @@ const AddProblemNew = () => {
 
   const fetchBundles = async () => {
     try {
-      const response = await fetch("/api/bundles");
+      const response = await apiFetch("/api/bundles");
       if (response.ok) {
         const data = await response.json();
         setBundles(data);
@@ -210,7 +211,7 @@ const AddProblemNew = () => {
 
       const url = isEdit ? `/api/problems/${editId}/content` : "/api/problems";
       const method = isEdit ? "PATCH" : "POST";
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
@@ -225,12 +226,12 @@ const AddProblemNew = () => {
         
         if (!isEdit && problemType === "bundle" && selectedBundle && savedProblem.id) {
           try {
-            const bundleResponse = await fetch(`/api/bundles/${selectedBundle}`);
+            const bundleResponse = await apiFetch(`/api/bundles/${selectedBundle}`);
             if (bundleResponse.ok) {
               const bundle = await bundleResponse.json();
               const updatedProblemIds = [...(bundle.problemIds || []), savedProblem.id];
               
-              const updateBundleResponse = await fetch(`/api/bundles/${selectedBundle}`, {
+              const updateBundleResponse = await apiFetch(`/api/bundles/${selectedBundle}`, {
                 method: "PUT",
                 headers: {
                   "Content-Type": "application/json",

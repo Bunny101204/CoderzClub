@@ -7,7 +7,7 @@ import {
   editProblemPath,
   nextPageForFilterChange
 } from "../admin/adminProblems";
-import { api } from "../apiClient";
+import { api, apiFetch } from "../apiClient";
 import ContestAdminList from "./admin/contests/ContestAdminList";
 
 const AdminDashboard = () => {
@@ -127,7 +127,7 @@ const AdminDashboard = () => {
   const fetchBundles = async () => {
     try {
       const token = localStorage.getItem("jwtToken");
-      const response = await fetch("/api/bundles/admin/all", {
+      const response = await apiFetch("/api/bundles/admin/all", {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (response.ok) {
@@ -150,7 +150,7 @@ const AdminDashboard = () => {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
       const params = new URLSearchParams({ page: "0", size: "20" });
       if (batchSearch.trim()) params.set("search", batchSearch.trim());
-      const response = await fetch(`/api/admin/batches?${params}`, {
+      const response = await apiFetch(`/api/admin/batches?${params}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (response.ok) {
@@ -173,7 +173,7 @@ const AdminDashboard = () => {
     setCreatingBatch(true);
     try {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-      const response = await fetch("/api/admin/batches", {
+      const response = await apiFetch("/api/admin/batches", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -204,7 +204,7 @@ const AdminDashboard = () => {
   const handleDeleteProblem = async (id) => {
     if (!window.confirm("Are you sure you want to delete this problem?")) return;
     try {
-      const res = await fetch(`/api/problems/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/problems/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete problem");
       // Refresh the list after deletion
       fetchProblems({ silent: true });
@@ -226,7 +226,7 @@ const AdminDashboard = () => {
       }
 
       // Fetch current bundle data
-      const bundleResponse = await fetch(`/api/bundles/${id}`);
+      const bundleResponse = await apiFetch(`/api/bundles/${id}`);
       if (!bundleResponse.ok) {
         alert("Failed to fetch bundle data");
         return;
@@ -240,7 +240,7 @@ const AdminDashboard = () => {
         isActive: !currentStatus
       };
 
-      const res = await fetch(`/api/bundles/${id}`, {
+      const res = await apiFetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers,
         body: JSON.stringify(updatedBundle)
@@ -267,7 +267,7 @@ const AdminDashboard = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const res = await fetch(`/api/bundles/${id}`, { 
+      const res = await apiFetch(`/api/bundles/${id}`, {
         method: "DELETE",
         headers
       });

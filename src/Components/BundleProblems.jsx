@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { CheckIcon } from "../icons/AppIcons.jsx";
@@ -21,7 +22,7 @@ const BundleProblems = () => {
     try {
       console.log("[BundleProblems] Fetching bundle data for ID:", id);
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-      const response = await fetch(`/api/bundles/${id}`, {
+      const response = await apiFetch(`/api/bundles/${id}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (response.status === 404 || response.status === 403) {
@@ -33,7 +34,7 @@ const BundleProblems = () => {
       if (response.ok) {
         const data = await response.json();
         setBundle(data);
-        const problemsResponse = await fetch(`/api/bundles/${id}/problems`, {
+        const problemsResponse = await apiFetch(`/api/bundles/${id}/problems`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         if (problemsResponse.ok) {
@@ -71,10 +72,10 @@ const BundleProblems = () => {
       
       const params = new URLSearchParams();
       idsArray.forEach(problemId => params.append("ids", problemId));
-      let response = await fetch(`/api/problems/by-ids?${params.toString()}`);
+      let response = await apiFetch(`/api/problems/by-ids?${params.toString()}`);
       if (response.status === 404) {
         // Support an already-running backend that predates the exact-ID endpoint.
-        response = await fetch("/api/problems?page=0&size=1000");
+        response = await apiFetch("/api/problems?page=0&size=1000");
       }
       if (response.ok) {
         const data = await response.json();
@@ -134,7 +135,7 @@ const BundleProblems = () => {
     try {
       const token = localStorage.getItem('jwtToken');
       if (!token) return;
-      const response = await fetch("/api/submissions/my-progress", {
+      const response = await apiFetch("/api/submissions/my-progress", {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!response.ok) return;

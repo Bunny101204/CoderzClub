@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { api } from "../apiClient";
 import { useAuth } from "../context/AuthContext";
 import { useProblemStatus } from "../hooks/useProblemStatus";
 import ProblemStatusMark from "./ProblemStatusMark";
@@ -64,28 +65,23 @@ const HomePage = ({ problems: propsProblems }) => {
   const fetchProblems = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: currentPage.toString(),
-        size: itemsPerPage.toString()
-      });
-      
-      // Add difficulty filter to API call
+      const params = {
+        page: currentPage,
+        size: itemsPerPage,
+      };
+
       if (difficulty && difficulty !== '') {
-        params.append('difficulty', difficulty);
+        params.difficulty = difficulty;
       }
       if (topic && topic !== '') {
-        params.append('tags', topic);
+        params.tags = topic;
       }
       if (search && search.trim() !== '') {
-        params.append('search', search.trim());
+        params.search = search.trim();
       }
-      
-      const response = await fetch(`/api/problems?${params}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
+
+      const response = await api.problems.getAll(params);
+      const data = response.data;
       let problemsArray = [];
       
       // Handle both new paginated response and old array response

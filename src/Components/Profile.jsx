@@ -362,7 +362,7 @@
 // export default Profile;
 
 import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
+import { api } from "../apiClient";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { canConfirmAccountDeletion, clearLocalAuthState, DELETE_CONFIRMATION_PHRASE } from "../privacy/accountDeletion";
@@ -381,18 +381,13 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
 
   useEffect(() => {
     if (!asPage && !isOpen) return;
-    const token =
-      localStorage.getItem("jwtToken") || localStorage.getItem("token");
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     const fetchAll = async () => {
       try {
         setLoadingStats(true);
         setStatsError(null);
         const [statsRes] = await Promise.all([
-          axios
-            .get("/api/users/stats", { headers })
-            .catch(() => ({ data: null })),
+          api.users.getStats().catch(() => ({ data: null })),
         ]);
         setStats(statsRes.data);
       } catch (e) {
@@ -421,11 +416,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     setDeleting(true);
     setDeleteError("");
     try {
-      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-      const response = await axios.delete("/api/users/me", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        data: { confirmation: DELETE_CONFIRMATION_PHRASE }
-      });
+      const response = await api.users.deleteMe(DELETE_CONFIRMATION_PHRASE);
       if (response.status >= 400) {
         throw new Error(response.data?.error || "Deletion failed");
       }
@@ -441,10 +432,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
   };
 
   const handleExportData = async () => {
-    const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-    const response = await axios.get("/api/users/me/export", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
+    const response = await api.users.exportData();
     const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

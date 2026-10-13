@@ -1,8 +1,10 @@
 import axios from 'axios';
-import { prefixApiPath, resolveApiBaseUrl } from './apiBase.js';
+import { htmlApiPayloadError, prefixApiPath, resolveApiBaseUrl } from './apiBase.js';
 
 // Development uses the Vite `/api` proxy. Production uses the HTTPS API origin
 // inlined from VITE_API_BASE_URL at build time.
+// Call api.*, apiUrl(), or apiFetch(). Do not patch global fetch: production
+// minifiers can delete that side effect, and relative /api then hits the SPA.
 const IS_DEVELOPMENT = import.meta.env.DEV;
 const API_BASE_URL = resolveApiBaseUrl({
   dev: IS_DEVELOPMENT,
@@ -42,16 +44,30 @@ export function apiUrl(path) {
   return prefixApiPath(path, API_BASE_URL);
 }
 
-axios.defaults.baseURL = API_BASE_URL;
+function acceptApiResponse(response) {
+  const contentType = response?.headers?.['content-type'] || response?.headers?.get?.('content-type') || '';
+  const htmlError = htmlApiPayloadError(response?.data, contentType);
+  if (htmlError) {
+    return Promise.reject(htmlError);
+  }
+  return response;
+}
 
-if (typeof globalThis.fetch === 'function' && !globalThis.fetch.__coderzclubApi) {
-  const nativeFetch = globalThis.fetch.bind(globalThis);
-  const wrappedFetch = (input, init) => nativeFetch(
-    typeof input === 'string' ? apiUrl(input) : input,
-    init
-  );
-  wrappedFetch.__coderzclubApi = true;
-  globalThis.fetch = wrappedFetch;
+export async function apiFetch(path, init) {
+  const response = await fetch(apiUrl(path), init);
+  const contentType = response.headers.get('content-type') || '';
+  const headerError = htmlApiPayloadError(null, contentType);
+  if (headerError) {
+    throw headerError;
+  }
+  if (!contentType || /text\/plain/i.test(contentType)) {
+    const head = (await response.clone().text()).slice(0, 64);
+    const bodyError = htmlApiPayloadError(head, contentType);
+    if (bodyError) {
+      throw bodyError;
+    }
+  }
+  return response;
 }
 
 // Create axios instance with interceptors
@@ -107,7 +123,7 @@ authClient.interceptors.request.use(
 
 // Response interceptor for auth operations - minimal error handling
 authClient.interceptors.response.use(
-  (response) => response,
+  (response) => acceptApiResponse(response),
   (error) => {
     // For auth operations, just log and reject - no redirects or complex retry
     if (error.response?.status === 401) {
@@ -126,9 +142,7 @@ authClient.interceptors.response.use(
 
 
 apiClient.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => acceptApiResponse(response),
   async (error) => {
     const originalRequest = error.config;
     const isAuthEndpoint = originalRequest.url?.includes('/api/login') ||
@@ -217,6 +231,7 @@ export const api = {
       return apiClient.get('/api/problems/by-ids', { params });
     },
     getAdminById: (id) => apiClient.get(`/api/problems/${id}/admin`),
+    runPublic: (id, body) => apiClient.post(`/api/problems/${id}/run-public`, body),
     create: (problem) => apiClient.post('/api/problems', problem),
     updateContent: (id, problem) => apiClient.patch(`/api/problems/${id}/content`, problem),
     updateExecution: (id, config) => apiClient.patch(`/api/problems/${id}/execution`, config),
@@ -244,7 +259,8 @@ export const api = {
   // Submission Jobs (async)
   submissionJobs: {
     create: (job) => apiClient.post('/api/submission-jobs', job),
-    getStatus: (jobId) => apiClient.get(`/api/submission-jobs/${jobId}`),
+    getStatus: (jobId, config) => apiClient.get(`/api/submission-jobs/${jobId}`, config),
+    createEventTicket: (jobId) => apiClient.post(`/api/submission-jobs/${jobId}/events/ticket`, {}),
     getMyJobs: (params) => apiClient.get('/api/submission-jobs/my-jobs', { params }),
     getQueueStats: () => apiClient.get('/api/submission-jobs/queue/stats'),
   },
@@ -253,6 +269,8 @@ export const api = {
   users: {
     getStats: () => apiClient.get('/api/users/stats'),
     getLeaderboard: (params) => apiClient.get('/api/users/leaderboard', { params }),
+    deleteMe: (confirmation) => apiClient.delete('/api/users/me', { data: { confirmation } }),
+    exportData: () => apiClient.get('/api/users/me/export'),
   },
 
   // Judge0 execution

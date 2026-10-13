@@ -43,3 +43,18 @@ export function prefixApiPath(path, base) {
   }
   return `${base || ""}${path}`;
 }
+
+/** Cloudflare SPA fallback returns index.html with HTTP 200. That is not an API payload. */
+export function htmlApiPayloadError(body, contentType = "") {
+  const type = String(contentType || "").toLowerCase();
+  if (type.includes("text/html")) {
+    return new Error("API returned HTML instead of JSON");
+  }
+  if (typeof body === "string") {
+    const trimmed = body.trim().slice(0, 64).toLowerCase();
+    if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+      return new Error("API returned HTML instead of JSON");
+    }
+  }
+  return null;
+}

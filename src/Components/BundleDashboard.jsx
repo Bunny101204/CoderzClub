@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { indexFromProgressEntries, getBundleProgress } from "./bundleProgress";
@@ -36,11 +37,11 @@ const BundleDashboard = () => {
   const fetchBundles = async () => {
     try {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-      let response = await fetch(user?.role === "ADMIN" ? "/api/bundles/admin/all" : "/api/bundles", {
+      let response = await apiFetch(user?.role === "ADMIN" ? "/api/bundles/admin/all" : "/api/bundles", {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (user?.role === "ADMIN" && response.status === 404) {
-        response = await fetch("/api/bundles?includeInactive=true", {
+        response = await apiFetch("/api/bundles?includeInactive=true", {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
       }
@@ -68,7 +69,7 @@ const BundleDashboard = () => {
     }
     try {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
-      const response = await fetch("/api/submissions/my-progress", {
+      const response = await apiFetch("/api/submissions/my-progress", {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!response.ok) return;
@@ -127,7 +128,7 @@ const BundleDashboard = () => {
       }
 
       // Fetch current bundle data
-      const bundleResponse = await fetch(`/api/bundles/${bundleId}`);
+      const bundleResponse = await apiFetch(`/api/bundles/${bundleId}`);
       if (!bundleResponse.ok) {
         alert("Failed to fetch bundle data");
         return;
@@ -141,7 +142,7 @@ const BundleDashboard = () => {
         isActive: !currentStatus
       };
 
-      const response = await fetch(`/api/bundles/${bundleId}`, {
+      const response = await apiFetch(`/api/bundles/${bundleId}`, {
         method: "PUT",
         headers,
         body: JSON.stringify(updatedBundle)
@@ -170,7 +171,7 @@ const BundleDashboard = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const response = await fetch(`/api/bundles/${bundleId}`, {
+      const response = await apiFetch(`/api/bundles/${bundleId}`, {
         method: "DELETE",
         headers
       });

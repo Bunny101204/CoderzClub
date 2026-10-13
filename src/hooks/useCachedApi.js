@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { apiFetch } from '../apiClient';
 
 /**
  * Custom hook for caching API responses to prevent redundant requests
@@ -26,7 +27,7 @@ export const useCachedApi = (cacheKey, ttl = 5 * 60 * 1000) => {
     setError(null);
 
     try {
-      const response = await fetch(url, options);
+      const response = await apiFetch(url, options);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

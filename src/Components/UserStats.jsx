@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../apiClient';
 import { useAuth } from '../context/AuthContext';
-import { auth } from './AuthHelper';
 
 const UserStats = () => {
   const { user } = useAuth();
@@ -19,7 +18,7 @@ const UserStats = () => {
 
   const fetchUserStats = async () => {
     try {
-      const response = await axios.get('/api/users/stats', auth.getAuthConfig());
+      const response = await api.users.getStats();
       setStats(response.data);
       setError(null);
     } catch (err) {
@@ -31,7 +30,7 @@ const UserStats = () => {
 
   const fetchUserSubmissions = async () => {
     try {
-      const response = await axios.get('/api/submissions/my-submissions', auth.getAuthConfig());
+      const response = await api.submissions.getMySubmissions();
       // Handle both paginated and non-paginated responses
       const data = response.data;
       const submissionsArray = Array.isArray(data) ? data : (data.submissions || []);

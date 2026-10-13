@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../apiClient";
 import { formatCodingDuration } from "../execution/codingDuration.js";
 import {
   formatSubmissionMemory,
@@ -36,7 +37,7 @@ const ProblemSubmissionHistory = ({ problemId, numericId, enabled = true, refres
       setError("");
       try {
         const params = new URLSearchParams({ page: String(page), size: "20", problemId });
-        const response = await fetch(`/api/submissions/my-submissions?${params}`, {
+        const response = await apiFetch(`/api/submissions/my-submissions?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         });

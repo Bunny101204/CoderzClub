@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { apiFetch } from '../apiClient';
 import { indexProgress, statusForProblem } from '../progress/userProgress';
 
 export const useProblemStatus = (problems, user) => {
@@ -27,7 +28,7 @@ export const useProblemStatus = (problems, user) => {
     }
 
     try {
-      const response = await fetch('/api/submissions/my-progress', {
+      const response = await apiFetch('/api/submissions/my-progress', {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal
       });

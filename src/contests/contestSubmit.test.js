@@ -25,6 +25,6 @@ test("contest submit uses the explicit contest endpoint and does not fall back t
   assert.doesNotMatch(page, /api\.problems\.getById/);
   assert.match(workspace, /contestId=\{contestId\}/);
   assert.match(editor, /contestId\s*\?\s*await api\.contests\.submit/);
-  assert.match(editor, /axios\.post\('\/api\/submission-jobs'/);
+  assert.match(editor, /api\.submissionJobs\.create\(\{ problemId, \.\.\.executionPayload \}\)/);
   assert.doesNotMatch(editor, /catch[\s\S]{0,500}api\.contests\.submit[\s\S]{0,200}\/api\/submission-jobs/);
 });

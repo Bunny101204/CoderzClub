@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../apiClient";
 
 function authHeaders(json = false) {
   const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
@@ -20,7 +21,7 @@ const BundleAccessPanel = ({ bundleId }) => {
   const [busy, setBusy] = useState(false);
 
   const loadAccess = async () => {
-    const response = await fetch(`/api/admin/bundles/${bundleId}/access`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/bundles/${bundleId}/access`, { headers: authHeaders() });
     if (!response.ok) throw new Error("Failed to load access");
     const data = await response.json();
     setVisibility(data.visibility || "PUBLIC");
@@ -37,7 +38,7 @@ const BundleAccessPanel = ({ bundleId }) => {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/admin/bundles/${bundleId}/visibility`, {
+      const response = await apiFetch(`/api/admin/bundles/${bundleId}/visibility`, {
         method: "PUT",
         headers: authHeaders(true),
         body: JSON.stringify({ visibility: next })
@@ -56,7 +57,7 @@ const BundleAccessPanel = ({ bundleId }) => {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/admin/bundles/${bundleId}/grants`, {
+      const response = await apiFetch(`/api/admin/bundles/${bundleId}/grants`, {
         method: "POST",
         headers: authHeaders(true),
         body: JSON.stringify({ subjectType, subjectId })
@@ -81,7 +82,7 @@ const BundleAccessPanel = ({ bundleId }) => {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/admin/bundles/${bundleId}/grants/${grantId}`, {
+      const response = await apiFetch(`/api/admin/bundles/${bundleId}/grants/${grantId}`, {
         method: "DELETE",
         headers: authHeaders()
       });
@@ -101,7 +102,7 @@ const BundleAccessPanel = ({ bundleId }) => {
       return;
     }
     const params = new URLSearchParams({ search: value.trim(), page: "0", size: "10" });
-    const response = await fetch(`/api/admin/batches/users?${params}`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/users?${params}`, { headers: authHeaders() });
     if (response.ok) {
       const data = await response.json();
       setUserHits(data.users || []);
@@ -115,7 +116,7 @@ const BundleAccessPanel = ({ bundleId }) => {
       return;
     }
     const params = new URLSearchParams({ search: value.trim(), page: "0", size: "10" });
-    const response = await fetch(`/api/admin/batches?${params}`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches?${params}`, { headers: authHeaders() });
     if (response.ok) {
       const data = await response.json();
       setBatchHits(data.batches || []);

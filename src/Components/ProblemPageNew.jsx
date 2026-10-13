@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { useParams, Link } from "react-router-dom";
 import Judge0CodeEditor from "./Judge0CodeEditor";
 import ProblemSubmissionHistory from "./ProblemSubmissionHistory";
@@ -331,7 +332,7 @@ const ProblemPageNew = ({ problems }) => {
 
   const fetchProblem = async () => {
     try {
-      const response = await fetch(`/api/problems/${id}`);
+      const response = await apiFetch(`/api/problems/${id}`);
       if (response.ok) {
         const data = await response.json();
         setProblem(data);

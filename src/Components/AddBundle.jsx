@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { useNavigate, useParams } from "react-router-dom";
 
 const AddBundle = () => {
@@ -41,7 +42,7 @@ const AddBundle = () => {
 
   const fetchBundle = async () => {
     try {
-      const response = await fetch(`/api/bundles/${bundleId}`, {
+      const response = await apiFetch(`/api/bundles/${bundleId}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("jwtToken") || localStorage.getItem("token") || ""}` }
       });
       if (response.ok) {
@@ -128,7 +129,7 @@ const AddBundle = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
         headers,
         body: JSON.stringify(bundleData),

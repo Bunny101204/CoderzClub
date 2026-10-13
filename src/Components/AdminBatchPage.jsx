@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { apiFetch } from "../apiClient";
 import { Link, useParams } from "react-router-dom";
 import { displayAssignedProblemId, batchStatusLabel } from "../admin/batchProgress";
 import ProblemStatusMark from "./ProblemStatusMark";
@@ -31,13 +32,13 @@ const AdminBatchPage = () => {
   const problemSearchSeq = useRef(0);
 
   const loadDetail = async () => {
-    const response = await fetch(`/api/admin/batches/${id}`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/${id}`, { headers: authHeaders() });
     if (!response.ok) throw new Error("Failed to load batch");
     setDetail(await response.json());
   };
 
   const loadMembers = async () => {
-    const response = await fetch(`/api/admin/batches/${id}/members?page=0&size=50`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/${id}/members?page=0&size=50`, { headers: authHeaders() });
     if (response.ok) {
       const data = await response.json();
       setMembers(data.members || []);
@@ -45,7 +46,7 @@ const AdminBatchPage = () => {
   };
 
   const loadAssignments = async () => {
-    const response = await fetch(`/api/admin/batches/${id}/assignments?page=0&size=80`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/${id}/assignments?page=0&size=80`, { headers: authHeaders() });
     if (response.ok) {
       const data = await response.json();
       setAssignments(data.assignments || []);
@@ -56,7 +57,7 @@ const AdminBatchPage = () => {
     const seq = ++reportSeq.current;
     const params = new URLSearchParams({ page: String(page), size: "20" });
     if (student.trim()) params.set("student", student.trim());
-    const response = await fetch(`/api/admin/batches/${id}/report?${params}`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/${id}/report?${params}`, { headers: authHeaders() });
     if (seq !== reportSeq.current) return;
     if (response.ok) setReport(await response.json());
   };
@@ -79,7 +80,7 @@ const AdminBatchPage = () => {
       return;
     }
     const seq = ++userSearchSeq.current;
-    const response = await fetch(`/api/admin/batches/users?search=${encodeURIComponent(value.trim())}&size=20`, {
+    const response = await apiFetch(`/api/admin/batches/users?search=${encodeURIComponent(value.trim())}&size=20`, {
       headers: authHeaders()
     });
     if (seq !== userSearchSeq.current) return;
@@ -97,7 +98,7 @@ const AdminBatchPage = () => {
       return;
     }
     const seq = ++problemSearchSeq.current;
-    const response = await fetch(`/api/problems?search=${encodeURIComponent(value.trim())}&size=20`);
+    const response = await apiFetch(`/api/problems?search=${encodeURIComponent(value.trim())}&size=20`);
     if (seq !== problemSearchSeq.current) return;
     if (response.ok) {
       const data = await response.json();
@@ -109,7 +110,7 @@ const AdminBatchPage = () => {
     if (!detail?.active || busy) return;
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/admin/batches/${id}/members`, {
+    const response = await apiFetch(`/api/admin/batches/${id}/members`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ userIds: [userId] })
@@ -126,7 +127,7 @@ const AdminBatchPage = () => {
 
   const removeMember = async (userId, username) => {
     if (!window.confirm(`Remove ${username} from this batch? Submissions will not be deleted.`)) return;
-    await fetch(`/api/admin/batches/${id}/members/${userId}`, { method: "DELETE", headers: authHeaders() });
+    await apiFetch(`/api/admin/batches/${id}/members/${userId}`, { method: "DELETE", headers: authHeaders() });
     await loadMembers();
     await loadDetail();
   };
@@ -135,7 +136,7 @@ const AdminBatchPage = () => {
     if (!detail?.active || busy) return;
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/admin/batches/${id}/assignments`, {
+    const response = await apiFetch(`/api/admin/batches/${id}/assignments`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ problemIds: [problemId] })
@@ -152,14 +153,14 @@ const AdminBatchPage = () => {
 
   const unassign = async (problemId, title) => {
     if (!window.confirm(`Unassign ${title || "this problem"}? The problem itself will not be deleted.`)) return;
-    await fetch(`/api/admin/batches/${id}/assignments/${problemId}`, { method: "DELETE", headers: authHeaders() });
+    await apiFetch(`/api/admin/batches/${id}/assignments/${problemId}`, { method: "DELETE", headers: authHeaders() });
     await loadAssignments();
     await loadDetail();
   };
 
   const archive = async () => {
     if (!window.confirm("Archive this batch? Users, problems, and submissions stay intact.")) return;
-    const response = await fetch(`/api/admin/batches/${id}/archive`, { method: "POST", headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/${id}/archive`, { method: "POST", headers: authHeaders() });
     if (response.ok) setDetail(await response.json());
   };
 
@@ -167,7 +168,7 @@ const AdminBatchPage = () => {
     setError("");
     const params = new URLSearchParams();
     if (studentFilter.trim()) params.set("student", studentFilter.trim());
-    const response = await fetch(`/api/admin/batches/${id}/report.csv?${params}`, { headers: authHeaders() });
+    const response = await apiFetch(`/api/admin/batches/${id}/report.csv?${params}`, { headers: authHeaders() });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "CSV export is limited to 500 students. Filter or split the batch.");

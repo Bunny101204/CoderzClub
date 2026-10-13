@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../apiClient";
+import { api, apiFetch } from "../apiClient";
 
 const PARAMETER_TYPES = [
   "int", "int[]", "long", "long[]", "float", "float[]", "double", "double[]", "String", "String[]", "boolean", "boolean[]", "List<Integer>", "List<String>", "ListNode", "TreeNode", "Graph", "Custom Object"
@@ -149,7 +149,7 @@ const AddProblem = () => {
         points: 10,
         estimatedTime: 30
       };
-      const res = await fetch("/api/problems", {
+      const res = await apiFetch("/api/problems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(problem),

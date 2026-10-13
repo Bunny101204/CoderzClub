@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import axios from "axios";
 import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
 import { getTemplate } from "./LanguageTemplates";
-import { auth } from "./AuthHelper";
 import {
   getJobStatusMessage,
   getPollDelay,
@@ -403,16 +401,7 @@ const Judge0CodeEditor = ({
     let lastErr;
     while (attempt <= maxRetries) {
       try {
-        return await axios.post(
-          "/api/judge0/execute",
-          payload,
-          // {
-          //   headers: {
-          //     "content-type": "application/json",
-          //   },
-          // },
-          auth.getAuthConfig()
-        );
+        return await api.judge0.execute(payload);
       } catch (error) {
         lastErr = error;
         const status = error?.response?.status;
@@ -587,14 +576,10 @@ const Judge0CodeEditor = ({
     
     try {
       const allResults = [];
-      const response = await axios.post(
-        `/api/problems/${problemId}/run-public`,
-        {
-          source_code: sourceCode,
-          language_id: languageId,
-        },
-        auth.getAuthConfig()
-      );
+      const response = await api.problems.runPublic(problemId, {
+        source_code: sourceCode,
+        language_id: languageId,
+      });
       const payload = response.data || {};
       const remoteResults = payload.results || [];
       for (let i = 0; i < remoteResults.length; i++) {
@@ -743,7 +728,7 @@ const Judge0CodeEditor = ({
     activeJobIdRef.current = null;
     // Check submission limits before submitting
     try {
-      const limitsResponse = await axios.get(`/api/submissions/limits?problemId=${problemId}`, auth.getAuthConfig());
+      const limitsResponse = await api.submissions.getLimits(problemId);
       const limits = limitsResponse.data;
 
       if (!limits.canSubmitNow) {
@@ -806,7 +791,7 @@ const Judge0CodeEditor = ({
 
       const jobResponse = contestId
         ? await api.contests.submit(contestId, problemId, executionPayload)
-        : await axios.post('/api/submission-jobs', { problemId, ...executionPayload }, auth.getAuthConfig());
+        : await api.submissionJobs.create({ problemId, ...executionPayload });
       if (submissionGeneration !== submissionGenerationRef.current) return;
       const { jobId } = jobResponse.data;
       activeJobIdRef.current = jobId;
@@ -832,7 +817,7 @@ const Judge0CodeEditor = ({
   const subscribeToJobEvents = async (jobId) => {
     let ticket;
     try {
-      const ticketResponse = await axios.post(`/api/submission-jobs/${jobId}/events/ticket`, {}, auth.getAuthConfig());
+      const ticketResponse = await api.submissionJobs.createEventTicket(jobId);
       ticket = ticketResponse.data.ticket;
     } catch (error) {
       console.warn("Unable to create SSE ticket; switching to polling", error);
@@ -892,10 +877,7 @@ const Judge0CodeEditor = ({
       try {
         await sleep(getPollDelay(poll));
         if (signal.aborted || activeJobIdRef.current !== jobId) return;
-        const response = await axios.get(`/api/submission-jobs/${jobId}`, {
-          ...auth.getAuthConfig(),
-          signal,
-        });
+        const response = await api.submissionJobs.getStatus(jobId, { signal });
         const job = response.data;
 
         const statusMessage = getJobStatusMessage(job);

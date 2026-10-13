@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import BundleAccessPanel from "./BundleAccessPanel";
 
@@ -21,7 +22,7 @@ const ManageBundleProblems = () => {
 
   const fetchBundleData = async () => {
     try {
-      const response = await fetch(`/api/bundles/${id}`, {
+      const response = await apiFetch(`/api/bundles/${id}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("jwtToken") || localStorage.getItem("token") || ""}` }
       });
       if (response.ok) {
@@ -72,7 +73,7 @@ const ManageBundleProblems = () => {
       let hasMore = true;
 
       while (hasMore) {
-        const response = await fetch(`/api/problems?page=${page}&size=${size}`);
+        const response = await apiFetch(`/api/problems?page=${page}&size=${size}`);
         if (response.ok) {
           const data = await response.json();
           let problemsArray = [];
@@ -123,7 +124,7 @@ const ManageBundleProblems = () => {
       const token = localStorage.getItem('jwtToken');
       const updatedProblemIds = [...(bundle.problemIds || []), selectedProblem];
       
-      const response = await fetch(`/api/bundles/${id}`, {
+      const response = await apiFetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -159,7 +160,7 @@ const ManageBundleProblems = () => {
       const token = localStorage.getItem('jwtToken');
       const updatedProblemIds = bundle.problemIds.filter(id => id !== problemId);
       
-      const response = await fetch(`/api/bundles/${id}`, {
+      const response = await apiFetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -200,7 +201,7 @@ const ManageBundleProblems = () => {
 
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`/api/bundles/${id}`, {
+      const response = await apiFetch(`/api/bundles/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
