@@ -16,11 +16,13 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
@@ -165,7 +167,8 @@ class ProblemControllerSecurityTest {
         extra.setId("50");
         extra.setNumericId(50);
 
-        doReturn(List.of(first, second, extra)).when(mongoTemplate).find(any(Query.class), eq(Problem.class));
+        doReturn(new ArrayList<>(List.of(first, second, extra))).when(mongoTemplate).find(any(Query.class), eq(Problem.class));
+        clearInvocations(mongoTemplate);
 
         mockMvc.perform(get("/api/problems?cursor=MjB8MjA&limit=2"))
             .andExpect(status().isOk())
