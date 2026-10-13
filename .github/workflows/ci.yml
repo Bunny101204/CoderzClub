@@ -29,6 +29,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Harmless HTTPS origin so production-mode Vite can build in CI.
+          # Cloudflare and other deploy builds supply their own VITE_API_BASE_URL.
+          VITE_API_BASE_URL: https://api.example.com
 
   docker-build:
     runs-on: ubuntu-latest

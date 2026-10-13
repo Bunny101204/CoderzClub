@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../apiClient';
+import { api, apiErrorMessage } from '../apiClient';
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -14,11 +14,10 @@ const AuthPage = () => {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
-  const [registerAsAdmin, setRegisterAsAdmin] = useState(false);
-  
   const { login, register, resendVerification } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const confirmingToken = useRef("");
 
   useEffect(() => {
     const verified = searchParams.get('verified');
@@ -26,7 +25,23 @@ const AuthPage = () => {
     const verificationToken = searchParams.get('verifyEmailToken');
 
     if (verificationToken) {
-      window.location.href = `/api/confirm-email?token=${encodeURIComponent(verificationToken)}`;
+      if (confirmingToken.current === verificationToken) {
+        return;
+      }
+      confirmingToken.current = verificationToken;
+      api.auth.confirmEmail(verificationToken)
+        .then(() => {
+          setInfo('Email verified successfully. Please login.');
+          setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.delete('verifyEmailToken');
+            next.set('verified', 'true');
+            return next;
+          }, { replace: true });
+        })
+        .catch((err) => {
+          setError(apiErrorMessage(err, 'Verification failed'));
+        });
       return;
     }
 
@@ -77,8 +92,7 @@ const AuthPage = () => {
         result = await register(
           formData.username,
           formData.email,
-          formData.password,
-          registerAsAdmin ? 'admin' : 'user'
+          formData.password
         );
       }
       if (result.success) {
@@ -108,7 +122,6 @@ const AuthPage = () => {
       password: '',
       confirmPassword: ''
     });
-    setRegisterAsAdmin(false);
   };
 
   return (
@@ -181,21 +194,6 @@ const AuthPage = () => {
                 className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
                 placeholder="Confirm your password"
               />
-            </div>
-          )}
-
-          {!isLogin && (
-            <div className="flex items-center mb-2">
-              <input
-                type="checkbox"
-                id="registerAsAdmin"
-                checked={registerAsAdmin}
-                onChange={() => setRegisterAsAdmin(!registerAsAdmin)}
-                className="mr-2"
-              />
-              <label htmlFor="registerAsAdmin" className="text-sm app-muted">
-                Register as Admin (temporary)
-              </label>
             </div>
           )}
 

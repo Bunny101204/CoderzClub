@@ -12,8 +12,9 @@ import com.coderzclub.service.EmailService;
 import com.coderzclub.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +25,8 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api")
 public class AuthController {
+    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
+
     @Autowired
     private UserService userService;
     
@@ -33,15 +36,11 @@ public class AuthController {
     @Autowired
     private JwtUtil jwtUtil;
 
-    @Value("${app.frontend.url:${app.backend.url:http://localhost:8080}}")
-    private String frontendUrl;
-
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
                                       @RequestHeader(value = "X-Client-Origin", required = false) String clientOrigin) {
         try {
-            String role = req.getRole() != null ? req.getRole() : "user";
-            User user = userService.registerUser(req.getUsername(), req.getEmail(), req.getPassword(), role);
+            User user = userService.registerUser(req.getUsername(), req.getEmail(), req.getPassword());
 
             try {
                 emailService.sendVerificationEmail(user.getEmail(), user.getEmailVerificationToken(), clientOrigin);
@@ -50,6 +49,7 @@ public class AuthController {
                     "emailSent", true
                 ));
             } catch (Exception emailEx) {
+                logger.warn("Verification email was not delivered for {}: {}", user.getUsername(), emailEx.getClass().getSimpleName());
                 return ResponseEntity.ok(Map.of(
                     "message", "Registration successful, but the verification email could not be sent. Please contact support or try again later.",
                     "emailSent", false
@@ -61,18 +61,18 @@ public class AuthController {
     }
 
     @GetMapping("/confirm-email")
-    public ResponseEntity<?> confirmEmail(@RequestParam String token, HttpServletRequest request) {
+    public ResponseEntity<?> confirmEmail(@RequestParam String token) {
         try {
             userService.verifyEmailToken(token);
-            // Redirect to frontend auth page with success message
-            return ResponseEntity.status(302).header("Location", "/auth?verified=true").build();
+            return ResponseEntity.ok(Map.of(
+                "verified", true,
+                "message", "Email verified successfully"
+            ));
         } catch (Exception e) {
-            try {
-                String encodedError = java.net.URLEncoder.encode(e.getMessage(), "UTF-8");
-                return ResponseEntity.status(302).header("Location", "/auth?error=" + encodedError).build();
-            } catch (Exception encodeEx) {
-                return ResponseEntity.status(302).header("Location", "/auth?error=Verification%20failed").build();
-            }
+            String message = e.getMessage() == null || e.getMessage().isBlank()
+                ? "Verification failed"
+                : e.getMessage();
+            return ResponseEntity.badRequest().body(Map.of("error", message));
         }
     }
 
@@ -88,6 +88,7 @@ public class AuthController {
                     "emailSent", true
                 ));
             } catch (Exception emailEx) {
+                logger.warn("Verification email was not delivered for {}: {}", user.getUsername(), emailEx.getClass().getSimpleName());
                 return ResponseEntity.ok(Map.of(
                     "message", "User found, but the verification email could not be sent. Please contact support or try again later.",
                     "emailSent", false

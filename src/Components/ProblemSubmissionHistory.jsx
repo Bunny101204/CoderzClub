@@ -19,12 +19,12 @@ const ProblemSubmissionHistory = ({ problemId, numericId, enabled = true, refres
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
     setPage(0);
     setSubmissions([]);
-    setSelected(null);
+    setExpandedId(null);
   }, [problemId, refreshKey]);
 
   useEffect(() => {
@@ -76,20 +76,37 @@ const ProblemSubmissionHistory = ({ problemId, numericId, enabled = true, refres
         <div className="text-sm">
           {submissions.map((submission) => {
             const verdict = submission.result || submission.verdict || "UNKNOWN";
+            const expanded = expandedId === submission.id;
+            const codePanelId = `submission-code-${submission.id}`;
             return (
-              <button
-                key={submission.id}
-                type="button"
-                className="block w-full text-left border-t border-gray-200 dark:border-gray-700 py-2 hover:bg-gray-100 dark:hover:bg-gray-900/60"
-                onClick={() => setSelected(submission)}
-              >
-                <div className={`font-semibold ${verdictClass(verdict)}`}>{verdict}</div>
-                <div>{submission.language || "—"}</div>
-                <div>Runtime: {formatSubmissionRuntime(submission.runtime)}</div>
-                <div>Memory: {formatSubmissionMemory(submission.memory)}</div>
-                <div>Submitted: {formatSubmissionTimestamp(submission.createdAt)}</div>
-                <div className="app-muted">Coding time: {formatCodingDuration(submission.codingDurationSeconds)}</div>
-              </button>
+              <article key={submission.id} className="border-t border-gray-200 dark:border-gray-700">
+                <button
+                  type="button"
+                  className="block w-full text-left py-2 hover:bg-gray-100 dark:hover:bg-gray-900/60"
+                  aria-expanded={expanded}
+                  aria-controls={codePanelId}
+                  onClick={() => setExpandedId((current) => current === submission.id ? null : submission.id)}
+                >
+                  <div className={`font-semibold ${verdictClass(verdict)}`}>{verdict}</div>
+                  <div>{submission.language || "—"}</div>
+                  <div>Runtime: {formatSubmissionRuntime(submission.runtime)}</div>
+                  <div>Memory: {formatSubmissionMemory(submission.memory)}</div>
+                  <div>Submitted: {formatSubmissionTimestamp(submission.createdAt)}</div>
+                  <div className="app-muted">
+                    Coding time: {submission.codingDurationSeconds == null
+                      ? "unavailable"
+                      : formatCodingDuration(submission.codingDurationSeconds)}
+                  </div>
+                </button>
+                {expanded && (
+                  <div id={codePanelId} className="app-inset rounded-lg p-4 mb-3">
+                    <h3 className="font-semibold mb-2">Submitted code (read-only)</h3>
+                    <pre className="text-xs overflow-auto max-h-80 whitespace-pre-wrap font-mono app-code rounded p-3">
+                      {submission.code || ""}
+                    </pre>
+                  </div>
+                )}
+              </article>
             );
           })}
         </div>
@@ -103,19 +120,6 @@ const ProblemSubmissionHistory = ({ problemId, numericId, enabled = true, refres
         >
           {loading ? "Loading..." : "Load more"}
         </button>
-      )}
-      {selected && (
-        <div className="mt-4 app-inset rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold">Submitted code (read-only)</h3>
-            <button type="button" className="text-sm app-muted" onClick={() => setSelected(null)}>
-              Close
-            </button>
-          </div>
-          <pre className="text-xs overflow-auto max-h-80 whitespace-pre-wrap font-mono app-code rounded p-3">
-            {selected.code || ""}
-          </pre>
-        </div>
       )}
     </div>
   );

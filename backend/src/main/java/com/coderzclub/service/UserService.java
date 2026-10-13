@@ -42,7 +42,7 @@ public class UserService implements UserDetailsService {
     @Value("${app.password-reset.token-expiration-ms:3600000}")
     private long resetTokenExpirationMs;
 
-    public User registerUser(String username, String email, String password, String role) {
+    public User registerUser(String username, String email, String password) {
         if (userRepository.findByUsername(username).isPresent()) {
             throw new RuntimeException("Username already exists");
         }
@@ -56,7 +56,7 @@ public class UserService implements UserDetailsService {
             throw new RuntimeException("An account already exists with that email address. Please verify your email or use password reset.");
         }
 
-        User user = new User(null, username, email, passwordEncoder.encode(password), role, new Date());
+        User user = new User(null, username, email, passwordEncoder.encode(password), AccountRoles.publicRegistrationRole(), new Date());
         user.setEmailVerified(false);
         user.setAccountStatus("ACTIVE");
         user.setEmailVerificationToken(generateToken());

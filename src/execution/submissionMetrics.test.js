@@ -59,7 +59,10 @@ test("history row labels runtime, memory, submitted, and coding time separately"
   assert.match(history, /Runtime: \{formatSubmissionRuntime\(submission\.runtime\)\}/);
   assert.match(history, /Memory: \{formatSubmissionMemory\(submission\.memory\)\}/);
   assert.match(history, /Submitted: \{formatSubmissionTimestamp\(submission\.createdAt\)\}/);
-  assert.match(history, /Coding time: \{formatCodingDuration\(submission\.codingDurationSeconds\)\}/);
+  assert.match(history, /formatCodingDuration\(submission\.codingDurationSeconds\)/);
+  assert.match(history, /unavailable/);
+  assert.match(history, /aria-expanded=\{expanded\}/);
+  assert.match(history, /Submitted code \(read-only\)/);
   assert.doesNotMatch(history, /completedAt\s*-\s*createdAt/);
   assert.doesNotMatch(history, /total submission time|queue time|wall-clock/i);
   assert.doesNotMatch(metrics, /total submission time|queue time|wall-clock/i);

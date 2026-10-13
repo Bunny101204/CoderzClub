@@ -57,7 +57,12 @@ export default function ContestAdminList() {
       }
       await load(page);
     } catch (err) {
-      setError(apiErrorMessage(err, "Action failed"));
+      const fallback = kind === "publish"
+        ? "Could not publish this contest"
+        : kind === "unpublish"
+          ? "Could not unpublish this contest"
+          : "Action failed";
+      setError(apiErrorMessage(err, fallback));
     } finally {
       setActingId("");
     }
@@ -79,7 +84,7 @@ export default function ContestAdminList() {
         {loading && contests.length === 0 ? (
           <div className="app-muted">Loading contests...</div>
         ) : contests.length === 0 ? (
-          <div className="app-muted">No contests yet.</div>
+          <div className="app-muted">No contests yet. Unpublished drafts appear in this list after they are saved.</div>
         ) : (
           <table className="w-full text-left">
             <thead>

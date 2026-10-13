@@ -7,6 +7,7 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.SubmissionRepository;
 import com.coderzclub.service.AccountDeletionService;
+import com.coderzclub.service.AccountRoles;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -153,7 +154,7 @@ public class AdminController {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
-            user.setRole(request.getRole());
+            user.setRole(AccountRoles.assignableRole(request == null ? null : request.getRole()));
             userRepository.save(user);
             
             return ResponseEntity.ok("User role updated successfully");

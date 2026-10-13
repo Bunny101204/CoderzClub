@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, apiErrorMessage } from "../../../apiClient";
 import {
   buildContestPatchBody,
@@ -51,6 +51,7 @@ async function loadSelectedBatches(batchIds) {
 export default function ContestForm() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const creating = !id;
   const [form, setForm] = useState(emptyForm);
   const [contest, setContest] = useState(null);
@@ -64,6 +65,12 @@ export default function ContestForm() {
   const scheduleLocked = !creating && !canEditScheduleAndSet(status);
   const liveLimited = canEditLiveLimited(status);
   const readOnly = isReadOnly(status);
+
+  useEffect(() => {
+    if (typeof location.state?.notice === "string" && location.state.notice) {
+      setNotice(location.state.notice);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     if (creating) {
@@ -170,8 +177,12 @@ export default function ContestForm() {
     try {
       if (creating) {
         const created = await api.adminContests.create(buildContestWriteBody(body));
-        setNotice("Draft saved.");
-        navigate(`/admin/contests/${created.data.id}`, { replace: true });
+        navigate(`/admin/contests/${created.data.id}`, {
+          replace: true,
+          state: {
+            notice: "Draft saved. This contest is unpublished. Use Publish when it is ready.",
+          },
+        });
         return;
       }
       const updated = await api.adminContests.update(id, buildContestPatchBody(body, status));
@@ -208,7 +219,12 @@ export default function ContestForm() {
         navigate("/admin");
       }
     } catch (err) {
-      setError(apiErrorMessage(err, "Action failed"));
+      const fallback = kind === "publish"
+        ? "Could not publish this contest"
+        : kind === "unpublish"
+          ? "Could not unpublish this contest"
+          : "Action failed";
+      setError(apiErrorMessage(err, fallback));
     } finally {
       setActing("");
     }
@@ -278,9 +294,14 @@ export default function ContestForm() {
           <ContestProblemSelector selected={form.problems} onChange={(problems) => setForm({ ...form, problems })} disabled={scheduleLocked || readOnly} />
           <div className="flex flex-wrap gap-3 pt-2">
             {!readOnly && (
-              <button type="submit" disabled={saving || !!acting} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">
-                {saving ? "Saving..." : creating ? "Save draft" : "Save"}
-              </button>
+              <div>
+                <button type="submit" disabled={saving || !!acting} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">
+                  {saving ? "Saving..." : creating ? "Save draft" : "Save"}
+                </button>
+                {creating && (
+                  <p className="text-sm app-muted mt-2">Save draft stores an unpublished contest. It is not published until you use Publish on the saved contest.</p>
+                )}
+              </div>
             )}
             {!creating && canPublish(status, contest?.published) && (
               <button type="button" disabled={saving || !!acting} onClick={() => act("publish")} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded disabled:opacity-50">

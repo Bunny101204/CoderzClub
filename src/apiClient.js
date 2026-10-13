@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { htmlApiPayloadError, prefixApiPath, resolveApiBaseUrl } from './apiBase.js';
+import { shouldRetryTransientFailure } from './apiRetry.js';
 
 // Development uses the Vite `/api` proxy. Production uses the HTTPS API origin
 // inlined from VITE_API_BASE_URL at build time.
@@ -151,17 +152,19 @@ apiClient.interceptors.response.use(
                           originalRequest.url?.includes('/api/confirm-email') ||
                           originalRequest.url?.includes('/api/resend-verification');
 
-    // For auth endpoints: retry on network errors ONCE, then fail
-    if (isAuthEndpoint && !originalRequest._retry &&
-        (error.code === 'ECONNABORTED' || 
-         error.code === 'ERR_NETWORK' ||
-         error.message === 'Network Error')) {
-      
+    // Retry only safe, idempotent reads. Writes such as contest creation,
+    // submissions, contest runs, admin mutations, and draft saves are not repeated.
+    if (originalRequest && shouldRetryTransientFailure({
+      method: originalRequest.method,
+      status: error.response?.status,
+      code: error.code,
+      message: error.message,
+      alreadyRetried: Boolean(originalRequest._retry),
+    })) {
       originalRequest._retry = true;
-      logger.warn(`Retrying auth request to ${originalRequest.url}`);
-      
-      // Short delay for auth retry
-      await new Promise(resolve => setTimeout(resolve, 500));
+      logger.warn(`Retrying request to ${originalRequest.url}`);
+      const delay = isAuthEndpoint ? 500 : 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
       return apiClient(originalRequest);
     }
 
@@ -177,24 +180,6 @@ apiClient.interceptors.response.use(
         window.location.href = '/auth?reason=session_expired';
       }
       return Promise.reject(error);
-    }
-
-    // Retry logic for network errors and 5xx (but not on auth endpoints)
-    if (!isAuthEndpoint &&
-        !originalRequest._retry &&
-        (error.code === 'ECONNABORTED' || 
-         error.code === 'ERR_NETWORK' ||
-         error.message === 'Network Error' ||
-         (error.response?.status >= 500 && error.response?.status < 600))) {
-
-      originalRequest._retry = true;
-      logger.warn(`Retrying request to ${originalRequest.url}`);
-
-      // Exponential backoff
-      const delay = Math.min(1000 * Math.pow(2, (originalRequest._retry || 1) - 1), 5000);
-      await new Promise(resolve => setTimeout(resolve, delay));
-
-      return apiClient(originalRequest);
     }
 
     logger.error('API request failed:', {

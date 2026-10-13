@@ -118,11 +118,10 @@ export function AuthProvider({ children }) {
   };
 
   // Real register function
-  const register = async (username, email, password, role) => {
+  const register = async (username, email, password) => {
     try {
       logger.info("Attempting register", username, email);
       const body = { username, email, password };
-      if (role) body.role = role;
 
       const response = await api.auth.register(body);
 

@@ -21,6 +21,7 @@ const AdminDashboard = () => {
   const [problemSearch, setProblemSearch] = useState("");
   const [debouncedProblemSearch, setDebouncedProblemSearch] = useState("");
   const [problemTopic, setProblemTopic] = useState("");
+  const [problemDifficulty, setProblemDifficulty] = useState("");
   const [bundlesPerPage, setBundlesPerPage] = useState(10);
   const [bundleSearch, setBundleSearch] = useState("");
   const [totalProblemPages, setTotalProblemPages] = useState(0);
@@ -67,7 +68,7 @@ const AdminDashboard = () => {
     }, 30000);
     
     return () => clearInterval(interval);
-  }, [currentPage, problemsPerPage, debouncedProblemSearch, problemTopic]);
+  }, [currentPage, problemsPerPage, debouncedProblemSearch, problemTopic, problemDifficulty]);
   // Note: AdminDashboard fetches paginated problems directly from API; props are not used.
 
   const fetchProblems = async ({ silent = false } = {}) => {
@@ -83,6 +84,9 @@ const AdminDashboard = () => {
       }
       if (problemTopic && problemTopic !== '') {
         params.append('tags', problemTopic);
+      }
+      if (problemDifficulty) {
+        params.append('difficulty', problemDifficulty);
       }
       const response = await api.problems.getAll(Object.fromEntries(params.entries()));
       if (seq !== problemFetchSeq.current) {
@@ -372,6 +376,18 @@ const AdminDashboard = () => {
                 <option value="sliding-window">Sliding Window</option>
                 <option value="backtracking">Backtracking</option>
                 <option value="sorting">Sorting</option>
+              </select>
+              <label className="block text-sm app-muted mb-2" htmlFor="admin-problem-difficulty">Difficulty</label>
+              <select
+                id="admin-problem-difficulty"
+                value={problemDifficulty}
+                onChange={(e) => { setProblemDifficulty(e.target.value); setCurrentPage(nextPageForFilterChange()); }}
+                className="w-full mb-4 px-3 py-2 app-input rounded"
+              >
+                <option value="">All Difficulties</option>
+                <option value="EASY">EASY</option>
+                <option value="MEDIUM">MEDIUM</option>
+                <option value="HARD">HARD</option>
               </select>
               <label className="block text-sm app-muted mb-2" htmlFor="admin-problem-items">Items</label>
               <select
