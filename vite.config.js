@@ -7,8 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        // Always proxy to localhost:8080 within Codespaces
-        // Since Vite and backend are in the same container, this avoids GitHub tunnel auth issues
+        // Dev server only. `vite build` does not include this proxy.
+        // Production API calls use VITE_API_BASE_URL instead.
         target: 'http://localhost:8080',
         changeOrigin: true,
         secure: false,

@@ -1,0 +1,10 @@
+{
+  // Static React build for Cloudflare Workers. No Worker script.
+  // Vite's localhost proxy in vite.config.js is used only by `npm run dev`.
+  "name": "coderzclub",
+  "compatibility_date": "2026-10-13",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

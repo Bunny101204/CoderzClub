@@ -18,7 +18,7 @@ import { useTheme } from "../context/ThemeContext";
 import { CopyIcon } from "../icons/AppIcons.jsx";
 import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.js";
 import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
-import { api } from "../apiClient";
+import { api, apiUrl } from "../apiClient";
 import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } from "../contests/contestRunPolling";
 import { useAuth } from "../context/AuthContext";
 import { readInitialDraftCode } from "../drafts/codeDraft";
@@ -841,7 +841,7 @@ const Judge0CodeEditor = ({
     }
 
     if (activeJobIdRef.current !== jobId) return;
-    const source = new EventSource(`/api/submission-jobs/${jobId}/events?ticket=${encodeURIComponent(ticket)}`);
+    const source = new EventSource(apiUrl(`/api/submission-jobs/${jobId}/events?ticket=${encodeURIComponent(ticket)}`));
     let fallbackStarted = false;
     const fallbackTimer = setTimeout(() => {
       if (activeJobIdRef.current !== jobId || fallbackStarted) return;

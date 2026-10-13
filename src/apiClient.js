@@ -1,10 +1,13 @@
 import axios from 'axios';
+import { prefixApiPath, resolveApiBaseUrl } from './apiBase.js';
 
-// Environment configuration
-const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const IS_PRODUCTION = import.meta.env.PROD;
+// Development uses the Vite `/api` proxy. Production uses the HTTPS API origin
+// inlined from VITE_API_BASE_URL at build time.
 const IS_DEVELOPMENT = import.meta.env.DEV;
-const API_BASE_URL = IS_DEVELOPMENT ? '' : (rawApiBaseUrl || '');
+const API_BASE_URL = resolveApiBaseUrl({
+  dev: IS_DEVELOPMENT,
+  raw: import.meta.env.VITE_API_BASE_URL,
+});
 
 // Environment-gated logger
 export const logger = {
@@ -33,6 +36,22 @@ export function getAuthToken() {
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
+}
+
+export function apiUrl(path) {
+  return prefixApiPath(path, API_BASE_URL);
+}
+
+axios.defaults.baseURL = API_BASE_URL;
+
+if (typeof globalThis.fetch === 'function' && !globalThis.fetch.__coderzclubApi) {
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+  const wrappedFetch = (input, init) => nativeFetch(
+    typeof input === 'string' ? apiUrl(input) : input,
+    init
+  );
+  wrappedFetch.__coderzclubApi = true;
+  globalThis.fetch = wrappedFetch;
 }
 
 // Create axios instance with interceptors
