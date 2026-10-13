@@ -8,8 +8,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
 import com.coderzclub.service.ContestAdmissionException;
+import com.coderzclub.service.DraftConflictException;
 import com.coderzclub.service.SubmissionAdmissionHttpException;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestControllerAdvice
@@ -38,6 +40,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ContestAdmissionException.class)
     public ResponseEntity<Map<String, Object>> handleContestAdmission(ContestAdmissionException ex) {
         return ResponseEntity.status(ex.getStatus()).body(Map.of("error", ex.getError()));
+    }
+
+    @ExceptionHandler(DraftConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleDraftConflict(DraftConflictException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "DRAFT_CONFLICT");
+        body.put("code", ex.getCode());
+        body.put("revision", ex.getRevision());
+        body.put("updatedAt", ex.getUpdatedAt());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     @ExceptionHandler(SubmissionAdmissionHttpException.class)

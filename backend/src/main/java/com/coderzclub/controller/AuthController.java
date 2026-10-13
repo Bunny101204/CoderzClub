@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -165,7 +166,13 @@ public class AuthController {
             }
             
             String role = userOpt.get().getRole();
-            return ResponseEntity.ok(Map.of("username", username, "role", role == null ? "USER" : role));
+            Map<String, String> body = new HashMap<>();
+            body.put("username", username);
+            body.put("role", role == null ? "USER" : role);
+            if (userOpt.get().getId() != null && !userOpt.get().getId().isBlank()) {
+                body.put("id", userOpt.get().getId());
+            }
+            return ResponseEntity.ok(body);
         } catch (Exception e) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid token"));
         }

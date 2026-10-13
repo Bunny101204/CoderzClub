@@ -224,6 +224,11 @@ ensureIndex(db.contest_run_jobs, { "status": 1, "createdAt": 1 }, {
 ensureIndex(db.contest_run_jobs, { "status": 1, "leaseExpiresAt": 1 }, {
   name: "status_leaseExpiresAt_idx"
 });
+// One current code draft per user, scope, problem, and language. No TTL.
+ensureIndex(db.code_drafts, { "userId": 1, "scopeKey": 1, "problemId": 1, "languageId": 1 }, {
+  unique: true,
+  name: "userId_scopeKey_problemId_languageId_unique_idx"
+});
 dropIndexIfPresent(db.contests, "published_startAt_idx");
 dropIndexIfPresent(db.contests, "published_endAt_idx");
 dropIndexIfPresent(db.contests, "audienceType_batchIds_startAt_idx");
@@ -277,3 +282,6 @@ assertIndex(db.contest_run_jobs, "expiresAt_ttl_idx", function(idx) {
 });
 assertIndex(db.contest_run_jobs, "status_createdAt_idx");
 assertIndex(db.contest_run_jobs, "status_leaseExpiresAt_idx");
+assertIndex(db.code_drafts, "userId_scopeKey_problemId_languageId_unique_idx", function(idx) {
+  return idx.unique === true;
+});

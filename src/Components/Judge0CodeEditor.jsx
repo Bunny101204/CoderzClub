@@ -4,7 +4,6 @@ import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
 import { getTemplate } from "./LanguageTemplates";
-import { editorStorageKey, resolveEditorSource } from "./editorLanguageDrafts";
 import { auth } from "./AuthHelper";
 import {
   getJobStatusMessage,
@@ -21,6 +20,9 @@ import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.
 import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
 import { api } from "../apiClient";
 import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } from "../contests/contestRunPolling";
+import { useAuth } from "../context/AuthContext";
+import { readInitialDraftCode } from "../drafts/codeDraft";
+import { useEditorDraft } from "../drafts/useEditorDraft";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -38,6 +40,7 @@ const Judge0CodeEditor = ({
   onSubmissionSuccess,
 }) => {
   const { theme } = useTheme();
+  const { user } = useAuth();
   const editorChrome = editorSurfaceClasses(theme);
   // Use controlled or internal state for languageId
   const [internalLanguageId, setInternalLanguageId] = useState(62);
@@ -45,8 +48,17 @@ const Judge0CodeEditor = ({
     propLanguageId !== undefined ? propLanguageId : internalLanguageId;
   const setLanguageId = propSetLanguageId || setInternalLanguageId;
 
-  // Use controlled or internal state for code
-  const [internalSourceCode, setInternalSourceCode] = useState(initialCode);
+  // Use controlled or internal state for code. Local draft seeding is only for the uncontrolled editor.
+  const [internalSourceCode, setInternalSourceCode] = useState(() => {
+    if (propSetEditorCode) return initialCode;
+    const local = readInitialDraftCode({
+      userId: user?.id,
+      contestId,
+      problemId,
+      languageId: propLanguageId !== undefined ? propLanguageId : 62,
+    });
+    return local != null ? local : initialCode;
+  });
   const sourceCode = propSetEditorCode ? initialCode : internalSourceCode;
   const setSourceCode = propSetEditorCode || setInternalSourceCode;
 
@@ -73,10 +85,21 @@ const Judge0CodeEditor = ({
   const runLocked = contestMode ? !contestLive : executionLocked;
   const customRunLocked = contestMode ? true : executionLocked;
   const eventSourceRef = useRef(null);
-  const previousLanguageRef = useRef(languageId);
-  const skipNextPersistRef = useRef(false);
   const sourceCodeRef = useRef(sourceCode);
   sourceCodeRef.current = sourceCode;
+  const draftEnabled = !propSetEditorCode && Boolean(problemId);
+  const draft = useEditorDraft({
+    enabled: draftEnabled,
+    userId: user?.id || null,
+    contestId,
+    problemId,
+    languageId,
+    starterCode: getTemplate(languageId),
+    currentCodeRef: sourceCodeRef,
+    onApply: (code) => {
+      if (!propSetEditorCode) setInternalSourceCode(code ?? "");
+    },
+  });
 
   const languageNames = {
     50: "C",
@@ -149,43 +172,11 @@ const Judge0CodeEditor = ({
       .padStart(2, "0")}`;
   };
 
+  const noteDraftEdit = draft.noteEdit;
   useEffect(() => {
-    if (propSetEditorCode) return;
-    const previousLanguageId = previousLanguageRef.current;
-    if (previousLanguageId !== languageId) {
-      if (problemId) {
-        localStorage.setItem(
-          editorStorageKey(problemId, previousLanguageId),
-          sourceCodeRef.current ?? ""
-        );
-      }
-      previousLanguageRef.current = languageId;
-      skipNextPersistRef.current = true;
-    }
-    if (!problemId) {
-      if (previousLanguageId !== languageId) {
-        setInternalSourceCode(getTemplate(languageId));
-      }
-      return;
-    }
-    const storedDraft = localStorage.getItem(editorStorageKey(problemId, languageId));
-    setInternalSourceCode(
-      resolveEditorSource({
-        storedDraft,
-        languageTemplate: getTemplate(languageId),
-      })
-    );
-    skipNextPersistRef.current = true;
-  }, [problemId, languageId, propSetEditorCode]);
-
-  useEffect(() => {
-    if (!problemId || propSetEditorCode) return;
-    if (skipNextPersistRef.current) {
-      skipNextPersistRef.current = false;
-      return;
-    }
-    localStorage.setItem(editorStorageKey(problemId, languageId), sourceCode ?? "");
-  }, [sourceCode, problemId, languageId, propSetEditorCode]);
+    if (!draftEnabled) return;
+    noteDraftEdit(sourceCode ?? "");
+  }, [sourceCode, draftEnabled, noteDraftEdit]);
 
   // UtilityFunctions.jsx
   let downloadCode = (sourceCode, languageId) => {
@@ -1128,6 +1119,18 @@ const Judge0CodeEditor = ({
   return (
     <div className={`max-w-4xl mx-auto mt-8 p-6 rounded-lg shadow-lg ${theme === "light" ? "bg-white text-gray-900" : "bg-gray-900 text-white"}`}>
       {/* REMOVED: Main method warning modal - no longer needed as users can submit full programs */}
+      {draftEnabled && draft.status ? (
+        <p className="text-xs app-muted mb-2" data-testid="draft-status">{draft.status}</p>
+      ) : null}
+      {draftEnabled && draft.conflict ? (
+        <div className="mb-2 text-sm" data-testid="draft-conflict">
+          <p>This draft changed on another device.</p>
+          <div className="mt-1 flex gap-2">
+            <button type="button" className="underline text-xs" onClick={draft.useCloud}>Use cloud</button>
+            <button type="button" className="underline text-xs" onClick={draft.keepLocal}>Keep this draft</button>
+          </div>
+        </div>
+      ) : null}
       <EditorContextAPI.Provider
         value={{
           setLanguageId,

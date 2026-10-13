@@ -671,6 +671,36 @@ class ContestServiceTest {
         assertEquals(0L, captor.getValue().getSkip());
     }
 
+    @Test
+    void requireContestDraftTargetFollowsVisibleProblemRules() {
+        Contest contest = publishedContest("c1", START, END);
+        contest.setBatchIds(List.of("b1"));
+        contest.setProblemIds(List.of("p1"));
+        when(mongo.findById("c1", Contest.class)).thenReturn(contest);
+        when(mongo.find(any(Query.class), eq(BatchMember.class))).thenReturn(List.of());
+        assertEquals(404, assertThrows(ResponseStatusException.class,
+            () -> service.requireContestDraftTarget(user("outsider"), "c1", "p1")).getStatusCode().value());
+
+        when(mongo.find(any(Query.class), eq(BatchMember.class))).thenReturn(List.of(member("b1", "u1")));
+        stubActiveBatches("b1");
+        assertEquals(404, assertThrows(ResponseStatusException.class,
+            () -> service.requireContestDraftTarget(user("u1"), "c1", "p1")).getStatusCode().value());
+
+        ContestService live = new ContestService(mongo, properties, Clock.fixed(START, ZoneOffset.UTC));
+        assertEquals(404, assertThrows(ResponseStatusException.class,
+            () -> live.requireContestDraftTarget(user("u1"), "c1", "other")).getStatusCode().value());
+        when(mongo.findOne(any(Query.class), eq(ContestProblemSnapshot.class)))
+            .thenReturn(snapshot("c1", "p1", "Two Sum", "A-in", "A-out"));
+        ContestService.ContestDraftTarget liveTarget = live.requireContestDraftTarget(user("u1"), "c1", "p1");
+        assertEquals("c1", liveTarget.contestId());
+        assertEquals("p1", liveTarget.problemId());
+
+        ContestService ended = new ContestService(mongo, properties, Clock.fixed(END, ZoneOffset.UTC));
+        ContestService.ContestDraftTarget endedTarget = ended.requireContestDraftTarget(user("u1"), "c1", "p1");
+        assertEquals("c1", endedTarget.contestId());
+        assertEquals("p1", endedTarget.problemId());
+    }
+
     private void stubProblemAndBatch() {
         stubProblem();
         stubBatch();

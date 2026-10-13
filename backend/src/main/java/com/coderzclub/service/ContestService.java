@@ -226,6 +226,21 @@ public class ContestService {
         return ContestProblemDetailResponse.from(snapshot);
     }
 
+    /**
+     * Same visibility as contest problem detail: published, eligible, and LIVE or ENDED.
+     * A draft save is not a submission and has no scoring effect.
+     */
+    public ContestDraftTarget requireContestDraftTarget(User user, String contestId, String problemId) {
+        ContestProblemDetailResponse detail = getVisibleProblem(user, contestId, problemId);
+        Contest contest = mongoTemplate.findById(contestId, Contest.class);
+        if (contest == null || contest.getId() == null || detail.getId() == null || detail.getId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Contest not found");
+        }
+        return new ContestDraftTarget(contest.getId(), detail.getId());
+    }
+
+    public record ContestDraftTarget(String contestId, String problemId) {}
+
     private void applyWrite(Contest contest, ContestWriteRequest body, boolean creating) {
         if (creating || body.getTitle() != null) {
             contest.setTitle(body.getTitle());

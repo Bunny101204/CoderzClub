@@ -27,9 +27,13 @@ export const logger = {
 };
 
 // Auth token management
-const getAuthToken = () => {
+export function getAuthToken() {
   return localStorage.getItem('jwtToken') || localStorage.getItem('token');
-};
+}
+
+export function getApiBaseUrl() {
+  return API_BASE_URL;
+}
 
 // Create axios instance with interceptors
 const apiClient = axios.create({
@@ -271,6 +275,23 @@ export const api = {
       payload
     ),
     getRun: (runId) => apiClient.get(`/api/contest-runs/${runId}`),
+  },
+
+  drafts: {
+    getPractice: (problemId, languageId) => apiClient.get(
+      `/api/problems/${encodeURIComponent(problemId)}/drafts/${encodeURIComponent(languageId)}`
+    ),
+    putPractice: (problemId, languageId, body) => apiClient.put(
+      `/api/problems/${encodeURIComponent(problemId)}/drafts/${encodeURIComponent(languageId)}`,
+      body
+    ),
+    getContest: (contestId, problemId, languageId) => apiClient.get(
+      `/api/contests/${encodeURIComponent(contestId)}/problems/${encodeURIComponent(problemId)}/drafts/${encodeURIComponent(languageId)}`
+    ),
+    putContest: (contestId, problemId, languageId, body) => apiClient.put(
+      `/api/contests/${encodeURIComponent(contestId)}/problems/${encodeURIComponent(problemId)}/drafts/${encodeURIComponent(languageId)}`,
+      body
+    ),
   },
 };
 

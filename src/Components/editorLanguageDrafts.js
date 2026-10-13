@@ -1,3 +1,4 @@
+// In-memory language switch helper. The editor persists through src/drafts instead.
 export function editorStorageKey(problemId, languageId) {
   return `code_${problemId}_${languageId}`;
 }
