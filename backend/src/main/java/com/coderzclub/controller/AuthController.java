@@ -108,16 +108,18 @@ public class AuthController {
             if (user.isDeleted()) {
                 return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
             }
+            boolean passwordMatch = userService.checkPassword(req.getPassword(), user.getPasswordHash());
+            if (!passwordMatch) {
+                return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+            }
+            if (user.isInactive()) {
+                return ResponseEntity.status(401).body(Map.of("error", "This account is inactive. Contact an administrator."));
+            }
             if (!user.isEmailVerified()) {
                 return ResponseEntity.status(401).body(Map.of("error", "Email is not verified. Please verify your email before logging in."));
             }
-            
-            boolean passwordMatch = userService.checkPassword(req.getPassword(), user.getPasswordHash());
-            if (passwordMatch) {
-                String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
-                return ResponseEntity.ok(new JwtResponse(token, user.getRole()));
-            }
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
+            String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
+            return ResponseEntity.ok(new JwtResponse(token, user.getRole()));
         } else {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid credentials"));
         }
@@ -158,8 +160,8 @@ public class AuthController {
             String token = authHeader.substring(7);
             String username = jwtUtil.extractUsername(token);
             Optional<User> userOpt = userService.findByUsername(username);
-            if (!userOpt.isPresent() || userOpt.get().isDeleted()) {
-                return ResponseEntity.status(401).body(Map.of("error", "User not found"));
+            if (!userOpt.isPresent() || !userOpt.get().canAuthenticate()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Invalid or expired token"));
             }
             
             if (!jwtUtil.isTokenValid(token, username)) {

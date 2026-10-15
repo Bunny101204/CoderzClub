@@ -1,5 +1,6 @@
 package com.coderzclub.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.coderzclub.model.ContestAudienceType;
 import com.coderzclub.model.ContestScoringMode;
 import com.coderzclub.model.ContestStatus;
@@ -25,6 +26,8 @@ public class ContestAdminResponse {
     private Instant createdAt;
     private Instant updatedAt;
     private ContestScoringMode scoringMode = ContestScoringMode.POINTS_FIRST_ACCEPTED;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer eligibleMemberCount;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -56,6 +59,8 @@ public class ContestAdminResponse {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public Integer getEligibleMemberCount() { return eligibleMemberCount; }
+    public void setEligibleMemberCount(Integer eligibleMemberCount) { this.eligibleMemberCount = eligibleMemberCount; }
     public ContestScoringMode getScoringMode() { return scoringMode; }
     public void setScoringMode(ContestScoringMode scoringMode) { this.scoringMode = scoringMode; }
 }

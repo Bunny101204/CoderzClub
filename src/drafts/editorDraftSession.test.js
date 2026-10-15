@@ -449,3 +449,60 @@ test("logout starts keepalive with the current token and leaves other users' dra
     unregister();
   }
 });
+
+test("a blank editor does not replace the language starter", async () => {
+  const { session, storage, applied } = harness();
+  await session.open({ ...practice(), currentCode: "", starterCode: "starter" });
+  assert.equal(applied.at(-1), "starter");
+  assert.equal(storage.getItem(buildDraftKey(practice())), null);
+});
+
+test("a slow cloud response does not replace a local edit", async () => {
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { session, applied, views } = harness({
+    async get() {
+      await gate;
+      return { code: "cloud replacement", revision: 4, updatedAt: "t" };
+    },
+  });
+  const opening = session.open({ ...practice(), currentCode: "", starterCode: "starter" });
+  session.noteEdit("starter");
+  session.noteEdit("local edit");
+  release();
+  await opening;
+  assert.equal(applied.includes("cloud replacement"), false);
+  assert.equal(views.at(-1).conflict.code, "cloud replacement");
+  assert.equal(views.at(-1).conflict.revision, 4);
+});
+
+test("a slow cloud response keeps an intentionally empty saved draft", async () => {
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { session, storage, applied } = harness({
+    async get() {
+      await gate;
+      return { code: "cloud replacement", revision: 4, updatedAt: "t" };
+    },
+  });
+  storage.setItem(buildDraftKey(practice()), JSON.stringify({
+    version: 1, code: "", dirty: true, baseRevision: 0, localUpdatedAt: "t",
+  }));
+  const opening = session.open({ ...practice(), currentCode: "starter", starterCode: "starter" });
+  release();
+  await opening;
+  assert.equal(applied.at(-1), "");
+  assert.equal(applied.includes("cloud replacement"), false);
+});
+
+test("an intentionally empty saved draft stays empty", async () => {
+  const { session, storage, applied } = harness();
+  const key = buildDraftKey(practice());
+  storage.setItem(key, JSON.stringify({ version: 1, code: "", dirty: true, baseRevision: 0, localUpdatedAt: "t" }));
+  await session.open({ ...practice(), currentCode: "starter", starterCode: "starter" });
+  assert.equal(applied.at(-1), "");
+});

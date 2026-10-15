@@ -49,7 +49,7 @@ public class ContestAccessService {
     }
 
     public boolean isEligible(User user, Contest contest, UserBatchScope scope, Instant now) {
-        if (user == null || user.isDeleted() || contest == null || !contest.isPublished()) {
+        if (user == null || !user.canAuthenticate() || contest == null || !contest.isPublished()) {
             return false;
         }
         if (contest.getAudienceType() == ContestAudienceType.ALL_USERS) {
@@ -146,7 +146,7 @@ public class ContestAccessService {
      * MongoDB cannot compound two array fields.
      */
     public boolean hasAccessibleLiveOrEndedContestContaining(User user, String problemId) {
-        if (user == null || user.isDeleted() || user.getId() == null
+        if (user == null || !user.canAuthenticate() || user.getId() == null
             || problemId == null || problemId.isBlank()) {
             return false;
         }

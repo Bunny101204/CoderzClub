@@ -20,10 +20,22 @@ const AdminBatchPage = () => {
   const [assignments, setAssignments] = useState([]);
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [userHits, setUserHits] = useState([]);
+  const [userSearchState, setUserSearchState] = useState("idle");
+  const [selectedAdds, setSelectedAdds] = useState([]);
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [memberPage, setMemberPage] = useState(0);
+  const [memberPages, setMemberPages] = useState(0);
+  const [memberFilter, setMemberFilter] = useState("");
   const [problemSearch, setProblemSearch] = useState("");
   const [problemHits, setProblemHits] = useState([]);
+  const [problemSearchState, setProblemSearchState] = useState("idle");
+  const [selectedProblems, setSelectedProblems] = useState([]);
+  const [selectedAssignments, setSelectedAssignments] = useState([]);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const [studentFilter, setStudentFilter] = useState("");
   const [reportPage, setReportPage] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -33,16 +45,25 @@ const AdminBatchPage = () => {
 
   const loadDetail = async () => {
     const response = await apiFetch(`/api/admin/batches/${id}`, { headers: authHeaders() });
-    if (!response.ok) throw new Error("Failed to load batch");
-    setDetail(await response.json());
+    if (!response.ok) throw new Error(response.status === 403 ? "You do not have permission to manage batches." : "Failed to load batch");
+    const data = await response.json();
+    setDetail(data);
+    setEditName(data.name || "");
+    setEditDescription(data.description || "");
   };
 
-  const loadMembers = async () => {
-    const response = await apiFetch(`/api/admin/batches/${id}/members?page=0&size=50`, { headers: authHeaders() });
-    if (response.ok) {
-      const data = await response.json();
-      setMembers(data.members || []);
+  const loadMembers = async (page = memberPage, search = memberFilter) => {
+    const params = new URLSearchParams({ page: String(page), size: "20" });
+    if (search.trim()) params.set("search", search.trim());
+    const response = await apiFetch(`/api/admin/batches/${id}/members?${params}`, { headers: authHeaders() });
+    if (!response.ok) {
+      setError(response.status === 403 ? "You do not have permission to view members." : "Failed to load members");
+      return;
     }
+    const data = await response.json();
+    setMembers(data.members || []);
+    setMemberPages(data.totalPages || 0);
+    setSelectedMembers([]);
   };
 
   const loadAssignments = async () => {
@@ -77,17 +98,23 @@ const AdminBatchPage = () => {
     if (!value.trim()) {
       userSearchSeq.current += 1;
       setUserHits([]);
+      setUserSearchState("idle");
       return;
     }
     const seq = ++userSearchSeq.current;
-    const response = await apiFetch(`/api/admin/batches/users?search=${encodeURIComponent(value.trim())}&size=20`, {
+    setUserSearchState("loading");
+    const response = await apiFetch(`/api/admin/batches/users?search=${encodeURIComponent(value.trim())}&page=0&size=20`, {
       headers: authHeaders()
     });
     if (seq !== userSearchSeq.current) return;
-    if (response.ok) {
-      const data = await response.json();
-      setUserHits(data.users || []);
+    if (!response.ok) {
+      setUserSearchState("error");
+      setError(response.status === 403 ? "You do not have permission to search students." : "Student search failed");
+      return;
     }
+    const data = await response.json();
+    setUserHits(data.users || []);
+    setUserSearchState("done");
   };
 
   const searchProblems = async (value) => {
@@ -95,40 +122,85 @@ const AdminBatchPage = () => {
     if (!value.trim()) {
       problemSearchSeq.current += 1;
       setProblemHits([]);
+      setProblemSearchState("idle");
       return;
     }
     const seq = ++problemSearchSeq.current;
+    setProblemSearchState("loading");
     const response = await apiFetch(`/api/problems?search=${encodeURIComponent(value.trim())}&size=20`);
     if (seq !== problemSearchSeq.current) return;
-    if (response.ok) {
-      const data = await response.json();
-      setProblemHits(data.problems || []);
+    if (!response.ok) {
+      setProblemSearchState("error");
+      setError("Problem search failed");
+      return;
     }
+    const data = await response.json();
+    setProblemHits(data.problems || []);
+    setProblemSearchState("done");
   };
 
-  const addMember = async (userId) => {
-    if (!detail?.active || busy) return;
+  const addSelectedMembers = async () => {
+    if (!selectedAdds.length) return;
+    await addMembers(selectedAdds);
+  };
+
+  const addMembers = async (userIds) => {
+    if (!detail?.active || busy || !userIds.length) return;
     setBusy(true);
     setError("");
+    setNotice("");
     const response = await apiFetch(`/api/admin/batches/${id}/members`, {
       method: "POST",
       headers: authHeaders(true),
-      body: JSON.stringify({ userIds: [userId] })
+      body: JSON.stringify({ userIds })
     });
     setBusy(false);
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      setError(data.error || "Could not add user");
+      setError(data.error || "Could not add students");
       return;
     }
-    await loadMembers();
+    setNotice(userIds.length === 1 ? "Student added." : `${userIds.length} students added.`);
+    setSelectedAdds([]);
+    await loadMembers(0, memberFilter);
+    setMemberPage(0);
     await loadDetail();
   };
 
   const removeMember = async (userId, username) => {
     if (!window.confirm(`Remove ${username} from this batch? Submissions will not be deleted.`)) return;
-    await apiFetch(`/api/admin/batches/${id}/members/${userId}`, { method: "DELETE", headers: authHeaders() });
-    await loadMembers();
+    setBusy(true);
+    setError("");
+    const response = await apiFetch(`/api/admin/batches/${id}/members/${userId}`, { method: "DELETE", headers: authHeaders() });
+    setBusy(false);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not remove student");
+      return;
+    }
+    setNotice("Student removed. Past submissions remain.");
+    await loadMembers(memberPage, memberFilter);
+    await loadDetail();
+  };
+
+  const removeSelectedMembers = async () => {
+    if (!selectedMembers.length) return;
+    if (!window.confirm(`Remove ${selectedMembers.length} selected students? Submissions will not be deleted.`)) return;
+    setBusy(true);
+    setError("");
+    const response = await apiFetch(`/api/admin/batches/${id}/members/remove`, {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({ userIds: selectedMembers })
+    });
+    setBusy(false);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not remove selected students");
+      return;
+    }
+    setNotice("Selected students removed. Past submissions remain.");
+    await loadMembers(memberPage, memberFilter);
     await loadDetail();
   };
 
@@ -158,10 +230,89 @@ const AdminBatchPage = () => {
     await loadDetail();
   };
 
+  const assignSelectedProblems = async () => {
+    if (!detail?.active || busy || !selectedProblems.length) return;
+    setBusy(true);
+    setError("");
+    const response = await apiFetch(`/api/admin/batches/${id}/assignments`, {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({ problemIds: selectedProblems })
+    });
+    setBusy(false);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not assign problems");
+      return;
+    }
+    setNotice("Problems assigned.");
+    setSelectedProblems([]);
+    await loadAssignments();
+    await loadDetail();
+  };
+
+  const unassignSelected = async () => {
+    if (!selectedAssignments.length) return;
+    if (!window.confirm(`Unassign ${selectedAssignments.length} problems? Completed work stays on the problems.`)) return;
+    setBusy(true);
+    setError("");
+    const response = await apiFetch(`/api/admin/batches/${id}/assignments/remove`, {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({ problemIds: selectedAssignments })
+    });
+    setBusy(false);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not unassign problems");
+      return;
+    }
+    setNotice("Problems unassigned. Completed submissions remain.");
+    setSelectedAssignments([]);
+    await loadAssignments();
+    await loadDetail();
+  };
+
+  const saveDetails = async () => {
+    setBusy(true);
+    setError("");
+    const response = await apiFetch(`/api/admin/batches/${id}`, {
+      method: "PATCH",
+      headers: authHeaders(true),
+      body: JSON.stringify({ name: editName, description: editDescription })
+    });
+    setBusy(false);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not update the batch");
+      return;
+    }
+    setDetail(await response.json());
+    setNotice("Batch details saved.");
+  };
+
   const archive = async () => {
-    if (!window.confirm("Archive this batch? Users, problems, and submissions stay intact.")) return;
+    if (!window.confirm("Archive this batch? Users, problems, and submissions stay intact. New membership and assignment changes will stop.")) return;
     const response = await apiFetch(`/api/admin/batches/${id}/archive`, { method: "POST", headers: authHeaders() });
-    if (response.ok) setDetail(await response.json());
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not archive the batch");
+      return;
+    }
+    setDetail(await response.json());
+    setNotice("Batch archived. Historical reports remain available.");
+  };
+
+  const reactivate = async () => {
+    if (!window.confirm("Reactivate this batch? Existing members become eligible again. Membership history is not recreated.")) return;
+    const response = await apiFetch(`/api/admin/batches/${id}/reactivate`, { method: "POST", headers: authHeaders() });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Could not reactivate the batch");
+      return;
+    }
+    setDetail(await response.json());
+    setNotice("Batch reactivated.");
   };
 
   const exportCsv = async () => {
@@ -197,18 +348,27 @@ const AdminBatchPage = () => {
           <div>
             <h1 className="text-3xl font-bold">{detail.name}</h1>
             <p className="app-muted">{detail.description || "No description"}</p>
-            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-              {detail.active ? "Active" : "Archived"} · {detail.memberCount} students · {detail.assignmentCount} problems
+            <p className="text-sm mt-2 flex flex-wrap gap-2 items-center">
+              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${detail.active ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-900"}`}>
+                {detail.active ? "Active" : "Archived"}
+              </span>
+              <span>{detail.memberCount} students</span>
+              <span>{detail.assignmentCount} problems</span>
             </p>
           </div>
-          {detail.active && (
-            <button onClick={archive} className="px-4 py-2 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white">Archive batch</button>
-          )}
+          <div className="flex gap-2">
+            {detail.active ? (
+              <button type="button" onClick={archive} className="px-4 py-2 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white">Archive batch</button>
+            ) : (
+              <button type="button" onClick={reactivate} className="px-4 py-2 rounded bg-green-600 text-white">Reactivate batch</button>
+            )}
+          </div>
         </div>
         {!detail.active && (
-          <div className="mb-4 text-yellow-800 dark:text-yellow-300">This batch is archived. Reports remain available; membership and assignments cannot be changed.</div>
+          <div className="mb-4 text-yellow-800 dark:text-yellow-300" role="status">This batch is archived. Reports remain available; membership and assignments cannot be changed.</div>
         )}
-        {error && <div className="mb-4 text-red-600 dark:text-red-400">{error}</div>}
+        {error && <div className="mb-4 text-red-600 dark:text-red-400" role="alert">{error}</div>}
+        {notice && <div className="mb-4 text-green-700 dark:text-green-300" role="status">{notice}</div>}
         <div className="flex gap-4 border-b border-gray-200 dark:border-gray-700 mb-6 overflow-x-auto">
           {["overview", "members", "assignments", "report"].map((item) => (
             <button
@@ -222,42 +382,70 @@ const AdminBatchPage = () => {
         </div>
 
         {tab === "overview" && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="app-surface rounded p-4">Students: {detail.memberCount}</div>
-            <div className="app-surface rounded p-4">Assigned problems: {detail.assignmentCount}</div>
-            <div className="app-surface rounded p-4">Status: {detail.active ? "Active" : "Archived"}</div>
-          </div>
+          <form className="app-surface rounded p-4 grid gap-3 max-w-xl" onSubmit={(event) => { event.preventDefault(); saveDetails(); }}>
+            <label className="text-sm font-medium" htmlFor="batch-name">Name</label>
+            <input id="batch-name" value={editName} onChange={(e) => setEditName(e.target.value)} className="px-3 py-2 app-input rounded" required />
+            <label className="text-sm font-medium" htmlFor="batch-description">Description</label>
+            <textarea id="batch-description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className="px-3 py-2 app-input rounded min-h-24" />
+            <button type="submit" disabled={busy} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50 w-fit">Save details</button>
+          </form>
         )}
 
         {tab === "members" && (
           <div>
-            <input
-              value={userSearch}
-              onChange={(e) => searchUsers(e.target.value)}
-              placeholder="Search users by username or email"
-              className="w-full max-w-md px-3 py-2 app-input rounded mb-4"
-            />
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <input
+                value={userSearch}
+                onChange={(e) => searchUsers(e.target.value)}
+                placeholder="Search registered students"
+                aria-label="Search students to add"
+                className="w-full max-w-md px-3 py-2 app-input rounded"
+              />
+              <button type="button" className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50" disabled={!detail.active || busy || !selectedAdds.length} onClick={addSelectedMembers}>
+                Add Students
+              </button>
+            </div>
+            {userSearchState === "loading" && <p className="text-sm app-muted mb-3">Searching students...</p>}
+            {userSearchState === "done" && userHits.length === 0 && <p className="text-sm mb-3">Search returned no results.</p>}
             {userHits.length > 0 && (
               <div className="app-surface rounded p-3 mb-4">
                 {userHits.map((user) => (
-                  <div key={user.id} className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
-                    <span>{user.username} <span className="app-muted">{user.email}</span></span>
-                    <button className="text-green-700 dark:text-green-400" disabled={!detail.active || busy} onClick={() => addMember(user.id)}>Add</button>
-                  </div>
+                  <label key={user.id} className="flex items-center justify-between gap-3 py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
+                    <span className="flex items-center gap-2">
+                      <input type="checkbox" checked={selectedAdds.includes(user.id)} onChange={() => setSelectedAdds((current) => current.includes(user.id) ? current.filter((item) => item !== user.id) : [...current, user.id])} />
+                      <span>{user.username} <span className="app-muted">{user.email}</span></span>
+                    </span>
+                    <span className="text-xs">{user.accountStatus || "ACTIVE"}{user.emailVerified ? "" : " · unverified"}</span>
+                  </label>
                 ))}
               </div>
             )}
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <input
+                value={memberFilter}
+                onChange={(e) => setMemberFilter(e.target.value)}
+                placeholder="Filter current members"
+                aria-label="Filter current members"
+                className="w-full max-w-md px-3 py-2 app-input rounded"
+              />
+              <button type="button" className="px-4 py-2 rounded bg-blue-600 text-white" onClick={() => { setMemberPage(0); loadMembers(0, memberFilter); }}>Search members</button>
+              <button type="button" className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-50" disabled={!detail.active || busy || !selectedMembers.length} onClick={removeSelectedMembers}>Remove selected</button>
+            </div>
             <div className="app-surface rounded p-4 overflow-x-auto">
-              {members.length === 0 ? "No members yet." : (
+              {members.length === 0 ? (memberFilter.trim() ? "Search returned no results." : "No members yet.") : (
                 <table className="w-full text-left">
-                  <thead><tr><th className="py-2">Username</th><th>Email</th><th></th></tr></thead>
+                  <thead><tr><th className="py-2"></th><th>Username</th><th>Email</th><th>Status</th><th></th></tr></thead>
                   <tbody>
                     {members.map((user) => (
                       <tr key={user.id} className="border-t border-gray-200 dark:border-gray-700">
-                        <td className="py-2">{user.username}</td>
+                        <td className="py-2">
+                          <input type="checkbox" aria-label={`Select ${user.username}`} checked={selectedMembers.includes(user.id)} onChange={() => setSelectedMembers((current) => current.includes(user.id) ? current.filter((item) => item !== user.id) : [...current, user.id])} />
+                        </td>
+                        <td>{user.username}</td>
                         <td>{user.email}</td>
+                        <td>{user.accountStatus || "ACTIVE"}{user.emailVerified === false ? " · unverified" : ""}</td>
                         <td>
-                          <button className="text-red-600 dark:text-red-400" disabled={!detail.active} onClick={() => removeMember(user.id, user.username)}>Remove</button>
+                          <button type="button" className="text-red-600 dark:text-red-400" disabled={!detail.active || busy} onClick={() => removeMember(user.id, user.username)}>Remove</button>
                         </td>
                       </tr>
                     ))}
@@ -265,6 +453,12 @@ const AdminBatchPage = () => {
                 </table>
               )}
             </div>
+            {memberPages > 1 && (
+              <div className="flex gap-2 mt-4">
+                <button type="button" disabled={memberPage === 0} onClick={() => { const next = Math.max(0, memberPage - 1); setMemberPage(next); loadMembers(next, memberFilter); }} className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50">Prev</button>
+                <button type="button" disabled={memberPage + 1 >= memberPages} onClick={() => { const next = memberPage + 1; setMemberPage(next); loadMembers(next, memberFilter); }} className="px-3 py-1 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white disabled:opacity-50">Next</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -276,26 +470,35 @@ const AdminBatchPage = () => {
               placeholder="Search problems by numeric ID or title"
               className="w-full max-w-md px-3 py-2 app-input rounded mb-4"
             />
+            {problemSearchState === "loading" && <p className="text-sm app-muted mb-3">Searching problems...</p>}
+            {problemSearchState === "done" && problemHits.length === 0 && <p className="text-sm mb-3">Search returned no results.</p>}
             {problemHits.length > 0 && (
               <div className="app-surface rounded p-3 mb-4">
+                <button type="button" className="mb-2 px-3 py-1 rounded bg-green-600 text-white disabled:opacity-50" disabled={!detail.active || busy || !selectedProblems.length} onClick={assignSelectedProblems}>Assign selected</button>
                 {problemHits.map((problem) => (
-                  <div key={problem.id} className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
-                    <span>
-                      <span className="font-mono mr-2">{displayAssignedProblemId(problem)}</span>
-                      {problem.title} <span className="app-muted">{problem.difficulty}</span>
+                  <label key={problem.id} className="flex justify-between gap-3 py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
+                    <span className="flex items-center gap-2">
+                      <input type="checkbox" checked={selectedProblems.includes(problem.id)} onChange={() => setSelectedProblems((current) => current.includes(problem.id) ? current.filter((item) => item !== problem.id) : [...current, problem.id])} />
+                      <span>
+                        <span className="font-mono mr-2">{displayAssignedProblemId(problem)}</span>
+                        {problem.title} <span className="app-muted">{problem.difficulty}</span>
+                      </span>
                     </span>
-                    <button className="text-green-700 dark:text-green-400" disabled={!detail.active || busy} onClick={() => assignProblem(problem.id)}>Assign</button>
-                  </div>
+                  </label>
                 ))}
               </div>
             )}
+            <button type="button" className="mb-3 px-3 py-1 rounded bg-red-600 text-white disabled:opacity-50" disabled={!detail.active || busy || !selectedAssignments.length} onClick={unassignSelected}>Unassign selected</button>
             <div className="app-surface rounded p-4 overflow-x-auto">
               {assignments.length === 0 ? "No assignments yet." : (
                 <table className="w-full text-left">
-                  <thead><tr><th className="py-2">ID</th><th>Title</th><th>Difficulty</th><th>Tags</th><th></th></tr></thead>
+                  <thead><tr><th className="py-2"></th><th>ID</th><th>Title</th><th>Difficulty</th><th>Tags</th><th></th></tr></thead>
                   <tbody>
                     {assignments.map((problem) => (
                       <tr key={problem.problemId} className="border-t border-gray-200 dark:border-gray-700">
+                        <td className="py-2">
+                          <input type="checkbox" aria-label={`Select ${problem.title || "problem"}`} checked={selectedAssignments.includes(problem.problemId)} onChange={() => setSelectedAssignments((current) => current.includes(problem.problemId) ? current.filter((item) => item !== problem.problemId) : [...current, problem.problemId])} />
+                        </td>
                         <td className="py-2 font-mono">{displayAssignedProblemId(problem)}</td>
                         <td>{problem.title}</td>
                         <td>{problem.difficulty}</td>

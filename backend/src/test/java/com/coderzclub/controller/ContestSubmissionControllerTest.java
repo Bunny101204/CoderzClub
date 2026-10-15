@@ -1,5 +1,6 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.config.GlobalExceptionHandler;
 import com.coderzclub.dto.ContestSubmissionJobRequest;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
@@ -144,6 +145,30 @@ class ContestSubmissionControllerTest {
                 .content("{\"code\":\"print(1)\",\"languageId\":71}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error").value("CONTEST_NOT_LIVE"));
+    }
+
+    @Test
+    void admissionConflictBeatsGenericHandler() throws Exception {
+        MockMvc ordered = MockMvcBuilders.standaloneSetup(new ContestSubmissionController(admissionService, userRepository))
+            .setControllerAdvice(new GlobalExceptionHandler(), new ApiExceptionHandler())
+            .build();
+        User alice = user("u1", "alice");
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(alice));
+        when(admissionService.admit(eq(alice), eq("c1"), eq("p1"), any()))
+            .thenThrow(ContestAdmissionException.notLive());
+        ordered.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("CONTEST_NOT_LIVE"));
+
+        when(admissionService.admit(eq(alice), eq("c1"), eq("p1"), any()))
+            .thenThrow(ContestAdmissionException.ended());
+        ordered.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("CONTEST_ENDED"));
     }
 
     @Test

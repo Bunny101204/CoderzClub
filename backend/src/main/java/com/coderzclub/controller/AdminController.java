@@ -8,6 +8,7 @@ import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.SubmissionRepository;
 import com.coderzclub.service.AccountDeletionService;
 import com.coderzclub.service.AccountRoles;
+import com.coderzclub.service.StudentAccountService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -37,6 +38,9 @@ public class AdminController {
 
     @Autowired
     private AccountDeletionService accountDeletionService;
+
+    @Autowired
+    private StudentAccountService studentAccountService;
 
     @GetMapping("/dashboard")
     public ResponseEntity<?> getDashboardStats() {
@@ -154,7 +158,10 @@ public class AdminController {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
-            user.setRole(AccountRoles.assignableRole(request == null ? null : request.getRole()));
+            String nextRole = AccountRoles.assignableRole(request == null ? null : request.getRole());
+            String status = user.getAccountStatus() == null ? "ACTIVE" : user.getAccountStatus();
+            studentAccountService.assertRetainsAdministrator(user, nextRole, status);
+            user.setRole(nextRole);
             userRepository.save(user);
             
             return ResponseEntity.ok("User role updated successfully");
@@ -164,6 +171,43 @@ public class AdminController {
         }
     }
     
+    @GetMapping("/students")
+    public ResponseEntity<?> searchStudents(
+        @RequestParam(required = false) String search,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(studentAccountService.search(search, page, size));
+    }
+
+    @GetMapping("/students/{userId}")
+    public ResponseEntity<?> student(@PathVariable String userId) {
+        return ResponseEntity.ok(studentAccountService.profile(userId));
+    }
+
+    @PatchMapping("/students/{userId}")
+    public ResponseEntity<?> updateStudent(@PathVariable String userId, @RequestBody StudentProfileUpdate request) {
+        return ResponseEntity.ok(studentAccountService.updateProfile(
+            userId,
+            request == null ? null : request.getBio(),
+            request == null ? null : request.getLocation(),
+            request == null ? null : request.getWebsite()));
+    }
+
+    @PostMapping("/students/{userId}/deactivate")
+    public ResponseEntity<?> deactivateStudent(@PathVariable String userId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String actor = auth == null ? null : auth.getName();
+        return ResponseEntity.ok(studentAccountService.setActive(userId, false, actor));
+    }
+
+    @PostMapping("/students/{userId}/activate")
+    public ResponseEntity<?> activateStudent(@PathVariable String userId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String actor = auth == null ? null : auth.getName();
+        return ResponseEntity.ok(studentAccountService.setActive(userId, true, actor));
+    }
+
     @GetMapping("/analytics/submissions")
     public ResponseEntity<?> getSubmissionAnalytics() {
         try {
@@ -219,5 +263,18 @@ public class AdminController {
         
         public String getRole() { return role; }
         public void setRole(String role) { this.role = role; }
+    }
+
+    public static class StudentProfileUpdate {
+        private String bio;
+        private String location;
+        private String website;
+
+        public String getBio() { return bio; }
+        public void setBio(String bio) { this.bio = bio; }
+        public String getLocation() { return location; }
+        public void setLocation(String location) { this.location = location; }
+        public String getWebsite() { return website; }
+        public void setWebsite(String website) { this.website = website; }
     }
 }

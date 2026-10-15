@@ -144,7 +144,7 @@ public class UserService implements UserDetailsService {
             user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
         }
-        if (user.isDeleted()) {
+        if (!user.canAuthenticate()) {
             throw new UsernameNotFoundException("User not found");
         }
         return user;
@@ -157,7 +157,7 @@ public class UserService implements UserDetailsService {
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getUsername())
                 .password(password)
-                .disabled(!user.isEmailVerified() || user.isDeleted())
+                .disabled(!user.isEmailVerified() || !user.canAuthenticate())
                 .authorities(roleAuthority)
                 .accountExpired(false)
                 .credentialsExpired(false)

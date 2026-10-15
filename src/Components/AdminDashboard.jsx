@@ -28,6 +28,7 @@ const AdminDashboard = () => {
   const [totalProblemItems, setTotalProblemItems] = useState(0);
   const [batches, setBatches] = useState([]);
   const [batchSearch, setBatchSearch] = useState("");
+  const [batchStatus, setBatchStatus] = useState("all");
   const [newBatchName, setNewBatchName] = useState("");
   const [newBatchDescription, setNewBatchDescription] = useState("");
   const [batchError, setBatchError] = useState("");
@@ -154,6 +155,8 @@ const AdminDashboard = () => {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
       const params = new URLSearchParams({ page: "0", size: "20" });
       if (batchSearch.trim()) params.set("search", batchSearch.trim());
+      if (batchStatus === "active") params.set("active", "true");
+      if (batchStatus === "archived") params.set("active", "false");
       const response = await apiFetch(`/api/admin/batches?${params}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
@@ -202,7 +205,7 @@ const AdminDashboard = () => {
     if (activeTab === "batches") {
       fetchAdminBatches();
     }
-  }, [activeTab, batchSearch]);
+  }, [activeTab, batchSearch, batchStatus]);
 
   // Delete problem handler
   const handleDeleteProblem = async (id) => {
@@ -633,7 +636,10 @@ const AdminDashboard = () => {
 
         {activeTab === "batches" && (
           <>
-            <h2 className="text-xl font-semibold mb-4">Batches</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 className="text-xl font-semibold">Batches</h2>
+              <Link to="/admin/students" className="text-blue-600 dark:text-blue-400 hover:underline">Manage students</Link>
+            </div>
             <form onSubmit={createBatch} className="app-surface rounded-lg p-4 mb-4 grid gap-3 sm:grid-cols-2">
               <input
                 value={newBatchName}
@@ -652,12 +658,19 @@ const AdminDashboard = () => {
                 {batchError && <span className="text-red-600 dark:text-red-400 text-sm">{batchError}</span>}
               </div>
             </form>
-            <input
-              value={batchSearch}
-              onChange={(e) => setBatchSearch(e.target.value)}
-              placeholder="Search batches by name"
-              className="px-3 py-2 app-input rounded mb-4 w-full sm:w-80"
-            />
+            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+              <input
+                value={batchSearch}
+                onChange={(e) => setBatchSearch(e.target.value)}
+                placeholder="Search batches by name"
+                className="px-3 py-2 app-input rounded w-full sm:w-80"
+              />
+              <select value={batchStatus} onChange={(e) => setBatchStatus(e.target.value)} aria-label="Batch status" className="px-3 py-2 app-input rounded">
+                <option value="all">Active and archived</option>
+                <option value="active">Active</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
             <div className="app-surface rounded-lg shadow p-4 overflow-x-auto">
               {batches.length === 0 ? (
                 <div className="app-muted">No batches found.</div>

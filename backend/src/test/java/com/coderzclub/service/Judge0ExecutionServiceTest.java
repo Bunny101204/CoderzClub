@@ -46,6 +46,22 @@ class Judge0ExecutionServiceTest {
     }
 
     @Test
+    void multilineCustomStdinReachesTheProviderPayloadUnchanged() {
+        SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
+        limits.setMaxExecutionTimeSeconds(10);
+        Judge0ProviderProperties provider = new Judge0ProviderProperties();
+        String stdin = "5 2\n10 20 30 40 50";
+        Map<String, Object> javaPayload = Judge0ExecutionService.buildPayload(
+            "import java.util.*; class Main { public static void main(String[] args) { Scanner in = new Scanner(System.in); System.out.println(in.nextInt()); } }",
+            62, stdin, 1, limits, provider);
+        Map<String, Object> pythonPayload = Judge0ExecutionService.buildPayload(
+            "import sys\nprint(sys.stdin.read())",
+            71, stdin, 1, limits, provider);
+        assertEquals(stdin, javaPayload.get("stdin"));
+        assertEquals(stdin, pythonPayload.get("stdin"));
+    }
+
+    @Test
     void harnessPathKeepsSixtySecondCpuCap() {
         SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
         limits.setMaxExecutionTimeSeconds(15);

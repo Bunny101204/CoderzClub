@@ -65,7 +65,7 @@ public class ContestSubmissionAdmissionService {
     public SubmissionJob admit(User user, String contestId, String problemId, ContestSubmissionJobRequest request) {
         Instant now = clock.instant();
 
-        if (user == null || user.isDeleted() || contestId == null || contestId.isBlank()
+        if (user == null || !user.canAuthenticate() || contestId == null || contestId.isBlank()
             || problemId == null || problemId.isBlank()) {
             throw ContestAdmissionException.notFound();
         }

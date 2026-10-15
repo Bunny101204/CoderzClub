@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
-import { getTemplate } from "./LanguageTemplates";
+import { chooseStarterCode } from "./LanguageTemplates";
+import { executionStdin } from "../execution/customStdin.js";
 import {
   getJobStatusMessage,
   getPollDelay,
@@ -47,15 +48,17 @@ const Judge0CodeEditor = ({
   const setLanguageId = propSetLanguageId || setInternalLanguageId;
 
   // Use controlled or internal state for code. Local draft seeding is only for the uncontrolled editor.
+  const preferredLanguageId = propLanguageId !== undefined ? propLanguageId : 62;
   const [internalSourceCode, setInternalSourceCode] = useState(() => {
     if (propSetEditorCode) return initialCode;
     const local = readInitialDraftCode({
       userId: user?.id,
       contestId,
       problemId,
-      languageId: propLanguageId !== undefined ? propLanguageId : 62,
+      languageId: preferredLanguageId,
     });
-    return local != null ? local : initialCode;
+    if (local != null) return local;
+    return chooseStarterCode(preferredLanguageId, initialCode, preferredLanguageId);
   });
   const sourceCode = propSetEditorCode ? initialCode : internalSourceCode;
   const setSourceCode = propSetEditorCode || setInternalSourceCode;
@@ -92,7 +95,7 @@ const Judge0CodeEditor = ({
     contestId,
     problemId,
     languageId,
-    starterCode: getTemplate(languageId),
+    starterCode: chooseStarterCode(languageId, initialCode, preferredLanguageId),
     currentCodeRef: sourceCodeRef,
     onApply: (code) => {
       if (!propSetEditorCode) setInternalSourceCode(code ?? "");
@@ -659,12 +662,16 @@ const Judge0CodeEditor = ({
         );
       }
       
-      const stdinInput = useCustomInput ? userInput : (buildStdinForParams(userInput) ?? "");
+      const preserveExactly = !isTestCaseMode || useCustomInput;
+      const stdinInput = executionStdin({
+        preserveExactly,
+        value: preserveExactly ? userInput : (buildStdinForParams(userInput) ?? ""),
+      });
       
       const response = await postToJudge0({
         language_id: languageId,
         source_code: codeToRun,
-        stdin: stdinInput + "\n",
+        stdin: stdinInput,
       });
       
       const res = response.data;
@@ -682,7 +689,7 @@ const Judge0CodeEditor = ({
       // Determine output
       let result = "";
       if (res.stdout) {
-        result = res.stdout.trim();
+        result = useCustomInput ? String(res.stdout) : res.stdout.trim();
       } else if (res.compile_output) {
         result = res.compile_output.trim();
       } else if (res.stderr) {
@@ -1016,13 +1023,13 @@ const Judge0CodeEditor = ({
 
   // Reset function
   const handleReset = () => {
-    const template = getTemplate(languageId);
+    const template = chooseStarterCode(languageId, initialCode, preferredLanguageId);
     setInternalSourceCode(template);
+    draft.noteEdit(template);
     setOutput("");
     setResults([]);
     setSubmitResult(null);
     setShowAccepted(false);
-    setUserInput("");
     setSubmissionStatus(null);
     // Reset timer
     setStartTime(Date.now());
@@ -1279,12 +1286,13 @@ const Judge0CodeEditor = ({
       {/* Normal editor mode: single input/output */}
       {!isTestCaseMode && (
         <>
-          <input
-            type="text"
-            className="w-full p-3 mb-4 rounded-lg app-input text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-            placeholder="Enter input (stdin)"
+          <textarea
+            className="w-full min-h-28 p-3 mb-4 rounded-lg app-input text-sm font-mono whitespace-pre focus:outline-none focus:ring-2 focus:ring-green-400"
+            placeholder={"Enter input (stdin)\n5 2\n10 20 30 40 50"}
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
+            spellCheck={false}
+            aria-label="Custom program input"
           />
           <button
             onClick={handleSingleRun}
@@ -1340,12 +1348,13 @@ const Judge0CodeEditor = ({
             </label>
 
             {useCustomInput && (
-              <input
-                type="text"
-                className="w-full p-3 mb-4 rounded-lg app-input text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                placeholder="Enter custom input (stdin)"
+              <textarea
+                className="w-full min-h-28 p-3 mb-4 rounded-lg app-input text-sm font-mono whitespace-pre focus:outline-none focus:ring-2 focus:ring-green-400"
+                placeholder={"Enter custom input (stdin)\n5 2\n10 20 30 40 50"}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
+                spellCheck={false}
+                aria-label="Custom program input"
               />
             )}
           </div>

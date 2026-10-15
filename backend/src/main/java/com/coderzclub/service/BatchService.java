@@ -165,11 +165,49 @@ public class BatchService {
     }
 
     public void removeMember(String batchId, String userId) {
+        removeMembers(batchId, List.of(userId));
+    }
+
+    public int removeMembers(String batchId, List<String> userIds) {
         requireWritable(batchId);
-        mongoTemplate.remove(
-            Query.query(Criteria.where("batchId").is(batchId).and("userId").is(userId)),
-            BatchMember.class);
+        if (userIds == null || userIds.isEmpty()) {
+            throw new IllegalArgumentException("userIds is required");
+        }
+        int removed = 0;
+        for (String rawId : userIds) {
+            if (rawId == null || rawId.isBlank()) {
+                continue;
+            }
+            var result = mongoTemplate.remove(
+                Query.query(Criteria.where("batchId").is(batchId).and("userId").is(rawId.trim())),
+                BatchMember.class);
+            if (result != null) {
+                removed += (int) result.getDeletedCount();
+            }
+        }
         touch(batchId);
+        return removed;
+    }
+
+    public int removeAssignments(String batchId, List<String> problemIds) {
+        requireWritable(batchId);
+        if (problemIds == null || problemIds.isEmpty()) {
+            throw new IllegalArgumentException("problemIds is required");
+        }
+        int removed = 0;
+        for (String rawId : problemIds) {
+            if (rawId == null || rawId.isBlank()) {
+                continue;
+            }
+            var result = mongoTemplate.remove(
+                Query.query(Criteria.where("batchId").is(batchId).and("problemId").is(rawId.trim())),
+                BatchAssignment.class);
+            if (result != null) {
+                removed += (int) result.getDeletedCount();
+            }
+        }
+        touch(batchId);
+        return removed;
     }
 
     public Map<String, Object> listMembers(String batchId, int page, int size, String search) {
@@ -193,7 +231,7 @@ public class BatchService {
         }
         long total = mongoTemplate.count(usersQuery, User.class);
         usersQuery.with(Sort.by("username")).skip((long) safePage * safeSize).limit(safeSize);
-        usersQuery.fields().include("username").include("email");
+        usersQuery.fields().include("username").include("email").include("accountStatus").include("emailVerified");
         List<Map<String, Object>> members = new ArrayList<>();
         for (User user : mongoTemplate.find(usersQuery, User.class)) {
             members.add(safeUser(user));
@@ -297,7 +335,7 @@ public class BatchService {
         }
         long total = mongoTemplate.count(query, User.class);
         query.with(Sort.by("username")).skip((long) safePage * safeSize).limit(safeSize);
-        query.fields().include("username").include("email");
+        query.fields().include("username").include("email").include("accountStatus").include("emailVerified");
         List<Map<String, Object>> users = new ArrayList<>();
         for (User user : mongoTemplate.find(query, User.class)) {
             users.add(safeUser(user));
@@ -398,6 +436,8 @@ public class BatchService {
         map.put("id", user.getId());
         map.put("username", user.getUsername());
         map.put("email", user.getEmail());
+        map.put("accountStatus", user.getAccountStatus() == null ? "ACTIVE" : user.getAccountStatus());
+        map.put("emailVerified", user.isEmailVerified());
         return map;
     }
 

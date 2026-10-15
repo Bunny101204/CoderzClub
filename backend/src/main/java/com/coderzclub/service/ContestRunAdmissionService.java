@@ -85,7 +85,7 @@ public class ContestRunAdmissionService {
             throw e;
         }
 
-        if (user == null || user.isDeleted() || contestId == null || contestId.isBlank()
+        if (user == null || !user.canAuthenticate() || contestId == null || contestId.isBlank()
             || problemId == null || problemId.isBlank()) {
             metrics.rejected("NOT_FOUND");
             throw ContestAdmissionException.notFound();

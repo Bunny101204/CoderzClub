@@ -21,7 +21,7 @@ const AuthPage = () => {
 
   useEffect(() => {
     const verified = searchParams.get('verified');
-    const errorParam = searchParams.get('error');
+    const reason = searchParams.get('reason');
     const verificationToken = searchParams.get('verifyEmailToken');
 
     if (verificationToken) {
@@ -45,10 +45,12 @@ const AuthPage = () => {
       return;
     }
 
-    if (verified === 'true') {
+    if (reason === 'session_expired') {
+      setInfo('Your session expired. Please sign in again.');
+    } else if (verified === 'true') {
       setInfo('Email verified successfully. Please login.');
-    } else if (errorParam) {
-      setError(decodeURIComponent(errorParam));
+    } else if (searchParams.get('error')) {
+      setError('Sign-in could not be completed. Please try again.');
     }
   }, [searchParams, setSearchParams]);
 

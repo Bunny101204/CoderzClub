@@ -97,6 +97,23 @@ class ContestAccessServiceTest {
         assertTrue(service.isEligible(actor, contest, scope, end));
     }
 
+    @Test
+    void inactiveStudentIsNotEligibleForALiveBatchContest() {
+        Instant liveNow = Instant.parse("2026-06-01T14:00:00Z");
+        ContestAccessService service = serviceAt(liveNow);
+        stubActiveMember();
+        Contest contest = new Contest();
+        contest.setPublished(true);
+        contest.setAudienceType(ContestAudienceType.BATCHES);
+        contest.setBatchIds(List.of("b1"));
+        contest.setStartAt(START);
+        contest.setEndAt(Instant.parse("2026-06-01T15:00:00Z"));
+        User actor = user("u1");
+        actor.setAccountStatus("INACTIVE");
+        ContestAccessService.UserBatchScope scope = service.scopeForUser("u1");
+        assertFalse(service.isEligible(actor, contest, scope, liveNow));
+    }
+
     private ContestAccessService serviceAt(Instant instant) {
         return new ContestAccessService(mongo, properties, Clock.fixed(instant, ZoneOffset.UTC));
     }

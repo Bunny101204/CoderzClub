@@ -24,6 +24,7 @@ const ProblemPage = lazy(() => import("./Components/ProblemPage"));
 const ProblemPageNew = lazy(() => import("./Components/ProblemPageNew"));
 const AdminDashboard = lazy(() => import("./Components/AdminDashboard"));
 const AdminBatchPage = lazy(() => import("./Components/AdminBatchPage"));
+const AdminStudentsPage = lazy(() => import("./Components/AdminStudentsPage"));
 const AddProblem = lazy(() => import("./Components/AddProblem"));
 const AddProblemNew = lazy(() => import("./Components/AddProblemNew"));
 const AddBundle = lazy(() => import("./Components/AddBundle"));
@@ -206,6 +207,16 @@ function AppContent() {
           element={
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/students"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><AdminStudentsPage /></Suspense>
             ) : (
               <Navigate to="/home" replace />
             )

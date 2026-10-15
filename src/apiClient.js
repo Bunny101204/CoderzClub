@@ -130,13 +130,15 @@ authClient.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('jwtToken');
       localStorage.removeItem('token');
+      logger.info('Session is no longer valid.');
+    } else {
+      logger.error('Auth request failed:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        status: error.response?.status,
+        message: error.message
+      });
     }
-    logger.error('Auth request failed:', {
-      url: error.config?.url,
-      method: error.config?.method,
-      status: error.response?.status,
-      message: error.message
-    });
     return Promise.reject(error);
   }
 );

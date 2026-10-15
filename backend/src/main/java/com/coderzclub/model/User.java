@@ -45,7 +45,7 @@ public class User {
     private String passwordResetToken;
     private Date passwordResetTokenExpiry;
     private boolean profileComplete; // Whether profile is complete
-    private String accountStatus = "ACTIVE"; // ACTIVE or DELETED
+    private String accountStatus = "ACTIVE"; // ACTIVE, INACTIVE, or DELETED
     private Date deletedAt;
     
     // Default constructor
@@ -98,6 +98,8 @@ public class User {
     public String getAccountStatus() { return accountStatus; }
     public Date getDeletedAt() { return deletedAt; }
     public boolean isDeleted() { return "DELETED".equals(accountStatus); }
+    public boolean isInactive() { return "INACTIVE".equals(accountStatus); }
+    public boolean canAuthenticate() { return !isDeleted() && !isInactive(); }
     
     // Setters
     public void setId(String id) { this.id = id; }

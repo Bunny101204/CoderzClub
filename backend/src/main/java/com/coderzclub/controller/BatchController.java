@@ -91,10 +91,21 @@ public class BatchController {
         return ResponseEntity.ok(batchService.detail(batchService.deactivate(id).getId()));
     }
 
+    @PostMapping("/{id}/reactivate")
+    public ResponseEntity<?> reactivate(@PathVariable String id) {
+        return ResponseEntity.ok(batchService.detail(batchService.update(id, null, null, true).getId()));
+    }
+
     @PostMapping("/{id}/members")
     public ResponseEntity<?> addMembers(@PathVariable String id, @RequestBody BatchIdsRequest body) {
         List<String> userIds = body == null ? List.of() : body.getUserIds();
         return ResponseEntity.ok(Map.of("members", batchService.addMembers(id, userIds)));
+    }
+
+    @PostMapping("/{id}/members/remove")
+    public ResponseEntity<?> removeMembers(@PathVariable String id, @RequestBody BatchIdsRequest body) {
+        List<String> userIds = body == null ? List.of() : body.getUserIds();
+        return ResponseEntity.ok(Map.of("removed", batchService.removeMembers(id, userIds)));
     }
 
     @DeleteMapping("/{id}/members/{userId}")
@@ -117,6 +128,12 @@ public class BatchController {
     public ResponseEntity<?> assign(@PathVariable String id, @RequestBody BatchIdsRequest body) {
         List<String> problemIds = body == null ? List.of() : body.getProblemIds();
         return ResponseEntity.ok(Map.of("assignments", batchService.addAssignments(id, problemIds)));
+    }
+
+    @PostMapping("/{id}/assignments/remove")
+    public ResponseEntity<?> unassignMany(@PathVariable String id, @RequestBody BatchIdsRequest body) {
+        List<String> problemIds = body == null ? List.of() : body.getProblemIds();
+        return ResponseEntity.ok(Map.of("removed", batchService.removeAssignments(id, problemIds)));
     }
 
     @DeleteMapping("/{id}/assignments/{problemId}")

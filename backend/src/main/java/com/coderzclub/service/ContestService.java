@@ -7,6 +7,7 @@ import com.coderzclub.dto.ContestProblemSummary;
 import com.coderzclub.dto.ContestUserResponse;
 import com.coderzclub.dto.ContestWriteRequest;
 import com.coderzclub.model.Batch;
+import com.coderzclub.model.BatchMember;
 import com.coderzclub.model.Contest;
 import com.coderzclub.model.ContestAudienceType;
 import com.coderzclub.model.ContestProblemSnapshot;
@@ -457,8 +458,52 @@ public class ContestService {
         return contest;
     }
 
+    /**
+     * Verified, active students in the contest's active batches.
+     * Contest status itself still comes only from start and end timestamps.
+     */
+    private int countEligibleMembers(Contest contest) {
+        if (contest == null || contest.getAudienceType() == ContestAudienceType.ALL_USERS) {
+            return 0;
+        }
+        List<String> batchIds = contest.getBatchIds() == null ? List.of() : contest.getBatchIds();
+        if (batchIds.isEmpty()) {
+            return 0;
+        }
+        List<Batch> activeBatches = mongoTemplate.find(
+            Query.query(Criteria.where("_id").in(batchIds).and("active").is(true)),
+            Batch.class);
+        if (activeBatches == null || activeBatches.isEmpty()) {
+            return 0;
+        }
+        List<String> activeIds = activeBatches.stream().map(Batch::getId).filter(id -> id != null && !id.isBlank()).toList();
+        List<BatchMember> memberships = mongoTemplate.find(
+            Query.query(Criteria.where("batchId").in(activeIds)),
+            BatchMember.class);
+        if (memberships == null || memberships.isEmpty()) {
+            return 0;
+        }
+        List<String> userIds = memberships.stream()
+            .map(BatchMember::getUserId)
+            .filter(id -> id != null && !id.isBlank())
+            .distinct()
+            .toList();
+        if (userIds.isEmpty()) {
+            return 0;
+        }
+        Query users = Query.query(new Criteria().andOperator(
+            Criteria.where("_id").in(userIds),
+            Criteria.where("emailVerified").is(true),
+            new Criteria().orOperator(
+                Criteria.where("accountStatus").exists(false),
+                Criteria.where("accountStatus").is("ACTIVE")
+            )
+        ));
+        return (int) Math.min(Integer.MAX_VALUE, mongoTemplate.count(users, User.class));
+    }
+
     private static void requireAuthenticated(User user) {
-        if (user == null || user.isDeleted() || user.getId() == null) {
+        if (user == null || !user.canAuthenticate() || user.getId() == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
         }
     }
@@ -476,6 +521,7 @@ public class ContestService {
             response.setProblems(contest.isPublished()
                 ? snapshotSummaries(contest)
                 : safeProblemSummaries(contest.getProblemIds()));
+            response.setEligibleMemberCount(countEligibleMembers(contest));
         }
         return response;
     }

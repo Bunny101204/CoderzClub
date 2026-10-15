@@ -72,6 +72,14 @@ class UserServiceAuthenticationTest {
     }
 
     @Test
+    void inactiveAccountCannotAuthenticateWithAnExistingRecord() {
+        User user = user("u1", "alice", "USER", "INACTIVE", true);
+        when(users.findById("u1")).thenReturn(Optional.of(user));
+        assertThrows(UsernameNotFoundException.class, () -> service.loadUserForAuthentication("u1", "alice"));
+        assertEquals(false, service.toUserDetails(user).isEnabled());
+    }
+
+    @Test
     void databaseRoleDeterminesAuthorityAndUnverifiedIsDisabled() {
         User admin = user("u1", "alice", "admin", "ACTIVE", false);
         UserDetails details = service.toUserDetails(admin);

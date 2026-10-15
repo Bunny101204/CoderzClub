@@ -247,6 +247,11 @@ export default function ContestForm() {
         <p className="text-sm app-muted mb-4">Times shown in {timeZone}. Values are sent to the server as UTC.</p>
         {error && <div className="mb-4 text-sm text-red-600 dark:text-red-400" role="alert">{error}</div>}
         {notice && <div className="mb-4 text-sm text-green-700 dark:text-green-300">{notice}</div>}
+        {contest && contest.audienceType === "BATCHES" && contest.eligibleMemberCount === 0 && (
+          <div className="mb-4 text-sm text-yellow-800 dark:text-yellow-300" role="status">
+            No eligible students. An active, verified student must belong to an active selected batch before this contest can be taken.
+          </div>
+        )}
         {liveLimited && (
           <div className="mb-4 text-sm app-muted">This contest is LIVE. Title, description, and end time can change. Audience, batches, problems, and start time cannot.</div>
         )}
