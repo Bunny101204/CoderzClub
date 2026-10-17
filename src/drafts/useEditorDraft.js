@@ -16,6 +16,13 @@ export function useEditorDraft({
   const sessionRef = useRef(null);
   const onApplyRef = useRef(onApply);
   const activeRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const slotRef = useRef({
+    userId,
+    contestId: contestId || null,
+    problemId,
+    languageId,
+  });
   onApplyRef.current = onApply;
   const [status, setStatus] = useState("");
   const [conflict, setConflict] = useState(null);
@@ -41,13 +48,24 @@ export function useEditorDraft({
     activeRef.current = true;
     const unregister = setActiveDraftSession(session);
     let cancelled = false;
+    const contestKey = contestId || null;
+    const previous = slotRef.current;
+    const sameSlot = previous
+      && previous.userId === userId
+      && previous.contestId === contestKey
+      && previous.problemId === problemId
+      && Number(previous.languageId) === Number(languageId);
+    const importVisibleCode = dirtyRef.current && sameSlot;
+    slotRef.current = { userId, contestId: contestKey, problemId, languageId };
+    if (!sameSlot) dirtyRef.current = false;
     session.open({
       userId,
-      contestId: contestId || null,
+      contestId: contestKey,
       problemId,
       languageId,
       starterCode: starterCode || "",
       currentCode: currentCodeRef?.current,
+      importVisibleCode,
     }).catch(() => {
       if (!cancelled) setStatus("Sync unavailable");
     });
@@ -68,6 +86,7 @@ export function useEditorDraft({
   }, [enabled, userId, contestId, problemId, languageId, starterCode, currentCodeRef]);
 
   const noteEdit = useCallback((code) => {
+    dirtyRef.current = true;
     sessionRef.current?.noteEdit(code);
   }, []);
   const useCloud = useCallback(() => {

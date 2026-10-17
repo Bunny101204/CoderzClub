@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -236,6 +237,43 @@ class BatchReportServiceTest {
             }
         }
         return List.of();
+    }
+
+    @Test
+    void reportRefusesAnUnboundedSubmissionScan() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        BatchService batchService = mock(BatchService.class);
+        Batch batch = new Batch();
+        batch.setId("b1");
+        when(batchService.requireBatch("b1")).thenReturn(batch);
+        when(mongo.find(any(Query.class), eq(BatchMember.class))).thenReturn(List.of(member("u1")));
+        when(mongo.find(any(Query.class), eq(BatchAssignment.class))).thenReturn(List.of(assignment("p1")));
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenReturn(List.of(problem("p1", 1, "A")));
+        when(mongo.find(any(Query.class), eq(User.class))).thenReturn(List.of(user("u1", "ada")));
+        when(mongo.count(any(Query.class), eq(Submission.class))).thenReturn((long) BatchReportService.MAX_REPORT_SUBMISSIONS + 1);
+        BatchReportService service = new BatchReportService(mongo, batchService);
+        org.springframework.web.server.ResponseStatusException ex = assertThrows(
+            org.springframework.web.server.ResponseStatusException.class,
+            () -> service.report("b1", 0, 20, null));
+        assertTrue(ex.getReason().contains("20000"));
+        assertTrue(ex.getReason().contains("500"));
+        verify(mongo, org.mockito.Mockito.never()).find(any(Query.class), eq(Submission.class));
+    }
+
+    @Test
+    void problemFilterRejectsAProblemThatIsNotAssigned() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        BatchService batchService = mock(BatchService.class);
+        Batch batch = new Batch();
+        batch.setId("b1");
+        when(batchService.requireBatch("b1")).thenReturn(batch);
+        when(mongo.find(any(Query.class), eq(BatchMember.class))).thenReturn(List.of(member("u1")));
+        when(mongo.find(any(Query.class), eq(BatchAssignment.class))).thenReturn(List.of(assignment("p1")));
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenReturn(List.of(problem("p1", 1, "A")));
+        when(mongo.find(any(Query.class), eq(User.class))).thenReturn(List.of(user("u1", "ada")));
+        BatchReportService service = new BatchReportService(mongo, batchService);
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
+            () -> service.report("b1", 0, 20, null, "missing", null, null));
     }
 
     private static BatchMember member(String userId) {

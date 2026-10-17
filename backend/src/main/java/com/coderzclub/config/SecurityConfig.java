@@ -78,6 +78,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/contests", "/api/contests/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/contest-runs", "/api/contest-runs/**").hasAnyRole("USER", "ADMIN")
+                // Batch routes enforce admin-or-coordinator checks in the controller.
+                // Creating a batch and listing every batch stay admin-only there as well.
+                .requestMatchers("/api/admin/batches/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )

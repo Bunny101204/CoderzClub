@@ -258,7 +258,13 @@ export function createDraftSession({
     let persist = Boolean(record);
     // A blank editor before the template is applied is not an intentional empty draft.
     // A saved record with code "" still wins above.
-    if (!record && typeof next.currentCode === "string" && next.currentCode !== "" && next.currentCode !== starter) {
+    if (
+      next.importVisibleCode === true &&
+      !record &&
+      typeof next.currentCode === "string" &&
+      next.currentCode !== "" &&
+      next.currentCode !== starter
+    ) {
       record = createDraftRecord({
         code: next.currentCode,
         dirty: true,

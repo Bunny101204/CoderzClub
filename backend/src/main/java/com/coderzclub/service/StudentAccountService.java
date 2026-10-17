@@ -30,18 +30,19 @@ public class StudentAccountService {
     public Map<String, Object> search(String search, int page, int size) {
         int safeSize = BatchService.boundSize(size);
         int safePage = Math.max(0, page);
-        Query query = new Query();
-        query.addCriteria(new Criteria().orOperator(
+        List<Criteria> filters = new ArrayList<>();
+        filters.add(new Criteria().orOperator(
             Criteria.where("accountStatus").exists(false),
             Criteria.where("accountStatus").ne("DELETED")
         ));
         if (search != null && !search.isBlank()) {
             String escaped = Pattern.quote(search.trim());
-            query.addCriteria(new Criteria().orOperator(
+            filters.add(new Criteria().orOperator(
                 Criteria.where("username").regex(escaped, "i"),
                 Criteria.where("email").regex(escaped, "i")
             ));
         }
+        Query query = Query.query(new Criteria().andOperator(filters));
         long total = mongoTemplate.count(query, User.class);
         query.skip((long) safePage * safeSize).limit(safeSize);
         List<Map<String, Object>> users = new ArrayList<>();

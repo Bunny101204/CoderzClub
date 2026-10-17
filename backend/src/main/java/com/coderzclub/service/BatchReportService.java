@@ -26,7 +26,13 @@ import java.util.Set;
 
 @Service
 public class BatchReportService {
+    /** CSV downloads include at most this many students. Filter or split a larger batch. */
     public static final int MAX_EXPORT_STUDENTS = 500;
+    /**
+     * One report reads at most this many submission documents. A larger match must be
+     * narrowed with a problem or date filter instead of loading an unbounded result.
+     */
+    public static final int MAX_REPORT_SUBMISSIONS = 20_000;
 
     private final MongoTemplate mongoTemplate;
     private final BatchService batchService;
@@ -37,12 +43,21 @@ public class BatchReportService {
     }
 
     public Map<String, Object> report(String batchId, int page, int size, String student) {
-        return build(batchId, page, size, student, false);
+        return report(batchId, page, size, student, null, null, null);
+    }
+
+    public Map<String, Object> report(
+        String batchId, int page, int size, String student, String problemId, Date from, Date to
+    ) {
+        return build(batchId, page, size, student, problemId, from, to, false);
     }
 
     public String csv(String batchId, String student) {
-        Map<String, Object> report = build(batchId, 0, MAX_EXPORT_STUDENTS, student, true);
-        return toCsv(report);
+        return csv(batchId, student, null, null, null);
+    }
+
+    public String csv(String batchId, String student, String problemId, Date from, Date to) {
+        return toCsv(build(batchId, 0, MAX_EXPORT_STUDENTS, student, problemId, from, to, true));
     }
 
     static String cellStatus(Collection<SubmissionAttemptClassifier.Kind> kinds) {
@@ -50,7 +65,9 @@ public class BatchReportService {
         return status == null ? "UNSOLVED" : status;
     }
 
-    Map<String, Object> build(String batchId, int page, int size, String student, boolean export) {
+    Map<String, Object> build(
+        String batchId, int page, int size, String student, String problemFilter, Date activityFrom, Date activityTo, boolean export
+    ) {
         Batch batch = batchService.requireBatch(batchId);
         int safeSize = export ? MAX_EXPORT_STUDENTS : BatchService.boundSize(size);
         int safePage = Math.max(0, page);
@@ -71,8 +88,15 @@ public class BatchReportService {
                 "A batch can have at most " + BatchService.MAX_ASSIGNMENTS + " assigned problems");
         }
 
+        Map<String, Problem> problems = loadProblems(assignments.stream().map(BatchAssignment::getProblemId).toList());
+        if (problemFilter != null && !problemFilter.isBlank()) {
+            String needle = problemFilter.trim();
+            assignments = assignments.stream().filter(assignment -> matchesProblem(assignment, problems.get(assignment.getProblemId()), needle)).toList();
+            if (assignments.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That problem is not assigned to this batch");
+            }
+        }
         List<String> assignedProblemIds = assignments.stream().map(BatchAssignment::getProblemId).toList();
-        Map<String, Problem> problems = loadProblems(assignedProblemIds);
         List<String> lookupProblemIds = lookupIds(assignedProblemIds, problems);
 
         List<String> allUserIds = allMembers.stream().map(BatchMember::getUserId).toList();
@@ -83,7 +107,7 @@ public class BatchReportService {
         int to = Math.min(from + safeSize, filteredUserIds.size());
         List<String> pageUserIds = filteredUserIds.subList(from, to);
 
-        List<Submission> submissions = loadSubmissions(allUserIds, lookupProblemIds);
+        List<Submission> submissions = loadSubmissions(allUserIds, lookupProblemIds, activityFrom, activityTo);
         Map<String, Map<String, Set<SubmissionAttemptClassifier.Kind>>> kinds =
             kindsByUserAndProblem(submissions, assignedProblemIds, problems);
         Map<String, Date> latestActivity = latestActivity(submissions, assignedProblemIds, problems);
@@ -92,16 +116,16 @@ public class BatchReportService {
         int solvedCells = 0;
         int attemptedCells = 0;
         Map<String, Integer> solvedByProblem = new LinkedHashMap<>();
-        for (String problemId : assignedProblemIds) {
-            solvedByProblem.put(problemId, 0);
+        for (String assignedId : assignedProblemIds) {
+            solvedByProblem.put(assignedId, 0);
         }
         for (String userId : allUserIds) {
             Map<String, Set<SubmissionAttemptClassifier.Kind>> byProblem = kinds.getOrDefault(userId, Map.of());
-            for (String problemId : assignedProblemIds) {
-                String status = cellStatus(byProblem.get(problemId));
+            for (String assignedId : assignedProblemIds) {
+                String status = cellStatus(byProblem.get(assignedId));
                 if ("SOLVED".equals(status)) {
                     solvedCells++;
-                    solvedByProblem.put(problemId, solvedByProblem.get(problemId) + 1);
+                    solvedByProblem.put(assignedId, solvedByProblem.get(assignedId) + 1);
                 } else if ("ATTEMPTED".equals(status)) {
                     attemptedCells++;
                 }
@@ -166,6 +190,33 @@ public class BatchReportService {
         summary.put("unsolvedCells", unsolvedCells);
         summary.put("completionPercent", BatchCsv.percentage(solvedCells, totalCells));
         summary.put("denominator", "studentCount * assignedProblemCount");
+        int completedProblems = 0;
+        if (!allUserIds.isEmpty()) {
+            for (String assignedId : assignedProblemIds) {
+                if (solvedByProblem.getOrDefault(assignedId, 0) == allUserIds.size()) {
+                    completedProblems++;
+                }
+            }
+        }
+        summary.put("completedProblemCount", completedProblems);
+        int submissionCount = 0;
+        int acceptedSubmissionCount = 0;
+        Map<String, String> canonical = canonicalLookup(assignedProblemIds, problems);
+        for (Submission submission : submissions) {
+            if (!canonical.containsKey(submission.getProblemId())) {
+                continue;
+            }
+            SubmissionAttemptClassifier.Kind kind = SubmissionAttemptClassifier.classify(
+                submission.getResult(), submission.getVerdict());
+            if (kind == SubmissionAttemptClassifier.Kind.ACCEPTED) {
+                submissionCount++;
+                acceptedSubmissionCount++;
+            } else if (kind == SubmissionAttemptClassifier.Kind.STUDENT_VERDICT) {
+                submissionCount++;
+            }
+        }
+        summary.put("submissionCount", submissionCount);
+        summary.put("acceptedSubmissionCount", acceptedSubmissionCount);
 
         Map<String, Object> batchView = new LinkedHashMap<>();
         batchView.put("id", batch.getId());
@@ -177,6 +228,13 @@ public class BatchReportService {
         response.put("summary", summary);
         response.put("problems", problemColumns);
         response.put("students", rows);
+        response.put("recentActivity", recentActivity(submissions, canonical, usersById));
+        if (activityFrom != null) {
+            response.put("activityFrom", activityFrom);
+        }
+        if (activityTo != null) {
+            response.put("activityTo", activityTo);
+        }
         response.put("currentPage", safePage);
         response.put("totalPages", totalStudents == 0 ? 0 : (int) Math.ceil((double) totalStudents / safeSize));
         response.put("totalItems", totalStudents);
@@ -210,13 +268,69 @@ public class BatchReportService {
         return csv.toString();
     }
 
-    private List<Submission> loadSubmissions(List<String> userIds, List<String> problemIds) {
+    private List<Submission> loadSubmissions(List<String> userIds, List<String> problemIds, Date from, Date to) {
         if (userIds.isEmpty() || problemIds.isEmpty()) {
             return List.of();
         }
-        Query query = Query.query(Criteria.where("userId").in(userIds).and("problemId").in(problemIds));
+        Criteria criteria = Criteria.where("userId").in(userIds).and("problemId").in(problemIds);
+        if (from != null || to != null) {
+            Criteria created = Criteria.where("createdAt");
+            if (from != null) {
+                created = created.gte(from);
+            }
+            if (to != null) {
+                created = created.lte(to);
+            }
+            criteria = new Criteria().andOperator(criteria, created);
+        }
+        Query query = Query.query(criteria);
+        long matches = mongoTemplate.count(query, Submission.class);
+        if (matches > MAX_REPORT_SUBMISSIONS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "This report matches more than " + MAX_REPORT_SUBMISSIONS
+                    + " submissions. Filter by problem or date. CSV export is limited to "
+                    + MAX_EXPORT_STUDENTS + " students.");
+        }
         query.fields().include("userId").include("problemId").include("result").include("verdict").include("createdAt");
+        query.limit(MAX_REPORT_SUBMISSIONS);
         return mongoTemplate.find(query, Submission.class);
+    }
+
+    private static boolean matchesProblem(BatchAssignment assignment, Problem problem, String needle) {
+        if (assignment.getProblemId() != null && assignment.getProblemId().equals(needle)) {
+            return true;
+        }
+        return problem != null && problem.getNumericId() != null && needle.equals(String.valueOf(problem.getNumericId()));
+    }
+
+    private List<Map<String, Object>> recentActivity(
+        List<Submission> submissions, Map<String, String> canonical, Map<String, User> usersById
+    ) {
+        List<Submission> activity = new ArrayList<>();
+        for (Submission submission : submissions) {
+            if (!canonical.containsKey(submission.getProblemId()) || submission.getCreatedAt() == null) {
+                continue;
+            }
+            if (!SubmissionAttemptClassifier.countsTowardActivity(submission.getResult(), submission.getVerdict())) {
+                continue;
+            }
+            activity.add(submission);
+        }
+        activity.sort((left, right) -> right.getCreatedAt().compareTo(left.getCreatedAt()));
+        List<Map<String, Object>> recent = new ArrayList<>();
+        int limit = Math.min(8, activity.size());
+        for (int index = 0; index < limit; index++) {
+            Submission submission = activity.get(index);
+            User user = usersById.get(submission.getUserId());
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("userId", submission.getUserId());
+            row.put("username", user == null ? null : user.getUsername());
+            row.put("problemId", canonical.get(submission.getProblemId()));
+            row.put("result", submission.getResult());
+            row.put("createdAt", submission.getCreatedAt());
+            recent.add(row);
+        }
+        return recent;
     }
 
     private Map<String, Map<String, Set<SubmissionAttemptClassifier.Kind>>> kindsByUserAndProblem(

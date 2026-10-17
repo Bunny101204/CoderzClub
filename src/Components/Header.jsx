@@ -45,6 +45,7 @@ const Header = () => {
               <Link to="/bundles" className={navClass('/bundles')}>Bundles</Link>
               <Link to="/editor" className={navClass('/editor')}>Editor</Link>
               <Link to="/leaderboard" className={navClass('/leaderboard')}>Leaderboard</Link>
+              <Link to="/my/batches" className={navClass('/my/batches')}>My batches</Link>
               {(user?.role === "ADMIN" || user?.role === "admin" || user?.role === "Admin") && (
                 <Link to="/admin" className={navClass('/admin')}>Admin</Link>
               )}

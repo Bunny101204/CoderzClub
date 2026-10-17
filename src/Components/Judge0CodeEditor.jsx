@@ -3,6 +3,7 @@ import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
 import { chooseStarterCode } from "./LanguageTemplates";
+import { applyLanguageSwitch } from "./editorLanguageDrafts";
 import { executionStdin } from "../execution/customStdin.js";
 import {
   getJobStatusMessage,
@@ -22,6 +23,7 @@ import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } f
 import { useAuth } from "../context/AuthContext";
 import { readInitialDraftCode } from "../drafts/codeDraft";
 import { useEditorDraft } from "../drafts/useEditorDraft";
+import { readSavedEditorLanguage, saveEditorLanguage } from "../drafts/editorLanguagePreference";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -42,26 +44,68 @@ const Judge0CodeEditor = ({
   const { user } = useAuth();
   const editorChrome = editorSurfaceClasses(theme);
   // Use controlled or internal state for languageId
-  const [internalLanguageId, setInternalLanguageId] = useState(62);
+  const [internalLanguageId, setInternalLanguageId] = useState(() =>
+    propLanguageId !== undefined ? Number(propLanguageId) : readSavedEditorLanguage(problemId, contestId)
+  );
   const languageId =
     propLanguageId !== undefined ? propLanguageId : internalLanguageId;
-  const setLanguageId = propSetLanguageId || setInternalLanguageId;
+  const sourceCodeRef = useRef("");
+  const draftRef = useRef(null);
+  const languageDraftsRef = useRef({});
+  const languageRef = useRef(languageId);
+  const setLanguageId = (value) => {
+    const next = Number(value);
+    const draftOwnsCode = !propSetEditorCode && Boolean(problemId) && Boolean(user?.id);
+    if (!draftOwnsCode && !propSetEditorCode && Number(languageRef.current) !== next) {
+      const template = chooseStarterCode(next, initialCode, propLanguageId !== undefined ? propLanguageId : 62);
+      const switched = applyLanguageSwitch({
+        previousLanguageId: languageRef.current,
+        nextLanguageId: next,
+        currentCode: sourceCodeRef.current ?? "",
+        drafts: languageDraftsRef.current,
+        templates: { [next]: template },
+      });
+      languageDraftsRef.current = switched.drafts;
+      sourceCodeRef.current = switched.code;
+      setInternalSourceCode(switched.code);
+    }
+    languageRef.current = next;
+    if (propSetLanguageId) {
+      propSetLanguageId(next);
+      return;
+    }
+    setInternalLanguageId(next);
+    saveEditorLanguage(problemId, contestId, next);
+  };
 
-  // Use controlled or internal state for code. Local draft seeding is only for the uncontrolled editor.
+  // Problem starter code belongs to the problem's preferred language. Other languages use their own template.
   const preferredLanguageId = propLanguageId !== undefined ? propLanguageId : 62;
   const [internalSourceCode, setInternalSourceCode] = useState(() => {
     if (propSetEditorCode) return initialCode;
+    const startingLanguage = propLanguageId !== undefined
+      ? propLanguageId
+      : readSavedEditorLanguage(problemId, contestId);
     const local = readInitialDraftCode({
       userId: user?.id,
       contestId,
       problemId,
-      languageId: preferredLanguageId,
+      languageId: startingLanguage,
     });
     if (local != null) return local;
-    return chooseStarterCode(preferredLanguageId, initialCode, preferredLanguageId);
+    return chooseStarterCode(startingLanguage, initialCode, preferredLanguageId);
   });
   const sourceCode = propSetEditorCode ? initialCode : internalSourceCode;
-  const setSourceCode = propSetEditorCode || setInternalSourceCode;
+  sourceCodeRef.current = sourceCode;
+  const setSourceCode = (value) => {
+    const next = typeof value === "function" ? value(sourceCodeRef.current) : value;
+    if (propSetEditorCode) {
+      propSetEditorCode(next);
+      return;
+    }
+    sourceCodeRef.current = next;
+    setInternalSourceCode(next);
+    draftRef.current?.noteEdit(next);
+  };
 
   const [output, setOutput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -86,8 +130,6 @@ const Judge0CodeEditor = ({
   const runLocked = contestMode ? !contestLive : executionLocked;
   const customRunLocked = contestMode ? true : executionLocked;
   const eventSourceRef = useRef(null);
-  const sourceCodeRef = useRef(sourceCode);
-  sourceCodeRef.current = sourceCode;
   const draftEnabled = !propSetEditorCode && Boolean(problemId);
   const draft = useEditorDraft({
     enabled: draftEnabled,
@@ -98,9 +140,13 @@ const Judge0CodeEditor = ({
     starterCode: chooseStarterCode(languageId, initialCode, preferredLanguageId),
     currentCodeRef: sourceCodeRef,
     onApply: (code) => {
-      if (!propSetEditorCode) setInternalSourceCode(code ?? "");
+      if (!propSetEditorCode) {
+        sourceCodeRef.current = code ?? "";
+        setInternalSourceCode(code ?? "");
+      }
     },
   });
+  draftRef.current = draft;
 
   const languageNames = {
     50: "C",
@@ -124,6 +170,11 @@ const Judge0CodeEditor = ({
     eventSourceRef.current?.close();
     contestRunControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (propLanguageId !== undefined) return;
+    setInternalLanguageId(readSavedEditorLanguage(problemId, contestId));
+  }, [problemId, contestId, propLanguageId]);
 
   useEffect(() => () => {
     contestRunGenerationRef.current += 1;
@@ -1148,8 +1199,10 @@ const Judge0CodeEditor = ({
         <textarea
           rows={isTestCaseMode ? 18 : 12}
           id="codeArea"
+          data-language={languageId}
+          spellCheck={false}
           className={`w-full p-4 mb-4 rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-green-400 ${editorChrome}`}
-          placeholder="Type your code here..."
+          placeholder={`${languageNames[languageId] || "Code"} — a missing template stays empty`}
           value={sourceCode}
           onChange={(e) => setSourceCode(e.target.value)}
           onKeyDown={(e) => {

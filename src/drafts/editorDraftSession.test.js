@@ -96,6 +96,35 @@ test("typing writes local storage and does not call the cloud", async () => {
   assert.equal(calls.put.length, 0);
 });
 
+test("switching language does not save the previous source as the new language draft", async () => {
+  const { session, storage, applied } = harness();
+  const javaSource = "public class Main { /* student java */ }";
+  await session.open({
+    ...practice(71),
+    starterCode: "# Python template",
+    currentCode: javaSource,
+    importVisibleCode: false,
+  });
+  assert.equal(applied.at(-1), "# Python template");
+  assert.equal(storage.getItem(buildDraftKey(practice(71))), null);
+  assert.notEqual(applied.at(-1), javaSource);
+});
+
+test("a new session restores each language after refresh", async () => {
+  const storage = memoryStorage();
+  const first = harness({ storage });
+  await first.session.open({ ...practice(62), starterCode: "public class Main {}", importVisibleCode: false });
+  first.session.noteEdit("public class Main {}");
+  first.session.noteEdit("java student draft");
+  await first.session.open({ ...practice(71), starterCode: "# python", currentCode: "java student draft", importVisibleCode: false });
+  assert.equal(first.applied.at(-1), "# python");
+  const second = harness({ storage });
+  await second.session.open({ ...practice(62), starterCode: "public class Main {}", importVisibleCode: false });
+  assert.equal(second.applied.at(-1), "java student draft");
+  await second.session.open({ ...practice(71), starterCode: "# python", currentCode: "java student draft", importVisibleCode: false });
+  assert.equal(second.applied.at(-1), "# python");
+});
+
 test("language switch syncs the old language and restores the new one", async () => {
   const { session, calls } = harness({
     get(identity) {

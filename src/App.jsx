@@ -24,6 +24,7 @@ const ProblemPage = lazy(() => import("./Components/ProblemPage"));
 const ProblemPageNew = lazy(() => import("./Components/ProblemPageNew"));
 const AdminDashboard = lazy(() => import("./Components/AdminDashboard"));
 const AdminBatchPage = lazy(() => import("./Components/AdminBatchPage"));
+const MyBatchesPage = lazy(() => import("./Components/MyBatchesPage"));
 const AdminStudentsPage = lazy(() => import("./Components/AdminStudentsPage"));
 const AddProblem = lazy(() => import("./Components/AddProblem"));
 const AddProblemNew = lazy(() => import("./Components/AddProblemNew"));
@@ -219,6 +220,26 @@ function AppContent() {
               <Suspense fallback={<LoadingFallback />}><AdminStudentsPage /></Suspense>
             ) : (
               <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/my/batches"
+          element={
+            user ? (
+              <Suspense fallback={<LoadingFallback />}><MyBatchesPage /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/my/batches/:id"
+          element={
+            user ? (
+              <Suspense fallback={<LoadingFallback />}><AdminBatchPage /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
             )
           }
         />

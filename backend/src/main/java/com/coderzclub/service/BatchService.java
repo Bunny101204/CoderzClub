@@ -4,6 +4,7 @@ import com.coderzclub.model.Batch;
 import com.coderzclub.model.BatchAssignment;
 import com.coderzclub.model.BatchMember;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.Submission;
 import com.coderzclub.model.User;
 import org.bson.Document;
 import org.springframework.dao.DuplicateKeyException;
@@ -20,9 +21,12 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @Service
@@ -121,8 +125,10 @@ public class BatchService {
     public Map<String, Object> detail(String id) {
         Batch batch = requireBatch(id);
         Map<String, Object> response = toBatchMap(batch);
-        response.put("memberCount", mongoTemplate.count(Query.query(Criteria.where("batchId").is(id)), BatchMember.class));
+        long memberCount = mongoTemplate.count(Query.query(Criteria.where("batchId").is(id)), BatchMember.class);
+        response.put("memberCount", memberCount);
         response.put("assignmentCount", mongoTemplate.count(Query.query(Criteria.where("batchId").is(id)), BatchAssignment.class));
+        response.put("activeMemberCount", activeMemberCount(id, memberCount));
         return response;
     }
 
@@ -214,29 +220,145 @@ public class BatchService {
         requireBatch(batchId);
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
-        List<String> memberIds = mongoTemplate.find(
-                Query.query(Criteria.where("batchId").is(batchId)).with(Sort.by("addedAt")),
-                BatchMember.class)
-            .stream().map(BatchMember::getUserId).toList();
-        if (memberIds.isEmpty()) {
+        List<BatchMember> memberships;
+        long total;
+        if (search == null || search.trim().isEmpty()) {
+            Query membershipQuery = Query.query(Criteria.where("batchId").is(batchId));
+            total = mongoTemplate.count(membershipQuery, BatchMember.class);
+            membershipQuery.with(Sort.by("addedAt")).skip((long) safePage * safeSize).limit(safeSize);
+            memberships = mongoTemplate.find(membershipQuery, BatchMember.class);
+        } else {
+            String escaped = Pattern.quote(search.trim());
+            long memberCount = mongoTemplate.count(Query.query(Criteria.where("batchId").is(batchId)), BatchMember.class);
+            if (memberCount > 2000) {
+                Map<String, Object> limited = searchMembersAmongCandidates(batchId, escaped, safePage, safeSize);
+                limited.put("searchLimited", true);
+                return limited;
+            }
+            List<String> memberIds = mongoTemplate.find(Query.query(Criteria.where("batchId").is(batchId)), BatchMember.class)
+                .stream().map(BatchMember::getUserId).toList();
+            if (memberIds.isEmpty()) {
+                return pageResponse("members", List.of(), safePage, safeSize, 0);
+            }
+            Query usersQuery = Query.query(new Criteria().andOperator(
+                Criteria.where("_id").in(memberIds),
+                new Criteria().orOperator(
+                    Criteria.where("username").regex("^" + escaped, "i"),
+                    Criteria.where("email").regex("^" + escaped, "i")
+                )
+            ));
+            total = mongoTemplate.count(usersQuery, User.class);
+            usersQuery.with(Sort.by("username")).skip((long) safePage * safeSize).limit(safeSize);
+            List<String> pageIds = mongoTemplate.find(usersQuery, User.class).stream().map(User::getId).toList();
+            if (pageIds.isEmpty()) {
+                return pageResponse("members", List.of(), safePage, safeSize, total);
+            }
+            Map<String, BatchMember> byUser = new HashMap<>();
+            for (BatchMember membership : mongoTemplate.find(
+                Query.query(Criteria.where("batchId").is(batchId).and("userId").in(pageIds)),
+                BatchMember.class)) {
+                byUser.put(membership.getUserId(), membership);
+            }
+            memberships = new ArrayList<>();
+            for (String userId : pageIds) {
+                BatchMember membership = byUser.get(userId);
+                if (membership != null) {
+                    memberships.add(membership);
+                }
+            }
+            return pageResponse("members", memberRows(batchId, memberships), safePage, safeSize, total);
+        }
+        return pageResponse("members", memberRows(batchId, memberships), safePage, safeSize, total);
+    }
+
+    private Map<String, Object> searchMembersAmongCandidates(String batchId, String escaped, int safePage, int safeSize) {
+        Query usersQuery = new Query();
+        usersQuery.addCriteria(new Criteria().orOperator(
+            Criteria.where("username").regex("^" + escaped, "i"),
+            Criteria.where("email").regex("^" + escaped, "i")
+        ));
+        usersQuery.limit(100);
+        List<String> candidateIds = mongoTemplate.find(usersQuery, User.class).stream().map(User::getId).toList();
+        if (candidateIds.isEmpty()) {
             return pageResponse("members", List.of(), safePage, safeSize, 0);
         }
-        Query usersQuery = Query.query(Criteria.where("_id").in(memberIds));
-        if (search != null && !search.trim().isEmpty()) {
-            String escaped = Pattern.quote(search.trim());
-            usersQuery.addCriteria(new Criteria().orOperator(
-                Criteria.where("username").regex("^" + escaped, "i"),
-                Criteria.where("email").regex("^" + escaped, "i")
-            ));
+        List<BatchMember> memberships = mongoTemplate.find(
+            Query.query(Criteria.where("batchId").is(batchId).and("userId").in(candidateIds)).with(Sort.by("addedAt")),
+            BatchMember.class);
+        long total = memberships.size();
+        int from = Math.min(safePage * safeSize, memberships.size());
+        int to = Math.min(from + safeSize, memberships.size());
+        return pageResponse("members", memberRows(batchId, new ArrayList<>(memberships.subList(from, to))), safePage, safeSize, total);
+    }
+
+    public Map<String, Object> addMembersResult(String batchId, List<String> userIds) {
+        requireWritable(batchId);
+        if (userIds == null || userIds.isEmpty()) {
+            throw new IllegalArgumentException("userIds is required");
         }
-        long total = mongoTemplate.count(usersQuery, User.class);
-        usersQuery.with(Sort.by("username")).skip((long) safePage * safeSize).limit(safeSize);
-        usersQuery.fields().include("username").include("email").include("accountStatus").include("emailVerified");
-        List<Map<String, Object>> members = new ArrayList<>();
-        for (User user : mongoTemplate.find(usersQuery, User.class)) {
-            members.add(safeUser(user));
+        List<String> alreadyMemberIds = new ArrayList<>();
+        List<String> fresh = new ArrayList<>();
+        for (String rawId : userIds) {
+            if (rawId == null || rawId.isBlank()) {
+                continue;
+            }
+            String userId = rawId.trim();
+            boolean exists = mongoTemplate.exists(
+                Query.query(Criteria.where("batchId").is(batchId).and("userId").is(userId)),
+                BatchMember.class);
+            if (exists) {
+                alreadyMemberIds.add(userId);
+            } else {
+                fresh.add(userId);
+            }
         }
-        return pageResponse("members", members, safePage, safeSize, total);
+        List<BatchMember> members = fresh.isEmpty() ? List.of() : addMembers(batchId, fresh);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("members", members);
+        response.put("alreadyMemberIds", alreadyMemberIds);
+        return response;
+    }
+
+    public Map<String, Object> importIdentifiers(String batchId, List<String> identifiers) {
+        requireWritable(batchId);
+        if (identifiers == null || identifiers.isEmpty()) {
+            throw new IllegalArgumentException("usernames is required");
+        }
+        if (identifiers.size() > 100) {
+            throw new IllegalArgumentException("Import at most 100 students at a time");
+        }
+        List<Map<String, Object>> added = new ArrayList<>();
+        List<Map<String, Object>> alreadyMembers = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String raw : identifiers) {
+            if (raw == null) {
+                continue;
+            }
+            String token = raw.trim();
+            if (token.isEmpty() || !seen.add(token.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            User user = findImportUser(token);
+            if (user == null || user.isDeleted()) {
+                notFound.add(token);
+                continue;
+            }
+            boolean exists = mongoTemplate.exists(
+                Query.query(Criteria.where("batchId").is(batchId).and("userId").is(user.getId())),
+                BatchMember.class);
+            if (exists) {
+                alreadyMembers.add(safeUser(user));
+                continue;
+            }
+            addMembers(batchId, List.of(user.getId()));
+            added.add(safeUser(user));
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("added", added);
+        response.put("alreadyMembers", alreadyMembers);
+        response.put("notFound", notFound);
+        return response;
     }
 
     public List<BatchAssignment> addAssignments(String batchId, List<String> problemIds) {
@@ -303,6 +425,11 @@ public class BatchService {
         List<BatchAssignment> assignments = mongoTemplate.find(query, BatchAssignment.class);
         List<String> problemIds = assignments.stream().map(BatchAssignment::getProblemId).toList();
         Map<String, Problem> problems = loadProblems(problemIds);
+        long memberCount = mongoTemplate.count(Query.query(Criteria.where("batchId").is(batchId)), BatchMember.class);
+        boolean completionLimited = memberCount > 2000;
+        Map<String, Integer> solvedCounts = completionLimited
+            ? Map.of()
+            : solvedByProblem(batchId, problemIds, problems, memberCount);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (BatchAssignment assignment : assignments) {
             Problem problem = problems.get(assignment.getProblemId());
@@ -313,32 +440,45 @@ public class BatchService {
             row.put("difficulty", problem == null ? null : problem.getDifficulty());
             row.put("tags", problem == null ? List.of() : problem.getTags());
             row.put("assignedAt", assignment.getAssignedAt());
+            row.put("memberCount", memberCount);
+            row.put("solvedCount", completionLimited ? null : solvedCounts.getOrDefault(assignment.getProblemId(), 0));
             rows.add(row);
         }
-        return pageResponse("assignments", rows, safePage, safeSize, total);
+        Map<String, Object> response = pageResponse("assignments", rows, safePage, safeSize, total);
+        response.put("memberCount", memberCount);
+        response.put("completionLimited", completionLimited);
+        return response;
     }
 
     public Map<String, Object> searchUsers(String search, int page, int size) {
+        return searchUsers(search, page, size, null);
+    }
+
+    public Map<String, Object> searchUsers(String search, int page, int size, String batchId) {
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
-        Query query = new Query();
-        query.addCriteria(new Criteria().orOperator(
-            Criteria.where("accountStatus").exists(false),
-            Criteria.where("accountStatus").ne("DELETED")
-        ));
+        List<Criteria> filters = new ArrayList<>();
+        filters.add(notDeleted());
         if (search != null && !search.trim().isEmpty()) {
             String escaped = Pattern.quote(search.trim());
-            query.addCriteria(new Criteria().orOperator(
+            filters.add(new Criteria().orOperator(
                 Criteria.where("username").regex("^" + escaped, "i"),
                 Criteria.where("email").regex("^" + escaped, "i")
             ));
         }
+        Query query = Query.query(new Criteria().andOperator(filters));
         long total = mongoTemplate.count(query, User.class);
         query.with(Sort.by("username")).skip((long) safePage * safeSize).limit(safeSize);
         query.fields().include("username").include("email").include("accountStatus").include("emailVerified");
+        List<User> found = mongoTemplate.find(query, User.class);
+        Set<String> memberIds = memberIds(batchId, found.stream().map(User::getId).toList());
         List<Map<String, Object>> users = new ArrayList<>();
-        for (User user : mongoTemplate.find(query, User.class)) {
-            users.add(safeUser(user));
+        for (User user : found) {
+            Map<String, Object> row = safeUser(user);
+            if (batchId != null && !batchId.isBlank()) {
+                row.put("alreadyMember", memberIds.contains(user.getId()));
+            }
+            users.add(row);
         }
         return pageResponse("users", users, safePage, safeSize, total);
     }
@@ -348,6 +488,161 @@ public class BatchService {
             return 20;
         }
         return Math.min(size, MAX_PAGE_SIZE);
+    }
+
+    private Long activeMemberCount(String batchId, long memberCount) {
+        if (memberCount == 0) {
+            return 0L;
+        }
+        if (memberCount > 2000) {
+            return null;
+        }
+        List<String> ids = mongoTemplate.find(Query.query(Criteria.where("batchId").is(batchId)), BatchMember.class)
+            .stream().map(BatchMember::getUserId).toList();
+        if (ids.isEmpty()) {
+            return 0L;
+        }
+        Query query = Query.query(new Criteria().andOperator(
+            Criteria.where("_id").in(ids),
+            new Criteria().orOperator(
+                Criteria.where("accountStatus").exists(false),
+                Criteria.where("accountStatus").is(null),
+                Criteria.where("accountStatus").is("ACTIVE")
+            )
+        ));
+        return mongoTemplate.count(query, User.class);
+    }
+
+    private List<Map<String, Object>> memberRows(String batchId, List<BatchMember> memberships) {
+        if (memberships.isEmpty()) {
+            return List.of();
+        }
+        List<String> userIds = memberships.stream().map(BatchMember::getUserId).toList();
+        Map<String, User> users = new HashMap<>();
+        Query userQuery = Query.query(Criteria.where("_id").in(userIds));
+        userQuery.fields().include("username").include("email").include("accountStatus").include("emailVerified");
+        for (User user : mongoTemplate.find(userQuery, User.class)) {
+            users.put(user.getId(), user);
+        }
+        List<BatchAssignment> assignments = mongoTemplate.find(
+            Query.query(Criteria.where("batchId").is(batchId)), BatchAssignment.class);
+        List<String> assignedIds = assignments.stream().map(BatchAssignment::getProblemId).toList();
+        Map<String, Problem> problems = loadProblems(assignedIds);
+        Map<String, Integer> solved = solvedByUser(userIds, assignedIds, problems);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (BatchMember membership : memberships) {
+            User user = users.get(membership.getUserId());
+            Map<String, Object> row = user == null ? new LinkedHashMap<>() : safeUser(user);
+            if (user == null) {
+                row.put("id", membership.getUserId());
+                row.put("username", null);
+                row.put("email", null);
+                row.put("accountStatus", null);
+                row.put("emailVerified", false);
+            }
+            row.put("addedAt", membership.getAddedAt());
+            row.put("assignedProblemCount", assignedIds.size());
+            row.put("solvedCount", solved.getOrDefault(membership.getUserId(), 0));
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private Map<String, Integer> solvedByUser(List<String> userIds, List<String> assignedProblemIds, Map<String, Problem> problems) {
+        Map<String, Integer> solved = new HashMap<>();
+        if (userIds.isEmpty() || assignedProblemIds.isEmpty()) {
+            return solved;
+        }
+        Map<String, String> canonical = canonicalProblemIds(assignedProblemIds, problems);
+        Query query = Query.query(Criteria.where("userId").in(userIds).and("problemId").in(canonical.keySet()));
+        query.fields().include("userId").include("problemId").include("result").include("verdict");
+        Map<String, Set<String>> solvedProblems = new HashMap<>();
+        for (Submission submission : mongoTemplate.find(query, Submission.class)) {
+            if (SubmissionAttemptClassifier.classify(submission.getResult(), submission.getVerdict())
+                != SubmissionAttemptClassifier.Kind.ACCEPTED) {
+                continue;
+            }
+            String problemId = canonical.get(submission.getProblemId());
+            if (problemId == null) {
+                continue;
+            }
+            solvedProblems.computeIfAbsent(submission.getUserId(), ignored -> new HashSet<>()).add(problemId);
+        }
+        for (Map.Entry<String, Set<String>> entry : solvedProblems.entrySet()) {
+            solved.put(entry.getKey(), entry.getValue().size());
+        }
+        return solved;
+    }
+
+    private Map<String, Integer> solvedByProblem(
+        String batchId, List<String> problemIds, Map<String, Problem> problems, long memberCount
+    ) {
+        Map<String, Integer> solved = new HashMap<>();
+        if (memberCount == 0 || problemIds.isEmpty()) {
+            return solved;
+        }
+        List<String> memberIds = mongoTemplate.find(Query.query(Criteria.where("batchId").is(batchId)), BatchMember.class)
+            .stream().map(BatchMember::getUserId).toList();
+        Map<String, String> canonical = canonicalProblemIds(problemIds, problems);
+        Query query = Query.query(Criteria.where("userId").in(memberIds).and("problemId").in(canonical.keySet()));
+        query.fields().include("userId").include("problemId").include("result").include("verdict");
+        Map<String, Set<String>> usersByProblem = new HashMap<>();
+        for (Submission submission : mongoTemplate.find(query, Submission.class)) {
+            if (SubmissionAttemptClassifier.classify(submission.getResult(), submission.getVerdict())
+                != SubmissionAttemptClassifier.Kind.ACCEPTED) {
+                continue;
+            }
+            String problemId = canonical.get(submission.getProblemId());
+            if (problemId == null) {
+                continue;
+            }
+            usersByProblem.computeIfAbsent(problemId, ignored -> new HashSet<>()).add(submission.getUserId());
+        }
+        for (Map.Entry<String, Set<String>> entry : usersByProblem.entrySet()) {
+            solved.put(entry.getKey(), entry.getValue().size());
+        }
+        return solved;
+    }
+
+    private static Map<String, String> canonicalProblemIds(List<String> assignedProblemIds, Map<String, Problem> problems) {
+        Map<String, String> canonical = new HashMap<>();
+        for (String problemId : assignedProblemIds) {
+            canonical.put(problemId, problemId);
+            Problem problem = problems.get(problemId);
+            if (problem != null && problem.getNumericId() != null) {
+                canonical.put(String.valueOf(problem.getNumericId()), problemId);
+            }
+        }
+        return canonical;
+    }
+
+    private Set<String> memberIds(String batchId, List<String> userIds) {
+        if (batchId == null || batchId.isBlank() || userIds.isEmpty()) {
+            return Set.of();
+        }
+        return mongoTemplate.find(
+                Query.query(Criteria.where("batchId").is(batchId).and("userId").in(userIds)),
+                BatchMember.class)
+            .stream().map(BatchMember::getUserId).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static Criteria notDeleted() {
+        return new Criteria().orOperator(
+            Criteria.where("accountStatus").exists(false),
+            Criteria.where("accountStatus").ne("DELETED")
+        );
+    }
+
+    private User findImportUser(String token) {
+        String escaped = Pattern.quote(token);
+        Query query = Query.query(new Criteria().andOperator(
+            new Criteria().orOperator(
+                Criteria.where("username").regex("^" + escaped + "$", "i"),
+                Criteria.where("email").regex("^" + escaped + "$", "i")
+            ),
+            notDeleted()
+        ));
+        return mongoTemplate.findOne(query, User.class);
     }
 
     private Problem resolveProblem(String id) {

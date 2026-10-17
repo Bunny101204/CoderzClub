@@ -21,6 +21,7 @@
     "test:testcase-import": "node --test src/admin/testcaseFileImport.test.js",
     "test:execution": "node --test src/execution/studentVerdict.test.js src/execution/codingDuration.test.js",
     "test:batch": "node --test src/admin/batchProgress.test.js",
+    "test:e2e": "playwright test",
     "test:progress": "node --test src/progress/userProgress.test.js src/Components/bundleProgress.test.js",
     "preview": "vite preview",
     "render:uml": "node scripts/render-uml.cjs"
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.1.10",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

@@ -166,6 +166,9 @@ ensureIndex(db.batch_members, { "userId": 1, "batchId": 1 }, { name: "userId_bat
 // Assignment uniqueness and per-batch assignment scans / counts.
 ensureIndex(db.batch_assignments, { "batchId": 1, "problemId": 1 }, { unique: true, name: "batchId_problemId_unique_idx" });
 ensureIndex(db.batch_assignments, { "batchId": 1, "assignedAt": 1 }, { name: "batchId_assignedAt_idx" });
+// One coordinator row per user per batch. userId supports the coordinator's own batch list.
+ensureIndex(db.batch_coordinators, { "batchId": 1, "userId": 1 }, { unique: true, name: "batchId_userId_unique_idx" });
+ensureIndex(db.batch_coordinators, { "userId": 1, "batchId": 1 }, { name: "userId_batchId_idx" });
 // Bundle access grants: uniqueness and subject lookup for USER/BATCH grants.
 ensureIndex(db.bundle_access_grants, { "bundleId": 1, "subjectType": 1, "subjectId": 1 }, { unique: true, name: "bundle_subject_unique_idx" });
 ensureIndex(db.bundle_access_grants, { "subjectType": 1, "subjectId": 1, "bundleId": 1 }, { name: "subject_bundle_idx" });
@@ -255,6 +258,10 @@ assertIndex(db.submission_outbox, "status_nextAttempt_locked_idx");
 assertIndex(db.batch_members, "batchId_userId_unique_idx", function(idx) {
   return idx.unique === true;
 });
+assertIndex(db.batch_coordinators, "batchId_userId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.batch_coordinators, "userId_batchId_idx");
 assertIndex(db.batch_assignments, "batchId_problemId_unique_idx", function(idx) {
   return idx.unique === true;
 });
