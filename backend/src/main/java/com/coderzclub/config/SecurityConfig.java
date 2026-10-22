@@ -19,13 +19,11 @@ import org.springframework.web.cors.CorsConfiguration;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, JwtFilter jwtFilter) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtFilter jwtFilter, CorsOrigins corsOrigins) throws Exception {
         http
             .cors(cors -> cors.configurationSource(request -> {
                 CorsConfiguration configuration = new CorsConfiguration();
-                configuration.setAllowedOrigins(java.util.Arrays.stream(System.getenv()
-                    .getOrDefault("APP_CORS_ALLOWED_ORIGINS", "http://localhost:5173")
-                    .split(",")).map(String::trim).filter(value -> !value.isBlank()).toList());
+                configuration.setAllowedOrigins(corsOrigins.allowed());
                 configuration.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
                 configuration.setAllowedHeaders(java.util.List.of("*"));
                 configuration.setExposedHeaders(java.util.List.of("Authorization"));
@@ -33,6 +31,11 @@ public class SecurityConfig {
                 configuration.setMaxAge(3600L);
                 return configuration;
             }))
+            .headers(headers -> headers
+                .contentTypeOptions(content -> {})
+                .frameOptions(frame -> frame.deny())
+                .referrerPolicy(referrer -> referrer.policy(
+                    org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN)))
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -45,12 +48,18 @@ public class SecurityConfig {
                 .requestMatchers("/api/resend-verification").permitAll()
                 .requestMatchers("/api/test-password").permitAll()
                 .requestMatchers("/api/validate-token").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/languages").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/problems").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/problems/{id}/admin").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/problems/{id}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/problems/{problemId}/drafts/{languageId}").hasAnyRole("USER", "ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/problems/{problemId}/drafts/{languageId}").hasAnyRole("USER", "ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/problems/test").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/problems").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/problems/{id}/run-public").hasAnyRole("USER", "ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/problems/{id}").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/problems/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PATCH, "/api/problems/{id}/execution").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/problems/**").hasRole("ADMIN")
                 .requestMatchers("/api/judge0/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/submission-jobs/*/events/ticket").hasAnyRole("USER", "ADMIN")
@@ -60,12 +69,18 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/prometheus").permitAll()
                 .requestMatchers("/api/bundles/difficulty/**").permitAll() // GET requests for filtering
                 .requestMatchers("/api/bundles/category/**").permitAll() // GET requests for filtering
+                .requestMatchers("/api/bundles/{id}/problems").permitAll()
                 .requestMatchers("/api/bundles/{id}").permitAll() // GET requests for individual bundles
                 .requestMatchers("/api/bundles").permitAll() // GET requests for viewing all bundles
                 .requestMatchers("/api/users/leaderboard").permitAll()
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/submissions/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/api/contests", "/api/contests/**").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/api/contest-runs", "/api/contest-runs/**").hasAnyRole("USER", "ADMIN")
+                // Batch routes enforce admin-or-coordinator checks in the controller.
+                // Creating a batch and listing every batch stay admin-only there as well.
+                .requestMatchers("/api/admin/batches/**").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )

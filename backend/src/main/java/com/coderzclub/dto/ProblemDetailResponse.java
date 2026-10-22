@@ -1,6 +1,7 @@
 package com.coderzclub.dto;
 
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 
 import java.util.List;
@@ -17,6 +18,7 @@ public class ProblemDetailResponse {
     private int points;
     private int estimatedTime;
     private String executionMode;
+    private String testcaseVersion;
     private String inputFormat;
     private String outputFormat;
     private String constraints;
@@ -25,6 +27,7 @@ public class ProblemDetailResponse {
     private String exampleOutput;
     private String exampleExplanation;
     private List<TestCase> publicTestCases;
+    private String availability;
 
     public ProblemDetailResponse() {}
 
@@ -39,6 +42,7 @@ public class ProblemDetailResponse {
         this.points = problem.getPoints();
         this.estimatedTime = problem.getEstimatedTime();
         this.executionMode = problem.getExecutionMode() == null ? null : problem.getExecutionMode().name();
+        this.testcaseVersion = problem.getTestcaseVersion();
         this.inputFormat = problem.getInputFormat();
         this.outputFormat = problem.getOutputFormat();
         this.constraints = problem.getConstraints();
@@ -55,6 +59,7 @@ public class ProblemDetailResponse {
                     return sanitized;
                 })
                 .collect(Collectors.toList());
+        this.availability = ProblemAvailability.of(problem).name();
     }
 
     public String getId() { return id; }
@@ -77,6 +82,8 @@ public class ProblemDetailResponse {
     public void setEstimatedTime(int estimatedTime) { this.estimatedTime = estimatedTime; }
     public String getExecutionMode() { return executionMode; }
     public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
+    public String getTestcaseVersion() { return testcaseVersion; }
+    public void setTestcaseVersion(String testcaseVersion) { this.testcaseVersion = testcaseVersion; }
     public String getInputFormat() { return inputFormat; }
     public void setInputFormat(String inputFormat) { this.inputFormat = inputFormat; }
     public String getOutputFormat() { return outputFormat; }
@@ -93,4 +100,6 @@ public class ProblemDetailResponse {
     public void setExampleExplanation(String exampleExplanation) { this.exampleExplanation = exampleExplanation; }
     public List<TestCase> getPublicTestCases() { return publicTestCases; }
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
+    public String getAvailability() { return availability; }
+    public void setAvailability(String availability) { this.availability = availability; }
 }

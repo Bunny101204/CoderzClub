@@ -26,4 +26,8 @@ public interface UserRepository extends MongoRepository<User, String> {
     List<User> findTopUsersByPoints();
 
     Page<User> findAllByOrderByTotalPointsDesc(Pageable pageable);
+
+    Page<User> findByAccountStatusNot(String accountStatus, Pageable pageable);
+
+    long countByAccountStatusNot(String accountStatus);
 } 

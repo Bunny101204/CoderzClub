@@ -13,22 +13,21 @@ import java.util.Optional;
 public interface ProblemRepository extends MongoRepository<Problem, String> {
        Optional<Problem> findByNumericId(Integer numericId);
 
-    // Filter by difficulty
+    // Ordinary practice-list queries exclude CONTEST_ONLY. Missing availability is PUBLIC ($ne).
+    @Query("{ 'difficulty': ?0, 'availability': { $ne: 'CONTEST_ONLY' } }")
     Page<Problem> findByDifficulty(String difficulty, Pageable pageable);
-    
-    // Filter by difficulty and category
+
+    @Query("{ 'difficulty': ?0, 'category': ?1, 'availability': { $ne: 'CONTEST_ONLY' } }")
     Page<Problem> findByDifficultyAndCategory(String difficulty, String category, Pageable pageable);
-    
-    // Filter by tags (any tag in the list)
-    @Query("{ 'tags': { $in: ?0 } }")
+
+    @Query("{ 'tags': { $in: ?0 }, 'availability': { $ne: 'CONTEST_ONLY' } }")
     Page<Problem> findByTagsIn(List<String> tags, Pageable pageable);
-    
-    // Search by title or statement
-    @Query("{ $or: [ { 'title': { $regex: ?0, $options: 'i' } }, { 'statement': { $regex: ?0, $options: 'i' } } ] }")
+
+    @Query("{ $and: [ { 'availability': { $ne: 'CONTEST_ONLY' } }, { $or: [ { 'title': { $regex: ?0, $options: 'i' } }, { 'statement': { $regex: ?0, $options: 'i' } } ] } ] }")
     Page<Problem> findByTitleOrStatementContaining(String search, Pageable pageable);
-    
-    // Combined filter query with pageable support
+
     @Query("{ $and: [ " +
+           "{ 'availability': { $ne: 'CONTEST_ONLY' } }, " +
            "?0 == null || { 'difficulty': ?0 }, " +
            "?1 == null || { 'category': ?1 }, " +
            "?2 == null || { $or: [ { 'title': { $regex: ?2, $options: 'i' } }, { 'statement': { $regex: ?2, $options: 'i' } }, { '_id': { $regex: ?2, $options: 'i' } } ] }, " +
@@ -37,10 +36,11 @@ public interface ProblemRepository extends MongoRepository<Problem, String> {
     Page<Problem> findWithFilters(String difficulty, String category, String search, List<String> tags, Pageable pageable);
 
     @Query("{ $and: [ " +
+           "{ 'availability': { $ne: 'CONTEST_ONLY' } }, " +
            "?0 == null || { 'difficulty': ?0 }, " +
            "?1 == null || { 'category': ?1 }, " +
            "?2 == null || { $or: [ { 'title': { $regex: ?2, $options: 'i' } }, { 'statement': { $regex: ?2, $options: 'i' } }, { '_id': { $regex: ?2, $options: 'i' } } ] }, " +
            "?3 == null || { 'tags': { $in: ?3 } } " +
            "] }")
     List<Problem> findAllWithFilters(String difficulty, String category, String search, List<String> tags);
-} 
+}

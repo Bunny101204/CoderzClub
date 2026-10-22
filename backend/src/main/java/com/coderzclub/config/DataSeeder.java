@@ -140,7 +140,7 @@
         
 //         problemBundleRepository.save(expertBundle);
 
-//         System.out.println("✅ Problem bundles seeded successfully!");
+//         System.out.println("Problem bundles seeded successfully!");
 //     }
 // }
 

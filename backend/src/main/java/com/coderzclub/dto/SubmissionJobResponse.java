@@ -15,6 +15,12 @@ public class SubmissionJobResponse {
     private Long memory;
     private List<TestResultResponse> testResults;
     private String error;
+    private String errorCode;
+    private String diagnosticMessage;
+    private String reference;
+    private String correlationId;
+    private String submissionId;
+    private Integer codingDurationSeconds;
 
     public String getJobId() { return jobId; }
     public void setJobId(String jobId) { this.jobId = jobId; }
@@ -48,4 +54,22 @@ public class SubmissionJobResponse {
 
     public String getError() { return error; }
     public void setError(String error) { this.error = error; }
+
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+
+    public String getDiagnosticMessage() { return diagnosticMessage; }
+    public void setDiagnosticMessage(String diagnosticMessage) { this.diagnosticMessage = diagnosticMessage; }
+
+    public String getReference() { return reference; }
+    public void setReference(String reference) { this.reference = reference; }
+
+    public String getCorrelationId() { return correlationId; }
+    public void setCorrelationId(String correlationId) { this.correlationId = correlationId; }
+
+    public String getSubmissionId() { return submissionId; }
+    public void setSubmissionId(String submissionId) { this.submissionId = submissionId; }
+
+    public Integer getCodingDurationSeconds() { return codingDurationSeconds; }
+    public void setCodingDurationSeconds(Integer codingDurationSeconds) { this.codingDurationSeconds = codingDurationSeconds; }
 }

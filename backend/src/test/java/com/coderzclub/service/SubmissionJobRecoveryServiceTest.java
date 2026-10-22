@@ -3,6 +3,7 @@ package com.coderzclub.service;
 import com.coderzclub.config.WorkerProperties;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.queue.SubmissionQueuePublisher;
+import com.coderzclub.repository.SubmissionRepository;
 import com.mongodb.client.result.UpdateResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +14,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -31,6 +33,12 @@ class SubmissionJobRecoveryServiceTest {
     private WorkerProperties workerProperties;
     @Mock
     private SubmissionJobEventService eventService;
+    @Mock
+    private SubmissionRepository submissionRepository;
+    @Mock
+    private SubmissionService submissionService;
+    @Mock
+    private SubmissionJobLeaseService leaseService;
     @InjectMocks
     private SubmissionJobRecoveryService recoveryService;
 
@@ -40,6 +48,7 @@ class SubmissionJobRecoveryServiceTest {
         final int[] findCount = {0};
         when(mongoTemplate.find(any(), eq(SubmissionJob.class)))
             .thenAnswer(invocation -> findCount[0]++ == 0 ? List.of(job) : List.of());
+        when(submissionRepository.findBySubmissionJobId("job-1")).thenReturn(Optional.empty());
         when(workerProperties.retryDelayMillis(1)).thenReturn(1000L);
         when(mongoTemplate.updateFirst(any(), any(), eq(SubmissionJob.class)))
             .thenReturn(UpdateResult.acknowledged(0, 0L, null));
@@ -56,6 +65,7 @@ class SubmissionJobRecoveryServiceTest {
         final int[] findCount = {0};
         when(mongoTemplate.find(any(), eq(SubmissionJob.class)))
             .thenAnswer(invocation -> findCount[0]++ == 0 ? List.of(job) : List.of());
+        when(submissionRepository.findBySubmissionJobId("job-1")).thenReturn(Optional.empty());
         when(mongoTemplate.updateFirst(any(), any(), eq(SubmissionJob.class)))
             .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
@@ -63,6 +73,24 @@ class SubmissionJobRecoveryServiceTest {
 
         verify(mongoTemplate).updateFirst(any(), any(), eq(SubmissionJob.class));
         verify(publisher, never()).publishJob(any());
+    }
+
+    @Test
+    void expiredLeaseWithExistingSubmissionCompletesWithoutRequeue() {
+        SubmissionJob job = expiredJob(1, 3);
+        job.setFinalResult("ACCEPTED");
+        when(mongoTemplate.find(any(), eq(SubmissionJob.class)))
+            .thenReturn(List.of(job), List.of());
+        com.coderzclub.model.Submission existing = com.coderzclub.model.Submission.builder()
+            .id("sub-1").submissionJobId("job-1").result("ACCEPTED").build();
+        when(submissionRepository.findBySubmissionJobId("job-1")).thenReturn(Optional.of(existing));
+        when(leaseService.completeExpiredRunningWithResult(eq("job-1"), any())).thenReturn(true);
+
+        recoveryService.recoverStuckJobs();
+
+        verify(leaseService).completeExpiredRunningWithResult(eq("job-1"), any());
+        verify(publisher, never()).publishJob(any());
+        verify(mongoTemplate, never()).updateFirst(any(), any(), eq(SubmissionJob.class));
     }
 
     private SubmissionJob expiredJob(int attempts, int maxAttempts) {

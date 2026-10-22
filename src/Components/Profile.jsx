@@ -159,7 +159,7 @@
 
 //   const Wrapper = ({ children }) =>
 //     asPage ? (
-//       <div className="min-h-screen bg-gray-900 text-white p-6">{children}</div>
+//       <div className="app-shell p-6">{children}</div>
 //     ) : (
 //       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
 //         {children}
@@ -362,61 +362,44 @@
 // export default Profile;
 
 import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
+import { api } from "../apiClient";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { canConfirmAccountDeletion, clearLocalAuthState, DELETE_CONFIRMATION_PHRASE } from "../privacy/accountDeletion";
 
 const Profile = ({ isOpen, onClose, asPage = false }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [stats, setStats] = useState(null);
-  const [submissions, setSubmissions] = useState([]);
-  const [problems, setProblems] = useState([]);
   const [loadingStats, setLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState(null);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [profileTab, setProfileTab] = useState("overview");
 
   useEffect(() => {
     if (!asPage && !isOpen) return;
-    const token =
-      localStorage.getItem("jwtToken") || localStorage.getItem("token");
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     const fetchAll = async () => {
       try {
         setLoadingStats(true);
         setStatsError(null);
-        const [statsRes, subsRes, probsRes] = await Promise.all([
-          axios
-            .get("/api/users/stats", { headers })
-            .catch(() => ({ data: null })),
-          axios
-            .get("/api/submissions/my-submissions", { headers })
-            .catch(() => ({ data: [] })),
-          axios.get("/api/problems").catch(() => ({ data: [] })),
+        const [statsRes] = await Promise.all([
+          api.users.getStats().catch(() => ({ data: null })),
         ]);
         setStats(statsRes.data);
-        setSubmissions(Array.isArray(subsRes.data) ? subsRes.data : []);
-        setProblems(Array.isArray(probsRes.data) ? probsRes.data : []);
       } catch (e) {
         console.error("Error fetching profile data:", e);
         setStatsError("Failed to load stats");
         setStats(null);
-        setSubmissions([]);
-        setProblems([]);
       } finally {
         setLoadingStats(false);
       }
     };
 
     fetchAll();
-
-    // Refresh data every 30 seconds for dynamic updates
-    const interval = setInterval(() => {
-      fetchAll();
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, [isOpen, asPage]);
 
   const handleLogout = async () => {
@@ -427,68 +410,59 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     setIsLoggingOut(false);
   };
 
-  if (!asPage && !isOpen) return null;
-
-  // Build maps and aggregates
-  const problemMap = useMemo(() => {
-    const map = new Map();
-    (problems || []).forEach((p) => map.set(String(p.id), p));
-    return map;
-  }, [problems]);
-
-  const normalizeDifficulty = (difficulty) => {
-    if (!difficulty) return "UNKNOWN";
-    const diff = String(difficulty).trim().toUpperCase();
-    if (diff === "BASIC" || diff === "EASY") return "EASY";
-    if (diff === "INTERMEDIATE" || diff === "MEDIUM") return "MEDIUM";
-    if (diff === "ADVANCED" || diff === "HARD") return "HARD";
-    return "UNKNOWN";
+  const handleDeleteAccount = async () => {
+    if (!canConfirmAccountDeletion(deletePhrase) || deleting) return;
+    if (!window.confirm("This permanently disables your account and anonymizes your identity. Continue?")) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const response = await api.users.deleteMe(DELETE_CONFIRMATION_PHRASE);
+      if (response.status >= 400) {
+        throw new Error(response.data?.error || "Deletion failed");
+      }
+      clearLocalAuthState();
+      logout();
+      if (onClose) onClose();
+      navigate("/auth", { replace: true });
+    } catch (error) {
+      setDeleteError(error.response?.data?.error || error.message || "Could not delete account");
+    } finally {
+      setDeleting(false);
+    }
   };
 
+  const handleExportData = async () => {
+    const response = await api.users.exportData();
+    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "coderzclub-data-export.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Build maps and aggregates
   const difficultyCounts = useMemo(() => {
-    const counts = {
-      EASY: 0,
-      MEDIUM: 0,
-      HARD: 0,
-      UNKNOWN: 0,
-    };
-    if (!submissions || !Array.isArray(submissions)) return counts;
-    const accepted = submissions.filter(
-      (s) =>
-        s &&
-        (s.result === "ACCEPTED" ||
-          s.status === "ACCEPTED" ||
-          s.verdict === "ACCEPTED")
-    );
-    accepted.forEach((s) => {
-      if (!s || !s.problemId) return;
-      const p = problemMap.get(String(s.problemId));
-      const diff = normalizeDifficulty(p?.difficulty);
-      counts[diff] = (counts[diff] || 0) + 1;
-    });
+    const counts = { EASY: 0, MEDIUM: 0, HARD: 0, UNKNOWN: 0 };
+    const fromApi = stats?.difficultySolved;
+    if (fromApi && typeof fromApi === "object") {
+      counts.EASY = fromApi.EASY || 0;
+      counts.MEDIUM = fromApi.MEDIUM || 0;
+      counts.HARD = fromApi.HARD || 0;
+    }
     return counts;
-  }, [submissions, problemMap]);
+  }, [stats]);
 
   const activityByDay = useMemo(() => {
     const counts = new Map();
-    if (!submissions || !Array.isArray(submissions)) return counts;
-    submissions.forEach((s) => {
-      if (!s || !s.createdAt) return;
-      try {
-        const d = new Date(s.createdAt);
-        if (isNaN(d.getTime())) return;
-        const key = new Date(
-          Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-        )
-          .toISOString()
-          .slice(0, 10);
-        counts.set(key, (counts.get(key) || 0) + 1);
-      } catch (e) {
-        console.warn("Invalid date in submission:", s.createdAt);
-      }
+    const rows = Array.isArray(stats?.activity) ? stats.activity : [];
+    rows.forEach((row) => {
+      if (!row?.date) return;
+      counts.set(String(row.date), Number(row.count) || 0);
     });
     return counts;
-  }, [submissions]);
+  }, [stats]);
 
   // New heatmap logic: build weeks (columns) x 7 days (rows) for the last 365 days
   const heatmap = useMemo(() => {
@@ -555,20 +529,21 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     return { weeks, monthLabels, max };
   }, [activityByDay]);
 
+  if (!asPage && !isOpen) return null;
+
   // heatColor: scale counts relative to max (4 intensity buckets)
   const heatColor = (count, max) => {
-    if (!count || count === 0) return "bg-gray-800";
-    // intensity from 1..4
+    if (!count || count === 0) return "bg-gray-200 dark:bg-gray-800";
     const intensity = Math.ceil((count / Math.max(1, max)) * 4);
-    if (intensity <= 1) return "bg-green-900";
-    if (intensity === 2) return "bg-green-700";
+    if (intensity <= 1) return "bg-green-200 dark:bg-green-900";
+    if (intensity === 2) return "bg-green-400 dark:bg-green-700";
     if (intensity === 3) return "bg-green-500";
     return "bg-green-300";
   };
 
   const Wrapper = ({ children }) =>
     asPage ? (
-      <div className="min-h-screen bg-gray-900 text-white p-6">{children}</div>
+      <div className="app-shell p-6">{children}</div>
     ) : (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         {children}
@@ -581,10 +556,26 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
         className={asPage ? "max-w-7xl mx-auto" : "w-full max-w-2xl mx-auto"}
       >
         <h2 className="text-2xl font-bold mb-6">Profile</h2>
+        <div className="flex mb-6 border-b border-gray-200 dark:border-gray-700">
+          <button
+            type="button"
+            className={`px-4 py-2 font-semibold ${profileTab === "overview" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "app-muted"}`}
+            onClick={() => setProfileTab("overview")}
+          >
+            Overview
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 font-semibold ${profileTab === "account" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "app-muted"}`}
+            onClick={() => setProfileTab("account")}
+          >
+            Account & Privacy
+          </button>
+        </div>
+        {profileTab === "overview" && (
         <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
-          {/* Left - 30% */}
           <div className="lg:col-span-3 space-y-4">
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
+            <div className="app-surface rounded-2xl p-6">
               <div className="flex items-center space-x-3 mb-4">
                 <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold text-lg">
@@ -592,13 +583,13 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-white font-semibold">{user?.username}</h3>
+                  <h3 className="font-semibold">{user?.username}</h3>
                 </div>
               </div>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between py-2 border-b border-gray-700">
-                  <span className="text-gray-300">Username</span>
-                  <span className="text-white font-medium">
+                <div className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-700">
+                  <span className="app-muted">Username</span>
+                  <span className="font-medium">
                     {user?.username}
                   </span>
                 </div>
@@ -614,61 +605,57 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
               </div>
             </div>
 
-            {/* Quick stats card */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-              <h3 className="text-white font-semibold mb-3">Overview</h3>
+            <div className="app-surface rounded-2xl p-6">
+              <h3 className="font-semibold mb-3">Overview</h3>
               {loadingStats ? (
-                <div className="text-gray-400 text-sm">Loading stats...</div>
+                <div className="app-muted text-sm">Loading stats...</div>
               ) : statsError ? (
-                <div className="text-red-400 text-sm">{statsError}</div>
+                <div className="text-red-600 dark:text-red-400 text-sm">{statsError}</div>
               ) : stats ? (
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Points</div>
-                    <div className="text-green-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Points</div>
+                    <div className="text-green-600 dark:text-green-400 text-xl font-bold">
                       {stats.totalPoints}
                     </div>
                   </div>
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Solved</div>
-                    <div className="text-blue-400 text-xl font-bold">
-                      {stats.totalProblemsSolved}
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Solved</div>
+                    <div className="text-blue-600 dark:text-blue-400 text-xl font-bold">
+                      {stats.uniqueProblemsSolved ?? stats.totalProblemsSolved}
                     </div>
                   </div>
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Success</div>
-                    <div className="text-yellow-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Success</div>
+                    <div className="text-yellow-700 dark:text-yellow-400 text-xl font-bold">
                       {Math.round((stats.successRate || 0) * 100)}%
                     </div>
                   </div>
-                  <div className="bg-gray-900/50 p-3 rounded border border-gray-700">
-                    <div className="text-gray-400">Streak</div>
-                    <div className="text-orange-400 text-xl font-bold">
+                  <div className="app-inset p-3 rounded">
+                    <div className="app-muted">Streak</div>
+                    <div className="text-orange-600 dark:text-orange-400 text-xl font-bold">
                       {stats.currentStreak}
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="text-gray-400 text-sm">No stats available.</div>
+                <div className="app-muted text-sm">No stats available.</div>
               )}
             </div>
           </div>
 
-          {/* Right - 70% */}
           <div className="lg:col-span-7 space-y-6">
-            {/* Total Solved visual */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
+            <div className="app-surface rounded-2xl p-6">
               <div className="flex items-center justify-between">
-                <h3 className="text-white font-semibold">Problems Solved</h3>
-                <div className="text-4xl font-extrabold text-blue-400">
-                  {stats?.totalProblemsSolved ?? 0}
+                <h3 className="font-semibold">Problems Solved</h3>
+                <div className="text-4xl font-extrabold text-blue-600 dark:text-blue-400">
+                  {stats?.uniqueProblemsSolved ?? stats?.totalProblemsSolved ?? 0}
                 </div>
               </div>
             </div>
 
-            {/* Difficulty distribution */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-              <h3 className="text-white font-semibold mb-4">
+            <div className="app-surface rounded-2xl p-6">
+              <h3 className="font-semibold mb-4">
                 Solved by Difficulty
               </h3>
               <div className="space-y-3">
@@ -678,8 +665,8 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   { key: "HARD", label: "Hard", color: "bg-orange-500" },
                 ].map((d) => (
                   <div key={d.key} className="flex items-center gap-3">
-                    <div className="w-32 text-sm text-gray-300">{d.label}</div>
-                    <div className="flex-1 bg-gray-900 rounded h-3 overflow-hidden">
+                    <div className="w-32 text-sm">{d.label}</div>
+                    <div className="flex-1 bg-gray-200 dark:bg-gray-900 rounded h-3 overflow-hidden">
                       <div
                         className={`h-3 ${d.color}`}
                         style={{
@@ -692,7 +679,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                         }}
                       />
                     </div>
-                    <div className="w-10 text-right text-sm text-gray-300">
+                    <div className="w-10 text-right text-sm">
                       {difficultyCounts[d.key] || 0}
                     </div>
                   </div>
@@ -700,20 +687,18 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
               </div>
             </div>
 
-            {/* Activity heatmap (yearly, week columns) */}
-            <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700">
+            <div className="app-surface rounded-2xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-semibold">
+                <h3 className="font-semibold">
                   Active Days (Last 12 months)
                 </h3>
-                <div className="text-sm text-gray-400">
-                  A day is active if it has ≥1 submission
+                <div className="text-sm app-muted">
+                  A day is active if it has at least 1 submission (UTC dates)
                 </div>
               </div>
 
               <div className="relative">
-                {/* Month labels */}
-                <div className="relative h-5 mb-2 text-xs text-gray-400">
+                <div className="relative h-5 mb-2 text-xs app-muted">
                   {heatmap.monthLabels.map((ml, idx) => (
                     <div
                       key={idx}
@@ -731,17 +716,13 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   ))}
                 </div>
 
-                {/* Grid: columns = weeks, each column stacks 7 days */}
                 <div className="overflow-x-auto -mx-2 px-2">
-                  {" "}
-                  {/* allow horizontal scroll on small screens */}
                   <div
                     className="grid gap-1"
                     style={{
                       gridAutoFlow: "column",
                       gridAutoColumns: "min-content",
                       alignItems: "start",
-                      // small left/right padding keeps it compact
                     }}
                   >
                     {heatmap.weeks.map((week, wIdx) => (
@@ -752,7 +733,7 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                             className={`${heatColor(
                               d.count,
                               heatmap.max
-                            )} w-3 h-3 rounded-sm border border-gray-700 transition-transform transform hover:scale-110`}
+                            )} w-3 h-3 rounded-sm border border-gray-200 dark:border-gray-700 transition-transform transform hover:scale-110`}
                             title={`${d.key}: ${d.count} submission(s)`}
                           />
                         ))}
@@ -761,19 +742,60 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mt-3 text-xs text-gray-400">
+                <div className="flex items-center gap-2 mt-3 text-xs app-muted">
                   <span>Less</span>
-                  <span className="w-3 h-3 bg-gray-800 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-900 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-700 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-500 rounded border border-gray-700 inline-block"></span>
-                  <span className="w-3 h-3 bg-green-300 rounded border border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-gray-200 dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-200 dark:bg-green-900 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-400 dark:bg-green-700 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-500 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
+                  <span className="w-3 h-3 bg-green-300 rounded border border-gray-300 dark:border-gray-700 inline-block"></span>
                   <span>More</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
+        )}
+        {profileTab === "account" && (
+          <div className="max-w-xl space-y-6">
+            <div className="app-surface rounded-2xl p-6 space-y-3">
+              <h3 className="font-semibold">Your Data</h3>
+              <button onClick={handleExportData} className="w-full bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white py-2 rounded-lg">
+                Download my data
+              </button>
+              <p className="text-sm app-muted">
+                Export includes account fields and submissions associated with this login.
+              </p>
+            </div>
+            <div className="app-surface rounded-2xl p-6 space-y-3">
+              <h3 className="font-semibold">Account</h3>
+              <p className="text-sm"><span className="app-muted">Username:</span> {user?.username}</p>
+              {user?.email && <p className="text-sm"><span className="app-muted">Email:</span> {user.email}</p>}
+            </div>
+            <div className="app-surface rounded-2xl p-6 space-y-3 border-red-300 dark:border-red-800">
+              <h3 className="font-semibold text-red-700 dark:text-red-400">Danger Zone</h3>
+              <p className="text-sm app-muted">
+                Deleting your account disables login and anonymizes your username and email. Judged submissions may remain for system integrity and will not show your original identity. This cannot be undone in the app.
+              </p>
+              <label className="block text-sm">
+                Type {DELETE_CONFIRMATION_PHRASE} to confirm
+                <input
+                  value={deletePhrase}
+                  onChange={(e) => setDeletePhrase(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 app-input rounded"
+                />
+              </label>
+              {deleteError && <p className="text-red-600 dark:text-red-400 text-sm">{deleteError}</p>}
+              <button
+                onClick={handleDeleteAccount}
+                disabled={!canConfirmAccountDeletion(deletePhrase) || deleting}
+                className="w-full bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white py-2 rounded-lg"
+              >
+                {deleting ? "Deleting..." : "Delete account"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </Wrapper>
   );

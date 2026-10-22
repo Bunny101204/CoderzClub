@@ -10,8 +10,51 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 5s
+    env:
+      # Loopback only. These override application properties so a repository
+      # or organization variable cannot redirect tests at Atlas or production Redis.
+      MONGODB_URI: mongodb://127.0.0.1:27017/coderzclub
+      SPRING_DATA_MONGODB_URI: mongodb://127.0.0.1:27017/coderzclub
+      SPRING_REDIS_HOST: 127.0.0.1
+      SPRING_REDIS_PORT: "6379"
     steps:
       - uses: actions/checkout@v4
+      - name: Require isolated MongoDB and Redis
+        run: |
+          set -euo pipefail
+          case "${SPRING_DATA_MONGODB_URI}" in
+            mongodb://127.0.0.1:27017/*|mongodb://localhost:27017/*) ;;
+            *) echo "MongoDB URI is not the isolated CI instance"; exit 1 ;;
+          esac
+          case "${SPRING_DATA_MONGODB_URI}${MONGODB_URI}${SPRING_REDIS_HOST}" in
+            *mongodb.net*|*mongodb+srv*|*atlas*|*redislabs*|*upstash*) echo "refusing a production database endpoint"; exit 1 ;;
+          esac
+          case "${SPRING_REDIS_HOST}" in
+            127.0.0.1|localhost) ;;
+            *) echo "Redis host is not the isolated CI instance"; exit 1 ;;
+          esac
+          python3 -c "import socket,sys; s=socket.create_connection(('127.0.0.1',6379),5); s.sendall(b'PING\r\n'); reply=s.recv(16); s.close(); sys.exit('Redis did not answer PONG') if not reply.startswith(b'+PONG') else None; socket.create_connection(('127.0.0.1',27017),5).close(); print('isolated MongoDB and Redis are reachable on loopback')"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,6 +72,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Harmless HTTPS origin so production-mode Vite can build in CI.
+          # Cloudflare and other deploy builds supply their own VITE_API_BASE_URL.
+          VITE_API_BASE_URL: https://api.example.com
 
   docker-build:
     runs-on: ubuntu-latest

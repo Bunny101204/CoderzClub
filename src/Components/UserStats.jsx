@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../apiClient';
 import { useAuth } from '../context/AuthContext';
-import { auth } from './AuthHelper';
 
 const UserStats = () => {
   const { user } = useAuth();
@@ -19,7 +18,7 @@ const UserStats = () => {
 
   const fetchUserStats = async () => {
     try {
-      const response = await axios.get('/api/users/stats', auth.getAuthConfig());
+      const response = await api.users.getStats();
       setStats(response.data);
       setError(null);
     } catch (err) {
@@ -31,7 +30,7 @@ const UserStats = () => {
 
   const fetchUserSubmissions = async () => {
     try {
-      const response = await axios.get('/api/submissions/my-submissions', auth.getAuthConfig());
+      const response = await api.submissions.getMySubmissions();
       // Handle both paginated and non-paginated responses
       const data = response.data;
       const submissionsArray = Array.isArray(data) ? data : (data.submissions || []);
@@ -62,9 +61,9 @@ const UserStats = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="app-shell p-6">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold mb-6">📊 My Statistics</h1>
+          <h1 className="text-3xl font-bold mb-6">My Statistics</h1>
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
           </div>
@@ -75,9 +74,9 @@ const UserStats = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="app-shell p-6">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold mb-6">📊 My Statistics</h1>
+          <h1 className="text-3xl font-bold mb-6">My Statistics</h1>
           <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 text-red-300">
             {error}
           </div>
@@ -87,48 +86,48 @@ const UserStats = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
+    <div className="app-shell p-6">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">📊 My Statistics</h1>
+        <h1 className="text-3xl font-bold mb-6">My Statistics</h1>
         
         {stats && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             {/* Total Points */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="app-surface rounded-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-400 text-sm">Total Points</p>
                   <p className="text-3xl font-bold text-green-400">{stats.totalPoints}</p>
                 </div>
-                <div className="text-4xl">🏆</div>
+                <div className="text-sm font-semibold app-muted">Points</div>
               </div>
             </div>
 
             {/* Problems Solved */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="app-surface rounded-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-400 text-sm">Problems Solved</p>
                   <p className="text-3xl font-bold text-blue-400">{stats.totalProblemsSolved}</p>
                 </div>
-                <div className="text-4xl">✅</div>
+                <div className="text-sm font-semibold app-muted">Solved</div>
               </div>
             </div>
 
             {/* Current Streak */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="app-surface rounded-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-400 text-sm">Current Streak</p>
                   <p className="text-3xl font-bold text-orange-400">{stats.currentStreak}</p>
                   <p className="text-xs text-gray-500">days</p>
                 </div>
-                <div className="text-4xl">🔥</div>
+                <div className="text-sm font-semibold app-muted">Streak</div>
               </div>
             </div>
 
             {/* Success Rate */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="app-surface rounded-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-400 text-sm">Success Rate</p>
@@ -136,7 +135,7 @@ const UserStats = () => {
                     {Math.round(stats.successRate * 100)}%
                   </p>
                 </div>
-                <div className="text-4xl">📈</div>
+                <div className="text-sm font-semibold app-muted">Success</div>
               </div>
             </div>
           </div>
@@ -145,8 +144,8 @@ const UserStats = () => {
         {/* Additional Stats */}
         {stats && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold mb-4">📊 Detailed Stats</h3>
+            <div className="app-surface rounded-lg p-6">
+              <h3 className="text-xl font-semibold mb-4">Detailed Stats</h3>
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-400">Total Submissions:</span>
@@ -163,7 +162,7 @@ const UserStats = () => {
               </div>
             </div>
 
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="app-surface rounded-lg p-6">
               <h3 className="text-xl font-semibold mb-4">Progress</h3>
               <div className="space-y-3">
                 <div>
@@ -196,7 +195,7 @@ const UserStats = () => {
         )}
 
         {/* Recent Submissions */}
-        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+        <div className="app-surface rounded-lg p-6">
           <h3 className="text-xl font-semibold mb-4">Recent Submissions</h3>
           
           {submissions.length > 0 ? (

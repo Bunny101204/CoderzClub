@@ -5,15 +5,20 @@ import com.coderzclub.config.SubmissionQueueProperties;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.SubmissionTestResult;
 import com.coderzclub.model.TestCase;
+import com.coderzclub.model.ContestProblemSnapshot;
 import com.coderzclub.model.Problem;
 import com.coderzclub.repository.SubmissionJobRepository;
 import com.coderzclub.repository.ProblemRepository;
+import com.coderzclub.service.ContestProblemSnapshotService;
 import com.coderzclub.repository.SubmissionTestResultRepository;
 import com.coderzclub.service.Judge0ExecutionService;
 import com.coderzclub.service.SubmissionJobLeaseService;
 import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.OperationalMetrics;
+import com.coderzclub.service.ExecutionOutcome;
+import com.coderzclub.service.ExecutionVerdictMapper;
+import com.coderzclub.service.IncompatibleExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +54,9 @@ public class SubmissionWorker {
     private ProblemRepository problemRepository;
 
     @Autowired
+    private ContestProblemSnapshotService snapshotService;
+
+    @Autowired
     private SubmissionTestResultRepository resultRepository;
 
     @Autowired
@@ -82,16 +90,24 @@ public class SubmissionWorker {
         }
 
         int concurrency = Math.max(1, queueProperties.getConcurrency());
+        if (workerProperties.getConcurrency() != concurrency) {
+            logger.warn("worker.concurrency={} is unused; Rabbit listener concurrency is submission.queue.concurrency={}",
+                workerProperties.getConcurrency(), concurrency);
+        }
         heartbeatExecutor = Executors.newScheduledThreadPool(Math.max(1, concurrency));
         consumer.start(this::handleMessage, concurrency);
-        logger.info("Started submission worker fleet with concurrency={}", concurrency);
+        logger.info("Started submission worker fleet with concurrency={} prefetch={} "
+                + "(submission.queue.concurrency is canonical; worker.concurrency does not control the listener)",
+            concurrency, queueProperties.getPrefetch());
     }
 
     private SubmissionQueueConsumer.MessageDisposition handleMessage(String jobId) {
         if (jobId == null || jobId.isBlank()) {
+            operationalMetrics.queueConsumer("dead_letter");
             return SubmissionQueueConsumer.MessageDisposition.DEAD_LETTER;
         }
         if (!jobRepository.existsById(jobId)) {
+            operationalMetrics.queueConsumer("unknown_job");
             logger.warn("Received submission message for unknown job {}; sending to DLQ", jobId);
             return SubmissionQueueConsumer.MessageDisposition.DEAD_LETTER;
         }
@@ -104,30 +120,40 @@ public class SubmissionWorker {
         if (heartbeatExecutor != null) heartbeatExecutor.shutdownNow();
     }
 
-    private SubmissionQueueConsumer.MessageDisposition processJob(String jobId) {
+    SubmissionQueueConsumer.MessageDisposition processJob(String jobId) {
         String workerId = UUID.randomUUID().toString();
         MDC.put("jobId", jobId);
         MDC.put("workerId", workerId);
         Optional<SubmissionJob> jobOpt = leaseService.claimJob(jobId, workerId, workerProperties.getLeaseDurationSeconds());
         if (jobOpt.isEmpty()) {
+            operationalMetrics.duplicateClaim();
+            operationalMetrics.queueConsumer("duplicate_or_unclaimable");
             return SubmissionQueueConsumer.MessageDisposition.ACK;
         }
 
         SubmissionJob job = jobOpt.get();
+        operationalMetrics.queueConsumer("claimed");
         operationalMetrics.workerStarted();
         eventService.publish(job, SubmissionJob.JobStatus.RUNNING);
-        long heartbeatInterval = Math.max(1, workerProperties.getLeaseDurationSeconds() / 2);
+        if (heartbeatExecutor == null || heartbeatExecutor.isShutdown()) {
+            heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
+        }
+        long heartbeatInterval = Math.max(1, workerProperties.getHeartbeatIntervalSeconds());
         AtomicBoolean leaseLost = new AtomicBoolean(false);
         ScheduledFuture<?> heartbeatTask = heartbeatExecutor.scheduleAtFixedRate(
             () -> {
                 try {
                     if (!leaseService.heartbeat(jobId, workerId, workerProperties.getLeaseDurationSeconds())) {
                         leaseLost.set(true);
-                        logger.warn("Worker {} lost lease for job {}; stopping result processing", workerId, jobId);
+                        operationalMetrics.heartbeatFailure();
+                        logger.warn("Worker {} lost lease for job {}; in-flight wait=true Judge0 execution cannot be cancelled",
+                            workerId, jobId);
                     }
                 } catch (RuntimeException heartbeatFailure) {
                     leaseLost.set(true);
-                    logger.warn("Heartbeat failed for job {}; stopping result processing", jobId, heartbeatFailure);
+                    operationalMetrics.heartbeatFailure();
+                    logger.warn("Heartbeat failed for job {}; in-flight wait=true Judge0 execution cannot be cancelled",
+                        jobId, heartbeatFailure);
                 }
             },
             heartbeatInterval,
@@ -142,17 +168,36 @@ public class SubmissionWorker {
         MDC.put("attemptCount", String.valueOf(job.getAttemptCount()));
 
         try {
-            Problem problem = problemRepository.findById(job.getProblemId())
-                .orElseThrow(() -> new IllegalStateException("Problem not found for submission job"));
-            List<SubmissionJob.TestCase> publicTests = convert(problem.getPublicTestCases());
-            List<SubmissionJob.TestCase> hiddenTests = convert(problem.getHiddenTestCases());
-            List<SubmissionJob.TestResult> results = executionService.executeTestCases(
-                job.getCode(), job.getLanguageId(), publicTests, hiddenTests, job.getExecutionMode(),
-                job.getTestcaseVersion());
+            List<SubmissionJob.TestCase> publicTests;
+            List<SubmissionJob.TestCase> hiddenTests;
+            com.coderzclub.model.ExecutionMode executionMode = job.getExecutionMode();
+            String testcaseVersion = job.getTestcaseVersion();
+            if (job.getContestId() != null && !job.getContestId().isBlank()) {
+                ContestProblemSnapshot snapshot = snapshotService.findById(job.getContestProblemSnapshotId());
+                if (snapshot == null) {
+                    throw new IllegalStateException("Contest problem snapshot not found for submission job");
+                }
+                publicTests = convert(snapshot.getPublicTestCases());
+                hiddenTests = convert(snapshot.getHiddenTestCases());
+                executionMode = snapshot.getExecutionMode();
+                testcaseVersion = snapshot.getTestcaseVersion();
+            } else {
+                Problem problem = problemRepository.findById(job.getProblemId())
+                    .orElseThrow(() -> new IllegalStateException("Problem not found for submission job"));
+                publicTests = convert(problem.getPublicTestCases());
+                hiddenTests = convert(problem.getHiddenTestCases());
+            }
+            ExecutionOutcome outcome = executionService.executeTestCases(
+                job.getCode(), job.getLanguageId(), publicTests, hiddenTests, executionMode, testcaseVersion);
+            List<SubmissionJob.TestResult> results = outcome.getResults();
+            logger.info("job_execution_strategy jobId={} configured={} used={} logicalTestcases={} providerExecutions={} fallbackReason={}",
+                jobId, outcome.getConfiguredMode(), outcome.getExecutionModeUsed(),
+                outcome.getLogicalTestcases(), outcome.getProviderExecutions(), outcome.getFallbackReason());
 
             if (leaseLost.get() || !leaseService.isOwned(jobId, workerId)) {
                 operationalMetrics.leaseLoss();
-                logger.warn("Lease ownership lost before saving results for job {}; ignoring stale result", jobId);
+                logger.warn("Lease ownership lost before saving results for job {}; ignoring stale result. "
+                    + "If a wait=true Judge0 POST was already sent, that provider execution cannot be cancelled.", jobId);
                 return SubmissionQueueConsumer.MessageDisposition.ACK;
             }
             saveResults(job.getId(), workerId, job.getAttemptCount(), results, publicTests.size(), job.getTotalTests());
@@ -171,22 +216,45 @@ public class SubmissionWorker {
             completionPayload.setTotalMemory(maxMemory);
             completionPayload.setCompletedTests(results.size());
             completionPayload.setCompletedAt(new Date());
-
-            if (!leaseService.completeIfOwned(jobId, workerId, completionPayload)) {
-                operationalMetrics.leaseLoss();
-                logger.warn("Lease ownership lost before completing job {}; ignoring stale result", jobId);
-                return SubmissionQueueConsumer.MessageDisposition.ACK;
+            java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("configuredExecutionMode", String.valueOf(outcome.getConfiguredMode()));
+            metadata.put("executionModeUsed", String.valueOf(outcome.getExecutionModeUsed()));
+            metadata.put("logicalTestcases", outcome.getLogicalTestcases());
+            metadata.put("providerExecutions", outcome.getProviderExecutions());
+            if (outcome.getFallbackReason() != null) {
+                metadata.put("fallbackReason", outcome.getFallbackReason());
             }
+            completionPayload.setMetadata(metadata);
 
             job.setFinalResult(finalResult);
             job.setTotalRuntime(maxRuntime);
             job.setTotalMemory(maxMemory);
             job.setCompletedTests(results.size());
-            job.setStatus(SubmissionJob.JobStatus.COMPLETED);
             job.setCompletedAt(completionPayload.getCompletedAt());
+
+            if (leaseLost.get() || !leaseService.persistJudgementIfOwned(jobId, workerId, completionPayload)) {
+                operationalMetrics.leaseLoss();
+                logger.warn("Lease ownership lost before persisting judgement for job {}; "
+                    + "in-flight wait=true Judge0 execution cannot be cancelled", jobId);
+                return SubmissionQueueConsumer.MessageDisposition.ACK;
+            }
+
+            com.coderzclub.model.Submission submission = submissionService.createSubmissionFromJob(job);
+            if (submission != null) {
+                completionPayload.setSubmissionId(submission.getId());
+                job.setSubmissionId(submission.getId());
+            }
+
+            if (leaseLost.get() || !leaseService.completeIfOwned(jobId, workerId, completionPayload)) {
+                operationalMetrics.leaseLoss();
+                logger.warn("Lease ownership lost before completing job {}; submission already materialized if present. "
+                    + "Recovery will finish COMPLETED without re-executing when judgement/submission exists.", jobId);
+                return SubmissionQueueConsumer.MessageDisposition.ACK;
+            }
+
+            job.setStatus(SubmissionJob.JobStatus.COMPLETED);
             eventService.publish(job, SubmissionJob.JobStatus.COMPLETED);
             operationalMetrics.verdict(finalResult);
-            submissionService.createSubmissionFromJob(job);
 
             logger.info("Job {} completed result={} passedTests={}/{} runtimeMs={} memoryBytes={} attempts={}",
                 jobId, finalResult,
@@ -194,6 +262,14 @@ public class SubmissionWorker {
                 maxRuntime, maxMemory, job.getAttemptCount());
 
             return SubmissionQueueConsumer.MessageDisposition.ACK;
+        } catch (IncompatibleExecutionException incompatible) {
+            logger.warn("Job {} incompatible execution configuration: {}", jobId, incompatible.getMessage());
+            if (!leaseService.failIfOwned(jobId, workerId, incompatible.getMessage())) {
+                return SubmissionQueueConsumer.MessageDisposition.ACK;
+            }
+            job.setLastError(incompatible.getMessage());
+            eventService.publish(job, SubmissionJob.JobStatus.FAILED);
+            return SubmissionQueueConsumer.MessageDisposition.DEAD_LETTER;
         } catch (Exception e) {
             logger.error("Job {} failed during execution", jobId, e);
             if (leaseLost.get()) {
@@ -294,25 +370,7 @@ public class SubmissionWorker {
     }
 
 
-    private String analyzeResults(List<SubmissionJob.TestResult> results) {
-        boolean allPassed = results.stream().allMatch(SubmissionJob.TestResult::isPassed);
-        if (allPassed) {
-            return "ACCEPTED";
-        }
-        for (SubmissionJob.TestResult result : results) {
-            if (!result.isPassed() && result.getErrorType() != null) {
-                switch (result.getErrorType()) {
-                    case "Compilation Error":
-                        return "COMPILATION_ERROR";
-                    case "Runtime Error":
-                        return "RUNTIME_ERROR";
-                    case "Time Limit Exceeded":
-                        return "TIME_LIMIT_EXCEEDED";
-                    case "Memory Limit Exceeded":
-                        return "MEMORY_LIMIT_EXCEEDED";
-                }
-            }
-        }
-        return "WRONG_ANSWER";
+    String analyzeResults(List<SubmissionJob.TestResult> results) {
+        return ExecutionVerdictMapper.fromTestResults(results);
     }
 }

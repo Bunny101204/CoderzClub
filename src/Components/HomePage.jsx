@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { api } from "../apiClient";
 import { useAuth } from "../context/AuthContext";
 import { useProblemStatus } from "../hooks/useProblemStatus";
+import ProblemStatusMark from "./ProblemStatusMark";
 
 const HomePage = ({ problems: propsProblems }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("");
@@ -51,15 +54,7 @@ const HomePage = ({ problems: propsProblems }) => {
     return styles[difficulty] || 'bg-gray-600 text-white';
   };
 
-  const getStatusIcon = (status) => {
-    if (status === 'SOLVED') {
-      return <span className="inline-flex items-center text-green-400 text-lg leading-none" title="Solved" aria-label="Solved"><span aria-hidden="true">✓</span></span>;
-    }
-    if (status === 'ATTEMPTED') {
-      return <span className="inline-flex items-center text-yellow-400 text-lg leading-none" title="Attempted" aria-label="Attempted"><span aria-hidden="true">●</span></span>;
-    }
-    return null;
-  };
+  const getStatusIcon = (status) => <ProblemStatusMark status={status} />;
 
   const compareById = (a, b) => {
     const idA = String(a.id || "");
@@ -70,28 +65,23 @@ const HomePage = ({ problems: propsProblems }) => {
   const fetchProblems = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: currentPage.toString(),
-        size: itemsPerPage.toString()
-      });
-      
-      // Add difficulty filter to API call
+      const params = {
+        page: currentPage,
+        size: itemsPerPage,
+      };
+
       if (difficulty && difficulty !== '') {
-        params.append('difficulty', difficulty);
+        params.difficulty = difficulty;
       }
       if (topic && topic !== '') {
-        params.append('tags', topic);
+        params.tags = topic;
       }
       if (search && search.trim() !== '') {
-        params.append('search', search.trim());
+        params.search = search.trim();
       }
-      
-      const response = await fetch(`/api/problems?${params}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
+
+      const response = await api.problems.getAll(params);
+      const data = response.data;
       let problemsArray = [];
       
       // Handle both new paginated response and old array response
@@ -211,7 +201,7 @@ const HomePage = ({ problems: propsProblems }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="app-shell p-8">
       <div className="max-w-3xl mx-auto">
         <h1 className="text-3xl font-bold mb-6">Problem List</h1>
         <div className="flex flex-col lg:flex-row gap-4 mb-6">
@@ -222,7 +212,7 @@ const HomePage = ({ problems: propsProblems }) => {
                 setDifficulty(e.target.value);
                 setCurrentPage(0);
               }}
-              className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+              className="px-4 py-2 app-input rounded focus:outline-none"
             >
               <option value="">All Difficulties</option>
               <option value="EASY">Easy</option>
@@ -235,7 +225,7 @@ const HomePage = ({ problems: propsProblems }) => {
                 setTopic(e.target.value);
                 setCurrentPage(0);
               }}
-              className="px-4 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+              className="px-4 py-2 app-input rounded focus:outline-none"
             >
               <option value="">All Topics</option>
               <option value="arrays">Arrays</option>
@@ -252,11 +242,11 @@ const HomePage = ({ problems: propsProblems }) => {
               <option value="sorting">Sorting</option>
             </select>
             <div className="flex items-center">
-              <label className="text-sm text-gray-400 mr-2">Items:</label>
+              <label className="text-sm app-muted mr-2">Items:</label>
               <select
                 value={itemsPerPage}
                 onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(0); }}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:outline-none"
+                className="px-3 py-2 app-input rounded focus:outline-none"
               >
                 <option value={10}>10</option>
                 <option value={20}>20</option>
@@ -273,55 +263,51 @@ const HomePage = ({ problems: propsProblems }) => {
               setSearch(e.target.value);
               setCurrentPage(0);
             }}
-            className="flex-1 p-3 rounded bg-gray-800 text-white border border-gray-600 focus:outline-none"
+            className="flex-1 p-3 rounded app-input focus:outline-none"
           />
         </div>
-        <table className="w-full text-left bg-gray-800 rounded-lg shadow">
+        <table className="w-full text-left app-surface rounded-lg shadow">
           <thead>
             <tr>
-              <th className="py-2 px-3">Status</th>
+              <th className="py-2 px-3" aria-label="Status"></th>
               <th className="py-2 px-3">ID</th>
               <th className="py-2 px-3">Title</th>
               <th className="py-2 px-3">Difficulty</th>
               <th className="py-2 px-3">Tags</th>
-              <th className="py-2 px-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="text-gray-400 text-center py-4">Loading...</td>
+                <td colSpan={5} className="app-muted text-center py-4">Loading...</td>
               </tr>
             ) : problems.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-gray-400 text-center py-4">No problems found.</td>
+                <td colSpan={5} className="app-muted text-center py-4">No problems found.</td>
               </tr>
             ) : (
               problems.map((problem) => {
-                const status = problemStatus[String(problem.id)] || problemStatus[problem.id] || 'NOT_STARTED';
+                const status = problemStatus[String(problem.id)] || problemStatus[String(problem.numericId)] || 'UNSOLVED';
+                const displayId = problem.numericId != null ? problem.numericId : problem.id;
                 return (
-                  <tr key={problem.id} className="border-t border-gray-700">
+                  <tr
+                    key={problem.id}
+                    className="border-t border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/40"
+                    onClick={() => navigate(`/problem/${problem.id}`)}
+                  >
                     <td className="py-2 px-3 align-top">
                       {getStatusIcon(status)}
                     </td>
-                    <td className="py-2 px-3 font-mono">{problem.id}</td>
+                    <td className="py-2 px-3 font-mono">{displayId}</td>
                     <td className="py-2 px-3">
-                      <div className="font-semibold text-white">{problem.title}</div>
+                      <div className="font-semibold">{problem.title}</div>
                     </td>
                     <td className="py-2 px-3">
                       <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${getDifficultyBadge(problem.difficulty)}`}>
                         {problem.difficulty || 'N/A'}
                       </span>
                     </td>
-                    <td className="py-2 px-3 text-gray-300">{(problem.tags || []).join(', ')}</td>
-                    <td className="py-2 px-3">
-                      <Link
-                        to={`/problem/${problem.id}`}
-                        className="text-blue-400 hover:underline"
-                      >
-                        Solve
-                      </Link>
-                    </td>
+                    <td className="py-2 px-3 app-muted">{(problem.tags || []).join(', ')}</td>
                   </tr>
                 );
               })

@@ -76,6 +76,14 @@ public class SubmissionLimitService {
     }
 
     public SubmissionLimitDecision tryAcquireSubmissionSlot(String userId, String problemId) {
+        return acquireSlot("submission", userId, problemId);
+    }
+
+    public SubmissionLimitDecision tryAcquireRunSlot(String userId, String resourceId) {
+        return acquireSlot("run", userId, resourceId);
+    }
+
+    private SubmissionLimitDecision acquireSlot(String namespace, String userId, String resourceId) {
         if (userId == null || userId.isBlank()) {
             return SubmissionLimitDecision.rejected("INVALID_USER");
         }
@@ -84,7 +92,10 @@ public class SubmissionLimitService {
             long now = System.currentTimeMillis();
             long cooldownUntil = now + config.getCooldownMs();
             Long result = redis.execute(new DefaultRedisScript<>(LUA_SCRIPT, Long.class),
-                List.of(buildCooldownKey(userId), buildDailyKey(userId), buildProblemKey(userId, problemId)),
+                List.of(
+                    buildCooldownKey(namespace, userId),
+                    buildDailyKey(namespace, userId),
+                    buildProblemKey(namespace, userId, resourceId)),
                 String.valueOf(cooldownUntil), String.valueOf(config.getDaily()),
                 String.valueOf(config.getPerProblemDaily()), String.valueOf(secondsUntilNextMidnight(now)),
                 String.valueOf(now), String.valueOf(config.getCooldownMs()));
@@ -170,15 +181,27 @@ public class SubmissionLimitService {
     }
 
     private String buildCooldownKey(String userId) {
-        return "coderzclub:submission:cooldown:" + userId;
+        return buildCooldownKey("submission", userId);
     }
 
     private String buildDailyKey(String userId) {
-        return "coderzclub:submission:daily:" + currentDate() + ":" + userId;
+        return buildDailyKey("submission", userId);
     }
 
     private String buildProblemKey(String userId, String problemId) {
-        return "coderzclub:submission:problem:" + currentDate() + ":" + userId + ":" + problemId;
+        return buildProblemKey("submission", userId, problemId);
+    }
+
+    private String buildCooldownKey(String namespace, String userId) {
+        return "coderzclub:" + namespace + ":cooldown:" + userId;
+    }
+
+    private String buildDailyKey(String namespace, String userId) {
+        return "coderzclub:" + namespace + ":daily:" + currentDate() + ":" + userId;
+    }
+
+    private String buildProblemKey(String namespace, String userId, String resourceId) {
+        return "coderzclub:" + namespace + ":problem:" + currentDate() + ":" + userId + ":" + resourceId;
     }
 
     private String currentDate() {

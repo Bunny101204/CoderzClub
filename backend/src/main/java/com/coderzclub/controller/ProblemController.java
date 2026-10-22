@@ -1,15 +1,32 @@
 package com.coderzclub.controller;
 
 import com.coderzclub.dto.ProblemListResponse;
+import com.coderzclub.dto.ProblemDetailResponse;
+import com.coderzclub.dto.AdminProblemResponse;
+import com.coderzclub.dto.ProblemContentUpdate;
+import com.coderzclub.dto.ProblemExecutionConfigUpdate;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.User;
 import com.coderzclub.repository.ProblemRepository;
+import com.coderzclub.repository.UserRepository;
 import com.coderzclub.service.ProblemNumericIdAllocator;
 
 import com.coderzclub.service.SubmissionValidator;
+import com.coderzclub.service.ExecutionOutcome;
+import com.coderzclub.service.IncompatibleExecutionException;
+import com.coderzclub.service.ProblemExecutionConfigService;
+import com.coderzclub.service.ProblemContentService;
+import com.coderzclub.service.ProblemAccessService;
+import com.coderzclub.service.ProblemRunService;
+import com.coderzclub.service.RunLimitExceededException;
+import com.coderzclub.model.ExecutionMode;
+import com.coderzclub.model.ProblemAvailability;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -20,7 +37,6 @@ import java.util.Optional;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -41,6 +57,21 @@ public class ProblemController {
 
     @Autowired
     private ProblemNumericIdAllocator numericIdAllocator;
+
+    @Autowired
+    private ProblemRunService problemRunService;
+
+    @Autowired
+    private ProblemContentService problemContentService;
+
+    @Autowired
+    private ProblemExecutionConfigService executionConfigService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private ProblemAccessService problemAccessService;
 
     @GetMapping
     public ResponseEntity<?> getAllProblems(
@@ -66,6 +97,7 @@ public class ProblemController {
             }
 
             Query query = new Query();
+            problemAccessService.applyPracticeListingFilter(query, currentUser().orElse(null));
             if (difficulty != null) {
                 query.addCriteria(Criteria.where("difficulty").is(difficulty));
             }
@@ -76,11 +108,7 @@ public class ProblemController {
                 query.addCriteria(Criteria.where("tags").in(tags));
             }
             if (search != null) {
-                String escapedSearch = Pattern.quote(search);
-                query.addCriteria(new Criteria().orOperator(
-                    Criteria.where("title").regex("^" + escapedSearch, "i"),
-                    Criteria.where("_id").regex("^" + escapedSearch, "i")
-                ));
+                query.addCriteria(ProblemSearchCriteria.forTerm(search));
             }
             boolean cursorMode = cursor != null && !cursor.trim().isEmpty();
             long totalItems = 0;
@@ -164,7 +192,7 @@ public class ProblemController {
                         problem = problemRepository.findByNumericId(Integer.valueOf(rawId)).orElse(null);
                     } catch (NumberFormatException ignored) { }
                 }
-                if (problem != null) {
+                if (problem != null && problemAccessService.canView(currentUser().orElse(null), problem)) {
                     problem.setHiddenTestCases(null);
                     problems.add(problem);
                 }
@@ -173,6 +201,21 @@ public class ProblemController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
         }
+    }
+
+    @GetMapping("/{id}/admin")
+    public ResponseEntity<?> getAdminProblem(@PathVariable String id) {
+        Optional<Problem> problem = problemRepository.findById(id);
+        if (problem.isEmpty()) {
+            try {
+                problem = problemRepository.findByNumericId(Integer.valueOf(id));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (problem.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(new AdminProblemResponse(problem.get()));
     }
 
     @GetMapping("/{id}")
@@ -188,6 +231,9 @@ public class ProblemController {
 
         if (problem.isEmpty()) return ResponseEntity.notFound().build();
         Problem p = problem.get();
+        if (!problemAccessService.canView(currentUser().orElse(null), p)) {
+            return ResponseEntity.notFound().build();
+        }
         // Remove hidden testcases from API response
         p.setHiddenTestCases(null);
         return ResponseEntity.ok(p);
@@ -215,7 +261,11 @@ public class ProblemController {
                 return ResponseEntity.badRequest().body(Map.of("error", "numericId must be positive"));
             }
 
+            if (problem.getAvailability() == null) {
+                problem.setAvailability(ProblemAvailability.PUBLIC);
+            }
             submissionValidator.validateProblemTestCases(problem);
+            validateExecutionConfig(problem);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -226,6 +276,97 @@ public class ProblemController {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("error", "A problem with this numericId already exists"));
         }
+    }
+
+    @PatchMapping("/{id}/content")
+    public ResponseEntity<?> updateProblemContent(@PathVariable String id,
+                                                  @RequestBody ProblemContentUpdate update) {
+        Optional<Problem> existingOpt = problemRepository.findById(id);
+        if (existingOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            Problem existing = existingOpt.get();
+            problemContentService.apply(existing, update);
+            return ResponseEntity.ok(new AdminProblemResponse(problemRepository.save(existing)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PatchMapping("/{id}/execution")
+    public ResponseEntity<?> updateExecutionConfig(@PathVariable String id,
+                                                   @RequestBody ProblemExecutionConfigUpdate update) {
+        Optional<Problem> existingOpt = problemRepository.findById(id);
+        if (existingOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            Problem existing = existingOpt.get();
+            ExecutionMode requested = update == null || update.getExecutionMode() == null
+                ? existing.getExecutionMode()
+                : ExecutionMode.fromValue(update.getExecutionMode());
+            String version = update == null ? null : update.getTestcaseVersion();
+            executionConfigService.apply(existing, requested, version);
+            return ResponseEntity.ok(problemRepository.save(existing));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{id}/run-public")
+    public ResponseEntity<?> runPublicTests(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        Optional<User> userOpt = currentUser();
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
+        }
+        Optional<Problem> problemOpt = problemRepository.findById(id);
+        if (problemOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Problem not found"));
+        }
+        Problem problem = problemOpt.get();
+        problemAccessService.requirePracticeExecute(userOpt.get(), problem);
+        String code = body.get("source_code") == null ? (String) body.get("code") : String.valueOf(body.get("source_code"));
+        Object languageRaw = body.get("language_id") != null ? body.get("language_id") : body.get("languageId");
+        Integer languageId = languageRaw == null ? null : Integer.parseInt(languageRaw.toString());
+        if (code == null || languageId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "source_code and language_id are required"));
+        }
+        try {
+            ExecutionOutcome outcome = problemRunService.runPublicCases(userOpt.get().getId(), problem, code, languageId);
+            Map<String, Object> response = new HashMap<>();
+            response.put("results", outcome.getResults());
+            response.put("configuredExecutionMode", outcome.getConfiguredMode() == null ? null : outcome.getConfiguredMode().name());
+            response.put("executionModeUsed", outcome.getExecutionModeUsed() == null ? null : outcome.getExecutionModeUsed().name());
+            response.put("fallbackReason", outcome.getFallbackReason());
+            response.put("logicalTestcases", outcome.getLogicalTestcases());
+            response.put("providerExecutions", outcome.getProviderExecutions());
+            return ResponseEntity.ok(response);
+        } catch (RunLimitExceededException limited) {
+            return RateLimitResponses.from(limited);
+        } catch (IncompatibleExecutionException incompatible) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", incompatible.getMessage(),
+                "reason", incompatible.getReason(),
+                "configuredExecutionMode", ExecutionMode.canonical(problem.getExecutionMode()).name()
+            ));
+        }
+    }
+
+    private Optional<User> currentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getName() == null
+            || "anonymousUser".equals(auth.getName())) {
+            return Optional.empty();
+        }
+        return userRepository.findByUsername(auth.getName());
+    }
+
+    private void validateExecutionConfig(Problem problem) {
+        if (problem.getExecutionMode() == null) {
+            problem.setExecutionMode(ExecutionMode.STANDARD_PER_CASE);
+        }
+        executionConfigService.apply(problem, problem.getExecutionMode(), problem.getTestcaseVersion());
     }
 
     private String encodeCursor(Problem problem) {

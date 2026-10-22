@@ -1,5 +1,6 @@
 package com.coderzclub.service;
 
+import com.coderzclub.config.CorsOrigins;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
@@ -7,11 +8,16 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class EmailService {
 
     @Autowired
     private JavaMailSender mailSender;
+
+    @Autowired
+    private CorsOrigins corsOrigins;
 
     @Value("${app.email.from:no-reply@coderzclub.com}")
     private String fromAddress;
@@ -28,10 +34,11 @@ public class EmailService {
 
     public void sendVerificationEmail(String recipientEmail, String token, String publicFrontendUrl) {
         String subject = "Verify your CoderzClub account";
-        String verificationBaseUrl = normalizeUrl(publicFrontendUrl);
-        if (verificationBaseUrl.isBlank()) {
-            verificationBaseUrl = normalizeUrl(frontendUrl);
-        }
+        String verificationBaseUrl = VerificationLinks.frontendBase(
+            publicFrontendUrl,
+            corsOrigins == null ? List.of() : corsOrigins.allowed(),
+            frontendUrl
+        );
         String verificationLink = String.format("%s/auth?verifyEmailToken=%s", verificationBaseUrl, token);
         String text = "Welcome to CoderzClub!\n\n" +
                 "Please verify your email address by clicking the link below:\n" +

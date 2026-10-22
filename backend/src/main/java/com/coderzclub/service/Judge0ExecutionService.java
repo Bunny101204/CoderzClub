@@ -1,5 +1,6 @@
 package com.coderzclub.service;
 
+import com.coderzclub.config.ExecutionTimeoutPolicy;
 import com.coderzclub.config.SubmissionLimitsConfig;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.config.WorkerProperties;
@@ -9,9 +10,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -35,8 +36,8 @@ public class Judge0ExecutionService {
 
     private final Judge0ProviderProperties providerProperties;
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(20))
+    private HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(ExecutionTimeoutPolicy.DEFAULT_CONNECT_TIMEOUT_SECONDS))
             .build();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -61,6 +62,9 @@ public class Judge0ExecutionService {
     private FunctionHarnessService harnessService;
 
     @Autowired
+    private ExecutionCompatibilityService compatibilityService;
+
+    @Autowired
     public Judge0ExecutionService(Judge0ProviderProperties providerProperties) {
         this.providerProperties = providerProperties;
     }
@@ -71,20 +75,35 @@ public class Judge0ExecutionService {
     @PostConstruct
     void initializeConcurrency() {
         globalPermits = new Semaphore(Math.max(1, workerProperties.getMaxGlobalJudge0Concurrency()));
+        httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(Math.max(1, providerProperties.getConnectTimeoutSeconds())))
+            .build();
     }
 
 
     /**
      * Execute all test cases for a submission
      */
-    public List<SubmissionJob.TestResult> executeTestCases(String code, Integer languageId,
+    public ExecutionOutcome executeTestCases(String code, Integer languageId,
                                                           List<SubmissionJob.TestCase> publicTestCases,
                                                           List<SubmissionJob.TestCase> hiddenTestCases,
                                                           ExecutionMode executionMode,
                                                           String testcaseVersion) {
-        if (executionMode == ExecutionMode.FUNCTION_HARNESS_BATCH
-            && harnessService.supports(languageId, code, publicTestCases, hiddenTestCases, testcaseVersion)) {
-            return executeHarnessBatch(code, languageId, publicTestCases, hiddenTestCases);
+        ExecutionMode configured = compatibilityService.configuredMode(executionMode);
+        compatibilityService.validate(executionMode, languageId, code, publicTestCases, hiddenTestCases, testcaseVersion);
+        ExecutionOutcome outcome = new ExecutionOutcome();
+        outcome.setConfiguredMode(configured);
+        outcome.setExecutionModeUsed(configured);
+        outcome.setFallbackReason(compatibilityService.fallbackReason(executionMode));
+        int logical = size(publicTestCases) + size(hiddenTestCases);
+        outcome.setLogicalTestcases(logical);
+
+        if (configured == ExecutionMode.FUNCTION_HARNESS_BATCH) {
+            List<SubmissionJob.TestResult> results = executeHarnessBatch(code, languageId, publicTestCases, hiddenTestCases);
+            outcome.setResults(results);
+            outcome.setProviderExecutions(1);
+            logStrategy(outcome);
+            return outcome;
         }
         List<SubmissionJob.TestResult> results = new ArrayList<>();
 
@@ -120,7 +139,14 @@ public class Judge0ExecutionService {
             }
         }
 
-        return results;
+        outcome.setResults(results);
+        outcome.setProviderExecutions(results.size());
+        logStrategy(outcome);
+        return outcome;
+    }
+
+    public Map<String, Object> executeCustomStdin(String code, Integer languageId, String stdin) {
+        return executeProviderGuarded(code, languageId, stdin, 1);
     }
 
     private List<SubmissionJob.TestResult> executeHarnessBatch(String code, Integer languageId,
@@ -131,38 +157,110 @@ public class Judge0ExecutionService {
         if (hiddenTestCases != null) all.addAll(hiddenTestCases);
         String wrapped = harnessService.wrap(languageId, code);
         String stdin = harnessService.buildInput(all);
-        Map<String, Object> response = executeProvider(wrapped, languageId, stdin, all.size());
-        return harnessService.mapResults(response, all);
+        Map<String, Object> response = executeProviderGuarded(wrapped, languageId, stdin, all.size());
+        List<SubmissionJob.TestResult> mapped = harnessService.mapResults(response, all);
+        applySharedResources(mapped, response);
+        return mapped;
+    }
+
+    private void applySharedResources(List<SubmissionJob.TestResult> results, Map<String, Object> response) {
+        Long runtime = null;
+        Long memory = null;
+        if (response.get("time") != null) {
+            try {
+                runtime = Math.round(Double.parseDouble(response.get("time").toString()) * 1000);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (response.get("memory") != null) {
+            try {
+                memory = Long.parseLong(response.get("memory").toString());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        for (SubmissionJob.TestResult result : results) {
+            if (result.getRuntime() == null) result.setRuntime(runtime);
+            if (result.getMemory() == null) result.setMemory(memory);
+        }
+    }
+
+    Map<String, Object> executeProviderGuarded(String code, Integer languageId, String stdin, int testcaseCount) {
+        return withProviderPermits(languageId, () -> executeProvider(code, languageId, stdin, testcaseCount),
+            Map.of("status", Map.of("id", 13, "description", "Execution was cancelled")));
+    }
+
+    private void logStrategy(ExecutionOutcome outcome) {
+        logger.info("execution_strategy configured={} used={} logicalTestcases={} providerExecutions={} fallbackReason={}",
+            outcome.getConfiguredMode(), outcome.getExecutionModeUsed(), outcome.getLogicalTestcases(),
+            outcome.getProviderExecutions(), outcome.getFallbackReason());
+        operationalMetrics.executionStrategy(
+            String.valueOf(outcome.getConfiguredMode()),
+            String.valueOf(outcome.getExecutionModeUsed()),
+            outcome.getFallbackReason() == null ? "none" : outcome.getFallbackReason());
+    }
+
+    private static int size(List<?> list) {
+        return list == null ? 0 : list.size();
+    }
+
+    int globalPermitsAvailable() {
+        return globalPermits.availablePermits();
+    }
+
+    void configureForTest(WorkerProperties workers, FunctionHarnessService harness,
+                          ExecutionCompatibilityService compatibility, OperationalMetrics metrics,
+                          SubmissionLimitsConfig limits) {
+        this.workerProperties = workers;
+        this.harnessService = harness;
+        this.compatibilityService = compatibility;
+        this.operationalMetrics = metrics;
+        this.limitsConfig = limits;
+        initializeConcurrency();
     }
 
     /**
      * Execute a single test case with output truncation and size limits
      */
     private SubmissionJob.TestResult executeSingleTest(String code, Integer languageId, SubmissionJob.TestCase testCase) {
+        SubmissionJob.TestResult cancelled = new SubmissionJob.TestResult();
+        cancelled.setPassed(false);
+        cancelled.setErrorType("Execution Cancelled");
+        cancelled.setErrorMessage("Execution was cancelled");
+        return withProviderPermits(languageId, () -> executeSingleTestBounded(code, languageId, testCase), cancelled);
+    }
+
+    private <T> T withProviderPermits(Integer languageId, ProviderCall<T> call, T cancelledValue) {
         io.micrometer.core.instrument.Timer.Sample timer = operationalMetrics.judge0Timer();
         Semaphore global = globalPermits;
         Semaphore language = languagePermits.computeIfAbsent(languageId == null ? 0 : languageId,
             ignored -> new Semaphore(Math.max(1, workerProperties.getMaxPerLanguageJudge0Concurrency())));
         boolean globalAcquired = false;
         boolean languageAcquired = false;
+        boolean inflight = false;
         try {
+            io.micrometer.core.instrument.Timer.Sample waitSample = operationalMetrics.judge0SemaphoreWait();
             global.acquire();
             globalAcquired = true;
             language.acquire();
             languageAcquired = true;
-            return executeSingleTestBounded(code, languageId, testCase);
+            operationalMetrics.stopJudge0SemaphoreWait(waitSample);
+            operationalMetrics.providerInflightIncrement();
+            inflight = true;
+            return call.run();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            SubmissionJob.TestResult result = new SubmissionJob.TestResult();
-            result.setPassed(false);
-            result.setErrorType("Execution Cancelled");
-            result.setErrorMessage("Execution was cancelled");
-            return result;
+            return cancelledValue;
         } finally {
             operationalMetrics.stopJudge0Timer(timer);
+            if (inflight) operationalMetrics.providerInflightDecrement();
             if (languageAcquired) language.release();
             if (globalAcquired) global.release();
         }
+    }
+
+    @FunctionalInterface
+    private interface ProviderCall<T> {
+        T run() throws InterruptedException;
     }
 
     private SubmissionJob.TestResult executeSingleTestBounded(String code, Integer languageId, SubmissionJob.TestCase testCase) {
@@ -249,31 +347,30 @@ public class Judge0ExecutionService {
                 actualOutputSummary = actualOutputSummary.substring(0, 200) + "...";
             }
 
-            // Mark as OUTPUT_LIMIT_EXCEEDED if outputs were truncated
-            if (outputTruncated) {
+            String errorType = parseErrorType(responseMap);
+            if (ExecutionVerdictMapper.isInfrastructureFailure(errorType)) {
+                result.setPassed(false);
+                result.setErrorType(ExecutionVerdictMapper.INTERNAL_ERROR);
+                result.setErrorMessage(ExecutionUserFacing.infrastructureMessage());
+                logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={} technicalMessage={}",
+                    languageId, ExecutionVerdictMapper.INTERNAL_ERROR, runtime, memory, actualOutputSummary,
+                    parseErrorMessage(responseMap));
+            } else if (outputTruncated) {
                 result.setErrorType("OUTPUT_LIMIT_EXCEEDED");
                 result.setPassed(false);
                 logger.warn("output_limit_exceeded_on_testcase languageId={} runtimeMs={} memoryBytes={} outputLength={}",
                     languageId, runtime, memory, actualOutput.length());
-            }
-
-            // Check for errors
-            String errorType = parseErrorType(responseMap);
-            if (errorType != null && !outputTruncated) {
+            } else if (errorType != null) {
                 result.setPassed(false);
                 result.setErrorType(errorType);
-                result.setErrorMessage(parseErrorMessage(responseMap));
-
-                // Observability: Log execution error
+                result.setErrorMessage(ExecutionUserFacing.studentDetail(
+                    ExecutionVerdictMapper.fromErrorType(errorType), parseErrorMessage(responseMap), false));
                 logger.warn("judge0_execution_error languageId={} errorType={} runtimeMs={} memoryBytes={} actualOutputSummary={}",
                     languageId, errorType, runtime, memory, actualOutputSummary);
-            } else if (errorType == null && !outputTruncated) {
-                // Check if output matches expected
+            } else {
                 String expected = testCase.getExpectedOutput() != null ? testCase.getExpectedOutput().trim() : "";
                 boolean passed = outputsMatch(actualOutput, expected, hasOutput);
                 result.setPassed(passed);
-
-                // Observability: Log execution result
                 logger.info("judge0_execution_result languageId={} passed={} runtimeMs={} memoryBytes={} expectedSummary={} actualOutputSummary={}",
                     languageId, passed, runtime, memory,
                     expected.length() > 200 ? expected.substring(0, 200) + "..." : expected,
@@ -283,14 +380,14 @@ public class Judge0ExecutionService {
         } catch (Exception e) {
             logger.error("Failed to execute test case", e);
             result.setPassed(false);
-            result.setErrorType("Execution Error");
-            result.setErrorMessage("Failed to execute code: " + e.getMessage());
+            result.setErrorType(ExecutionVerdictMapper.INTERNAL_ERROR);
+            result.setErrorMessage(ExecutionUserFacing.infrastructureMessage());
         }
 
         return result;
     }
 
-    Map<String, Object> executeProvider(String code, Integer languageId, String stdin, int testcaseCount) {
+    protected Map<String, Object> executeProvider(String code, Integer languageId, String stdin, int testcaseCount) {
         try {
             Map<String, Object> payload = buildPayload(code, languageId, stdin, testcaseCount, limitsConfig,
                 providerProperties);
@@ -307,36 +404,120 @@ public class Judge0ExecutionService {
                     request.header("X-RapidAPI-Host", providerProperties.getHostHeader());
                 }
             }
-            HttpResponse<String> response;
-            int attempt = 0;
-            while (true) {
-                response = httpClient.send(request.POST(HttpRequest.BodyPublishers.ofString(body)).build(),
-                    HttpResponse.BodyHandlers.ofString());
-                int status = response.statusCode();
-                if (status == 429 || status == 503) operationalMetrics.judge0RateLimit(status);
-                if (status == 429 || status >= 500) operationalMetrics.judge0HttpError(status);
-                if (!isTransient(status) || attempt++ >= 5) break;
-                long delay = Math.min(8000L, 250L * (1L << Math.min(5, attempt)))
-                    + java.util.concurrent.ThreadLocalRandom.current().nextLong(100L, 400L);
-                Thread.sleep(delay);
+            HttpRequest posted = request.POST(HttpRequest.BodyPublishers.ofString(body)).build();
+            HttpResponse<String> response = sendWithSafeConnectRetry(posted);
+            int status = response.statusCode();
+            Judge0RetryClassifier.Classification httpClass = Judge0RetryClassifier.classifyHttpStatus(status);
+            if (status == 429) {
+                operationalMetrics.judge0RateLimit(status);
+                operationalMetrics.provider429();
             }
-            if (response.statusCode() == 401 || response.statusCode() == 403) {
+            if (status >= 500) {
+                operationalMetrics.judge0HttpError(status);
+                operationalMetrics.provider5xx();
+            }
+            if (httpClass != null && httpClass.decision() == Judge0RetryClassifier.Decision.DO_NOT_RETRY) {
+                recordAmbiguousIfNeeded(httpClass);
+                logger.warn("judge0_provider_http_failure status={} class={} reason={} posts=1 retry=false",
+                    status, httpClass.kind(), httpClass.reason());
+            }
+            if (status == 401 || status == 403) {
                 return Map.of("status", Map.of("id", 13, "description", "Judge0 authentication failed"));
             }
-            @SuppressWarnings("unchecked") Map<String, Object> parsed = objectMapper.readValue(response.body(), Map.class);
-            if (response.statusCode() >= 400) {
-                return Map.of("status", Map.of("id", 13,
-                    "description", "Judge0 rejected the execution request: "
-                        + String.valueOf(parsed.getOrDefault("error", parsed.getOrDefault("message", "HTTP " + response.statusCode())))));
+            if (status >= 400) {
+                return parseErrorBody(response.body(), status);
             }
-            return parsed;
+            return parseTerminalBody(response.body());
         } catch (Exception e) {
-            return Map.of("status", Map.of("id", 13, "description", "Judge0 provider error: " + e.getMessage()));
+            Judge0RetryClassifier.Classification classification = Judge0RetryClassifier.classifyException(e);
+            recordTransportFailure(classification);
+            logger.warn("judge0_provider_transport_failure class={} reason={} retry=false",
+                classification.kind(), classification.reason());
+            logger.warn("judge0_provider_exception class={} message={}",
+                e.getClass().getSimpleName(), e.getMessage(), e);
+            return Map.of("status", Map.of("id", 13, "description", ExecutionUserFacing.infrastructureMessage()));
         }
     }
 
-    private boolean isTransient(int status) {
-        return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+    private HttpResponse<String> sendWithSafeConnectRetry(HttpRequest request) throws IOException, InterruptedException {
+        int connectAttempts = 0;
+        int maxConnectRetries = Math.max(0, providerProperties.getMaxConnectRetries());
+        while (true) {
+            try {
+                return sendProvider(request);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw interrupted;
+            } catch (Exception error) {
+                Judge0RetryClassifier.Classification classification = Judge0RetryClassifier.classifyException(error);
+                boolean canRetryConnect = classification.decision() == Judge0RetryClassifier.Decision.SAFE_PRE_SEND
+                    && connectAttempts < maxConnectRetries;
+                if (!canRetryConnect) {
+                    if (error instanceof IOException io) throw io;
+                    if (error instanceof RuntimeException runtime) throw runtime;
+                    throw new IOException(error);
+                }
+                connectAttempts++;
+                logger.warn("judge0_connect_retry attempt={} class={} reason={}",
+                    connectAttempts, classification.kind(), classification.reason());
+                long delay = Math.min(8000L, 250L * (1L << Math.min(5, connectAttempts)))
+                    + java.util.concurrent.ThreadLocalRandom.current().nextLong(50L, 200L);
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
+                }
+            }
+        }
+    }
+
+    protected HttpResponse<String> sendProvider(HttpRequest request) throws IOException, InterruptedException {
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private Map<String, Object> parseTerminalBody(String body) {
+        try {
+            @SuppressWarnings("unchecked") Map<String, Object> parsed = objectMapper.readValue(body, Map.class);
+            return parsed;
+        } catch (Exception malformed) {
+            Judge0RetryClassifier.Classification classification = new Judge0RetryClassifier.Classification(
+                Judge0RetryClassifier.Kind.MALFORMED_RESPONSE, Judge0RetryClassifier.Decision.DO_NOT_RETRY,
+                "malformed_terminal_response");
+            recordAmbiguousIfNeeded(classification);
+            logger.warn("judge0_malformed_terminal_response retry=false");
+            return Map.of("status", Map.of("id", 13, "description", "Judge0 returned a malformed terminal response"));
+        }
+    }
+
+    private Map<String, Object> parseErrorBody(String body, int status) {
+        String detail = "HTTP " + status;
+        try {
+            @SuppressWarnings("unchecked") Map<String, Object> parsed = objectMapper.readValue(body, Map.class);
+            detail = String.valueOf(parsed.getOrDefault("error", parsed.getOrDefault("message", detail)));
+        } catch (Exception ignored) {
+            Judge0RetryClassifier.Classification classification = new Judge0RetryClassifier.Classification(
+                Judge0RetryClassifier.Kind.MALFORMED_RESPONSE, Judge0RetryClassifier.Decision.DO_NOT_RETRY,
+                "malformed_error_body");
+            recordAmbiguousIfNeeded(classification);
+        }
+        return Map.of("status", Map.of("id", 13,
+            "description", "Judge0 rejected the execution request: " + detail));
+    }
+
+    private void recordTransportFailure(Judge0RetryClassifier.Classification classification) {
+        if (classification.kind() == Judge0RetryClassifier.Kind.READ_TIMEOUT) {
+            operationalMetrics.providerTimeout();
+        }
+        recordAmbiguousIfNeeded(classification);
+    }
+
+    private void recordAmbiguousIfNeeded(Judge0RetryClassifier.Classification classification) {
+        if (classification != null && classification.decision() == Judge0RetryClassifier.Decision.DO_NOT_RETRY
+            && classification.kind() != Judge0RetryClassifier.Kind.AUTH_FAILURE
+            && classification.kind() != Judge0RetryClassifier.Kind.CANCELLED) {
+            operationalMetrics.ambiguousExecutionFailure(classification.reason());
+        }
     }
 
     private String providerUrl() {
@@ -353,7 +534,8 @@ public class Judge0ExecutionService {
         Map<String, Object> payload = new HashMap<>();
         payload.put("language_id", languageId);
         payload.put("source_code", code);
-        payload.put("cpu_time_limit", Math.min(60, Math.max(1, limits.getMaxExecutionTimeSeconds() * Math.max(1, testcaseCount))));
+        payload.put("cpu_time_limit", ExecutionTimeoutPolicy.cpuTimeLimitSeconds(
+            limits.getMaxExecutionTimeSeconds(), testcaseCount, provider.getMaxCpuTimeLimitSeconds()));
         payload.put("compile_time_limit", Math.min(120, Math.max(1, provider.getCompileTimeLimitSeconds())));
         if (!"KB".equalsIgnoreCase(provider.getMemoryLimitUnit())) {
             throw new IllegalArgumentException("judge0.provider.memory-limit-unit must be KB");
@@ -374,12 +556,14 @@ public class Judge0ExecutionService {
     /**
      * Parse error type from Judge0 response
      */
-    private String parseErrorType(Map<String, Object> response) {
-        if (response == null) return null;
+    public static String parseErrorType(Map<String, Object> response) {
+        if (response == null || response.isEmpty()) {
+            return ExecutionVerdictMapper.INTERNAL_ERROR;
+        }
 
         Object status = response.get("status");
         if (status instanceof Map<?, ?> statusMap) {
-            Integer id = (Integer) statusMap.get("id");
+            Integer id = statusId(statusMap.get("id"));
             if (id != null) {
                 switch (id) {
                     case 6: return "Compilation Error";
@@ -392,11 +576,15 @@ public class Judge0ExecutionService {
                     case 12: return "Runtime Error";
                     case 5: return "Time Limit Exceeded";
                     case 4: return "Memory Limit Exceeded";
+                    case 13: return ExecutionVerdictMapper.INTERNAL_ERROR;
                 }
+            } else if (statusMap.containsKey("id")) {
+                return ExecutionVerdictMapper.INTERNAL_ERROR;
             }
+        } else if (status != null) {
+            return ExecutionVerdictMapper.INTERNAL_ERROR;
         }
 
-        // Check for compile output as alternative indicator
         if (response.get("compile_output") != null && !response.get("compile_output").toString().trim().isEmpty()) {
             return "Compilation Error";
         }
@@ -404,29 +592,51 @@ public class Judge0ExecutionService {
         return null;
     }
 
+    private static Integer statusId(Object rawId) {
+        if (rawId instanceof Number number) {
+            return number.intValue();
+        }
+        if (rawId == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(rawId.toString());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
     /**
      * Parse error message from Judge0 response
      */
-    private String parseErrorMessage(Map<String, Object> response) {
-        if (response == null) return null;
+    static String parseErrorMessage(Map<String, Object> response) {
+        if (response == null) return ExecutionUserFacing.infrastructureMessage();
 
         if (response.get("compile_output") != null && !response.get("compile_output").toString().trim().isEmpty()) {
-            return response.get("compile_output").toString();
+            return ExecutionUserFacing.bound(response.get("compile_output").toString());
         }
 
         if (response.get("stderr") != null && !response.get("stderr").toString().trim().isEmpty()) {
-            return response.get("stderr").toString();
+            return ExecutionUserFacing.bound(response.get("stderr").toString());
         }
 
         if (response.get("message") != null) {
-            return response.get("message").toString();
+            String message = response.get("message").toString();
+            if (ExecutionUserFacing.isUnusableProviderText(message)) {
+                return ExecutionUserFacing.infrastructureMessage();
+            }
+            return ExecutionUserFacing.bound(message);
         }
 
         Object status = response.get("status");
         if (status instanceof Map<?, ?> statusMap) {
             Object description = statusMap.get("description");
             if (description != null) {
-                return description.toString();
+                String text = description.toString();
+                if (ExecutionUserFacing.isUnusableProviderText(text)) {
+                    return ExecutionUserFacing.infrastructureMessage();
+                }
+                return ExecutionUserFacing.bound(text);
             }
         }
 

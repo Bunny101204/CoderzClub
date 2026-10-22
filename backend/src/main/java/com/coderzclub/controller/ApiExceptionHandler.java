@@ -1,5 +1,7 @@
 package com.coderzclub.controller;
 
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -7,9 +9,14 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
+import com.coderzclub.service.ContestAdmissionException;
+import com.coderzclub.service.DraftConflictException;
+import com.coderzclub.service.SubmissionAdmissionHttpException;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
@@ -31,5 +38,25 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
+    }
+
+    @ExceptionHandler(ContestAdmissionException.class)
+    public ResponseEntity<Map<String, Object>> handleContestAdmission(ContestAdmissionException ex) {
+        return ResponseEntity.status(ex.getStatus()).body(Map.of("error", ex.getError()));
+    }
+
+    @ExceptionHandler(DraftConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleDraftConflict(DraftConflictException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "DRAFT_CONFLICT");
+        body.put("code", ex.getCode());
+        body.put("revision", ex.getRevision());
+        body.put("updatedAt", ex.getUpdatedAt());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(SubmissionAdmissionHttpException.class)
+    public ResponseEntity<Map<String, Object>> handleSubmissionAdmission(SubmissionAdmissionHttpException ex) {
+        return ResponseEntity.status(ex.getStatus()).body(ex.getBody());
     }
 }

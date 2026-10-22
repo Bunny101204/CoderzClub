@@ -1,5 +1,6 @@
 ﻿import React, { createContext, useContext, useState, useEffect } from "react";
 import { api, logger } from "../apiClient";
+import { flushActiveDraftBoundary } from "../drafts/draftBoundary";
 
 const missingProviderResult = {
   success: false,
@@ -33,8 +34,11 @@ export function AuthProvider({ children }) {
       const json = JSON.parse(atob(payload));
       const username = json.sub || json.username || json.user || null;
       const role = normalizeRole(json.role);
-      if (username && role) return { username, role };
-    } catch {}
+      const id = typeof json.uid === "string" && json.uid.trim() ? json.uid.trim() : null;
+      if (username && role) return { username, role, id };
+    } catch {
+      return null;
+    }
     return null;
   };
 
@@ -43,9 +47,11 @@ export function AuthProvider({ children }) {
     try {
       const response = await api.auth.validateToken();
       const userData = response.data;
+      const decoded = decodeJwt(token);
       const userObj = {
         username: userData.username,
         role: normalizeRole(userData.role),
+        id: (typeof userData.id === "string" && userData.id.trim()) ? userData.id.trim() : (decoded?.id || null),
       };
       setUser(userObj);
       setIsAuthenticated(true);
@@ -92,7 +98,8 @@ export function AuthProvider({ children }) {
         localStorage.setItem("jwtToken", data.token);
         setIsAuthenticated(true);
         const normalizedRole = normalizeRole(data.role);
-        const userObj = { username, role: normalizedRole };
+        const decoded = decodeJwt(data.token);
+        const userObj = { username, role: normalizedRole, id: decoded?.id || null };
         setUser(userObj);
         return { success: true, token: data.token, role: normalizedRole };
       } else {
@@ -111,11 +118,10 @@ export function AuthProvider({ children }) {
   };
 
   // Real register function
-  const register = async (username, email, password, role) => {
+  const register = async (username, email, password) => {
     try {
       logger.info("Attempting register", username, email);
       const body = { username, email, password };
-      if (role) body.role = role;
 
       const response = await api.auth.register(body);
 
@@ -124,7 +130,8 @@ export function AuthProvider({ children }) {
         localStorage.setItem("jwtToken", data.token);
         setIsAuthenticated(true);
         const normalizedRole = normalizeRole(data.role);
-        const userObj = { username, role: normalizedRole };
+        const decoded = decodeJwt(data.token);
+        const userObj = { username, role: normalizedRole, id: decoded?.id || null };
         setUser(userObj);
         return { success: true, token: data.token, role: normalizedRole };
       } else if (data.message) {
@@ -158,9 +165,15 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    flushActiveDraftBoundary({ keepalive: true });
     setIsAuthenticated(false);
     setUser(null);
     localStorage.removeItem("jwtToken");
+    localStorage.removeItem("token");
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("jwtToken");
+      sessionStorage.removeItem("token");
+    }
   };
 
   return (

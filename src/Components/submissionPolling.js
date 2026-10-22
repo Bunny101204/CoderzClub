@@ -38,14 +38,15 @@ export function getJobStatusMessage(job) {
 
 export function normalizeJobResult(result) {
   const isHidden = result?.type === "hidden";
+  const errorType = result?.errorType || result?.errorCode;
   return {
     type: isHidden ? "hidden" : "public",
     input: isHidden ? undefined : result?.input,
     expected: isHidden ? undefined : result?.expectedOutput,
     actual: isHidden ? undefined : result?.actualOutput,
     passed: Boolean(result?.passed),
-    error: result?.errorType
-      ? { type: result.errorType, message: result.errorMessage || "Test case failed" }
+    error: errorType
+      ? { type: errorType, message: result?.errorMessage || result?.diagnosticMessage || result?.message || "Test case failed" }
       : null,
     runtime: result?.runtime,
     memory: result?.memory,

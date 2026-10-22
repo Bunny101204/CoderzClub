@@ -28,25 +28,25 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900">
+    <div className="app-shell flex items-center justify-center">
       <form
         onSubmit={handleSubmit}
-        className="bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-sm"
+        className="app-surface p-8 rounded-lg shadow-lg w-full max-w-sm"
       >
-        <h2 className="text-2xl font-bold mb-6 text-white text-center">Admin Login</h2>
+        <h2 className="text-2xl font-bold mb-6 text-center">Admin Login</h2>
         <input
           type="text"
           placeholder="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
         />
         <input
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none"
+          className="w-full p-3 mb-4 rounded app-input focus:outline-none"
         />
         {error && <div className="text-red-400 mb-4 text-center">{error}</div>}
         <button

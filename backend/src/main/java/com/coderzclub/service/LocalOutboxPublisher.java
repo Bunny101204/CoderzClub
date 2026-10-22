@@ -9,15 +9,18 @@ import org.springframework.stereotype.Component;
 import java.util.Date;
 
 @Component
-@Profile("local")
+@Profile("local & worker")
 public class LocalOutboxPublisher {
     private final SubmissionQueuePublisher publisher;
     private final com.coderzclub.repository.SubmissionOutboxRepository repository;
+    private final OperationalMetrics metrics;
 
     public LocalOutboxPublisher(SubmissionQueuePublisher publisher,
-                                com.coderzclub.repository.SubmissionOutboxRepository repository) {
+                                com.coderzclub.repository.SubmissionOutboxRepository repository,
+                                OperationalMetrics metrics) {
         this.publisher = publisher;
         this.repository = repository;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${submission.outbox.poll-ms:1000}")
@@ -26,10 +29,16 @@ public class LocalOutboxPublisher {
             .filter(event -> event.getStatus() != SubmissionOutboxEvent.Status.PUBLISHED)
             .filter(event -> event.getNextAttemptAt() == null || !event.getNextAttemptAt().after(new Date()))
             .forEach(event -> {
-                publisher.publishJob(event.getPayload());
-                event.setStatus(SubmissionOutboxEvent.Status.PUBLISHED);
-                event.setPublishedAt(new Date());
-                repository.save(event);
+                try {
+                    publisher.publishJob(event.getPayload());
+                    event.setStatus(SubmissionOutboxEvent.Status.PUBLISHED);
+                    event.setPublishedAt(new Date());
+                    repository.save(event);
+                    metrics.outboxPublish("in_memory", "published");
+                } catch (RuntimeException failure) {
+                    metrics.outboxPublish("in_memory", "failed");
+                    throw failure;
+                }
             });
     }
 }

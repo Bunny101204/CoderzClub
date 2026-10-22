@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { lazy, Suspense } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -6,8 +6,6 @@ import {
   Navigate,
 } 
 from "react-router-dom";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
 import "./App.css";
 
 // Static imports for above-the-fold components
@@ -15,8 +13,9 @@ import LandingPage from "./Components/LandingPage";
 import Header from "./Components/Header";
 import AuthPage from "./Components/AuthPage";
 import ErrorBoundary from "./Components/ErrorBoundary";
+import SiteFooter from "./Components/SiteFooter";
 import { useAuth, AuthProvider } from "./context/AuthContext";
-import { api } from "./apiClient";
+import { ThemeProvider } from "./context/ThemeContext";
 
 // Lazy load route-specific components
 const Judge0CodeEditor = lazy(() => import("./Components/Judge0CodeEditor"));
@@ -24,6 +23,9 @@ const HomePage = lazy(() => import("./Components/HomePage"));
 const ProblemPage = lazy(() => import("./Components/ProblemPage"));
 const ProblemPageNew = lazy(() => import("./Components/ProblemPageNew"));
 const AdminDashboard = lazy(() => import("./Components/AdminDashboard"));
+const AdminBatchPage = lazy(() => import("./Components/AdminBatchPage"));
+const MyBatchesPage = lazy(() => import("./Components/MyBatchesPage"));
+const AdminStudentsPage = lazy(() => import("./Components/AdminStudentsPage"));
 const AddProblem = lazy(() => import("./Components/AddProblem"));
 const AddProblemNew = lazy(() => import("./Components/AddProblemNew"));
 const AddBundle = lazy(() => import("./Components/AddBundle"));
@@ -34,12 +36,18 @@ const SubscriptionPlans = lazy(() => import("./Components/SubscriptionPlans"));
 const Leaderboard = lazy(() => import("./Components/Leaderboard"));
 const UserStats = lazy(() => import("./Components/UserStats"));
 const Profile = lazy(() => import("./Components/Profile"));
+const PrivacyPage = lazy(() => import("./Components/PrivacyPage"));
+const TermsPage = lazy(() => import("./Components/TermsPage"));
+const ContestList = lazy(() => import("./Components/contests/ContestList"));
+const ContestDetail = lazy(() => import("./Components/contests/ContestDetail"));
+const ContestProblemPage = lazy(() => import("./Components/contests/ContestProblemPage"));
+const ContestForm = lazy(() => import("./Components/admin/contests/ContestForm"));
 
 // Fallback component for Suspense
 function LoadingFallback() {
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-      <div className="text-white text-lg">Loading...</div>
+    <div className="app-shell flex items-center justify-center">
+      <div className="text-lg">Loading...</div>
     </div>
   );
 }
@@ -49,7 +57,7 @@ function AdminRoute({ user }) {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="app-shell text-center flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-4">Access Denied</h2>
           <p className="text-gray-400 mb-4">You need admin privileges to access this page.</p>
@@ -68,8 +76,8 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="app-shell flex items-center justify-center">
+        <div className="text-xl">Loading...</div>
       </div>
     );
   }
@@ -77,8 +85,8 @@ function AppContent() {
   // App no longer fetches the full problem list globally; individual pages fetch as needed.
 
   return (
-    <div className="min-h-screen bg-gray-900">
-      {isAuthenticated && <Header />}
+    <div className="app-shell">
+      <Header />
       <Routes>
         <Route
           path="/about"
@@ -152,8 +160,108 @@ function AppContent() {
           element={<Suspense fallback={<LoadingFallback />}><Profile isOpen={true} onClose={() => {}} asPage={true} /></Suspense>}
         />
         <Route
+          path="/contests"
+          element={
+            isAuthenticated ? (
+              <Suspense fallback={<LoadingFallback />}><ContestList /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/contests/:id"
+          element={
+            isAuthenticated ? (
+              <Suspense fallback={<LoadingFallback />}><ContestDetail /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/contests/:contestId/problems/:problemId"
+          element={
+            isAuthenticated ? (
+              <Suspense fallback={<LoadingFallback />}><ContestProblemPage /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
           path="/admin"
           element={<Suspense fallback={<LoadingFallback />}><AdminRoute user={user} /></Suspense>}
+        />
+        <Route
+          path="/admin/contests/new"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/contests/:id"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/students"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><AdminStudentsPage /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/my/batches"
+          element={
+            user ? (
+              <Suspense fallback={<LoadingFallback />}><MyBatchesPage /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/my/batches/:id"
+          element={
+            user ? (
+              <Suspense fallback={<LoadingFallback />}><AdminBatchPage /></Suspense>
+            ) : (
+              <Navigate to="/auth" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/batches/:id"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><AdminBatchPage /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
+        />
+        <Route
+          path="/admin/edit-problem/:id"
+          element={
+            user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
+              <Suspense fallback={<LoadingFallback />}><AddProblemNew /></Suspense>
+            ) : (
+              <Navigate to="/home" replace />
+            )
+          }
         />
         <Route
           path="/admin/add-problem"
@@ -205,9 +313,18 @@ function AppContent() {
             )
           }
         />
+        <Route
+          path="/privacy"
+          element={<Suspense fallback={<LoadingFallback />}><PrivacyPage /></Suspense>}
+        />
+        <Route
+          path="/terms"
+          element={<Suspense fallback={<LoadingFallback />}><TermsPage /></Suspense>}
+        />
         {/* Catch-all for unknown routes */}
         <Route path="*" element={<Navigate to={isAuthenticated ? "/home" : "/"} replace />} />
       </Routes>
+      <SiteFooter />
     </div>
   );
 }
@@ -216,9 +333,11 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
+        <ThemeProvider>
         <Router>
           <AppContent />
         </Router>
+        </ThemeProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

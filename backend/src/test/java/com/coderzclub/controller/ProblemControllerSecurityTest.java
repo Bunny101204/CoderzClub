@@ -16,16 +16,19 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -56,6 +59,42 @@ class ProblemControllerSecurityTest {
         problem.setHiddenTestCases(List.of(new TestCase("9", "10", "secret")));
 
         when(problemRepository.findById("p1")).thenReturn(Optional.of(problem));
+        when(problemRepository.save(any(Problem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void userCannotReadAdminProblemPayload() throws Exception {
+        mockMvc.perform(get("/api/problems/p1/admin"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminCanReadHiddenTestsForEditing() throws Exception {
+        mockMvc.perform(get("/api/problems/p1/admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hiddenTestCases[0].input").value("9"));
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void userCannotPatchProblemContent() throws Exception {
+        mockMvc.perform(patch("/api/problems/p1/content")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Hacked\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminContentPatchPreservesOmittedHiddenTests() throws Exception {
+        mockMvc.perform(patch("/api/problems/p1/content")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Renamed\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Renamed"))
+                .andExpect(jsonPath("$.hiddenTestCases[0].input").value("9"));
     }
 
     @Test
@@ -128,7 +167,8 @@ class ProblemControllerSecurityTest {
         extra.setId("50");
         extra.setNumericId(50);
 
-        doReturn(List.of(first, second, extra)).when(mongoTemplate).find(any(Query.class), eq(Problem.class));
+        doReturn(new ArrayList<>(List.of(first, second, extra))).when(mongoTemplate).find(any(Query.class), eq(Problem.class));
+        clearInvocations(mongoTemplate);
 
         mockMvc.perform(get("/api/problems?cursor=MjB8MjA&limit=2"))
             .andExpect(status().isOk())

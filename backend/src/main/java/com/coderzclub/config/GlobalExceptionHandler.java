@@ -1,5 +1,7 @@
 package com.coderzclub.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -13,6 +15,7 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationException(MethodArgumentNotValidException ex) {
@@ -36,21 +39,22 @@ public class GlobalExceptionHandler {
             return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(response);
         }
         
-        response.put("error", "Invalid request body: " + message);
+        response.put("error", "Request body is invalid");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
     @ExceptionHandler(MailException.class)
     public ResponseEntity<Map<String, String>> handleMailException(MailException ex) {
         Map<String, String> response = new HashMap<>();
-        response.put("error", "Email delivery failed: " + ex.getMessage());
+        response.put("error", "Email delivery failed");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleGenericException(Exception ex) {
+        logger.error("Unhandled server error", ex);
         Map<String, String> response = new HashMap<>();
-        response.put("error", ex.getMessage() != null ? ex.getMessage() : "An unexpected error occurred");
+        response.put("error", "An unexpected error occurred");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 }

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import axios from "axios";
 import "../index.css";
 import UtilBar from "./UtilBar";
 import { EditorContextAPI } from "./EditorContextAPI";
-import { getTemplate } from "./LanguageTemplates";
-import { auth } from "./AuthHelper";
+import { chooseStarterCode } from "./LanguageTemplates";
+import { applyLanguageSwitch } from "./editorLanguageDrafts";
+import { executionStdin } from "../execution/customStdin.js";
 import {
   getJobStatusMessage,
   getPollDelay,
@@ -13,6 +13,17 @@ import {
   normalizeJobResult,
   isHiddenResult,
 } from "./submissionPolling";
+import { editorSurfaceClasses, resultCardClasses } from "../theme/theme";
+import { useTheme } from "../context/ThemeContext";
+import { CopyIcon } from "../icons/AppIcons.jsx";
+import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.js";
+import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
+import { api, apiUrl } from "../apiClient";
+import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } from "../contests/contestRunPolling";
+import { useAuth } from "../context/AuthContext";
+import { readInitialDraftCode } from "../drafts/codeDraft";
+import { useEditorDraft } from "../drafts/useEditorDraft";
+import { readSavedEditorLanguage, saveEditorLanguage } from "../drafts/editorLanguagePreference";
 
 const Judge0CodeEditor = ({
   initialCode = "",
@@ -24,45 +35,118 @@ const Judge0CodeEditor = ({
   parameters: propParameters = [],
   problemId,
   executionMode = "STDIN_STDOUT",
+  executionLocked = false,
+  contestId = null,
+  contestStatus = null,
   onSubmissionSuccess,
 }) => {
-  // Debug: Log props on mount
-  React.useEffect(() => {
-    console.log("=== Judge0CodeEditor mounted ===");
-    console.log("testCases:", testCases);
-    console.log("testCases.length:", testCases?.length);
-    console.log("problemId:", problemId);
-    console.log("executionMode:", executionMode);
-  }, []);
+  const { theme } = useTheme();
+  const { user } = useAuth();
+  const editorChrome = editorSurfaceClasses(theme);
   // Use controlled or internal state for languageId
-  const [internalLanguageId, setInternalLanguageId] = useState(62);
+  const [internalLanguageId, setInternalLanguageId] = useState(() =>
+    propLanguageId !== undefined ? Number(propLanguageId) : readSavedEditorLanguage(problemId, contestId)
+  );
   const languageId =
     propLanguageId !== undefined ? propLanguageId : internalLanguageId;
-  const setLanguageId = propSetLanguageId || setInternalLanguageId;
+  const sourceCodeRef = useRef("");
+  const draftRef = useRef(null);
+  const languageDraftsRef = useRef({});
+  const languageRef = useRef(languageId);
+  const setLanguageId = (value) => {
+    const next = Number(value);
+    const draftOwnsCode = !propSetEditorCode && Boolean(problemId) && Boolean(user?.id);
+    if (!draftOwnsCode && !propSetEditorCode && Number(languageRef.current) !== next) {
+      const template = chooseStarterCode(next, initialCode, propLanguageId !== undefined ? propLanguageId : 62);
+      const switched = applyLanguageSwitch({
+        previousLanguageId: languageRef.current,
+        nextLanguageId: next,
+        currentCode: sourceCodeRef.current ?? "",
+        drafts: languageDraftsRef.current,
+        templates: { [next]: template },
+      });
+      languageDraftsRef.current = switched.drafts;
+      sourceCodeRef.current = switched.code;
+      setInternalSourceCode(switched.code);
+    }
+    languageRef.current = next;
+    if (propSetLanguageId) {
+      propSetLanguageId(next);
+      return;
+    }
+    setInternalLanguageId(next);
+    saveEditorLanguage(problemId, contestId, next);
+  };
 
-  // Use controlled or internal state for code
-  const [internalSourceCode, setInternalSourceCode] = useState(initialCode);
+  // Problem starter code belongs to the problem's preferred language. Other languages use their own template.
+  const preferredLanguageId = propLanguageId !== undefined ? propLanguageId : 62;
+  const [internalSourceCode, setInternalSourceCode] = useState(() => {
+    if (propSetEditorCode) return initialCode;
+    const startingLanguage = propLanguageId !== undefined
+      ? propLanguageId
+      : readSavedEditorLanguage(problemId, contestId);
+    const local = readInitialDraftCode({
+      userId: user?.id,
+      contestId,
+      problemId,
+      languageId: startingLanguage,
+    });
+    if (local != null) return local;
+    return chooseStarterCode(startingLanguage, initialCode, preferredLanguageId);
+  });
   const sourceCode = propSetEditorCode ? initialCode : internalSourceCode;
-  const setSourceCode = propSetEditorCode || setInternalSourceCode;
+  sourceCodeRef.current = sourceCode;
+  const setSourceCode = (value) => {
+    const next = typeof value === "function" ? value(sourceCodeRef.current) : value;
+    if (propSetEditorCode) {
+      propSetEditorCode(next);
+      return;
+    }
+    sourceCodeRef.current = next;
+    setInternalSourceCode(next);
+    draftRef.current?.noteEdit(next);
+  };
 
   const [output, setOutput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState([]); // [{input, expected, actual, passed}]
-  const [showMainWarning, setShowMainWarning] = useState(false);
+  const [, setSubmissionStatus] = useState(null);
   const [userInput, setUserInput] = useState("");
   const [submitResult, setSubmitResult] = useState(null); // {status, failedCase, passedCount, totalCount}
   const [showAccepted, setShowAccepted] = useState(false);
-  const [submissionStatus, setSubmissionStatus] = useState(null); // Track submission status
   const [useCustomInput, setUseCustomInput] = useState(false);
   const [executionTime, setExecutionTime] = useState(null); // Execution time in ms
   const [executionMemory, setExecutionMemory] = useState(null); // Execution memory in bytes
   const [errorDetails, setErrorDetails] = useState(null); // Detailed error info
   const [copySuccess, setCopySuccess] = useState(false); // Copy to clipboard success
-  const [isDarkTheme, setIsDarkTheme] = useState(true); // Theme state
   const pollingControllerRef = useRef(null);
   const activeJobIdRef = useRef(null);
   const submissionGenerationRef = useRef(0);
+  const contestRunGenerationRef = useRef(0);
+  const contestRunControllerRef = useRef(null);
+  const activeRunIdRef = useRef(null);
+  const contestMode = Boolean(contestId);
+  const contestLive = contestMode && contestStatus === "LIVE";
+  const runLocked = contestMode ? !contestLive : executionLocked;
+  const customRunLocked = contestMode ? true : executionLocked;
   const eventSourceRef = useRef(null);
+  const draftEnabled = !propSetEditorCode && Boolean(problemId);
+  const draft = useEditorDraft({
+    enabled: draftEnabled,
+    userId: user?.id || null,
+    contestId,
+    problemId,
+    languageId,
+    starterCode: chooseStarterCode(languageId, initialCode, preferredLanguageId),
+    currentCodeRef: sourceCodeRef,
+    onApply: (code) => {
+      if (!propSetEditorCode) {
+        sourceCodeRef.current = code ?? "";
+        setInternalSourceCode(code ?? "");
+      }
+    },
+  });
+  draftRef.current = draft;
 
   const languageNames = {
     50: "C",
@@ -84,11 +168,23 @@ const Judge0CodeEditor = ({
   useEffect(() => () => {
     pollingControllerRef.current?.abort();
     eventSourceRef.current?.close();
+    contestRunControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (propLanguageId !== undefined) return;
+    setInternalLanguageId(readSavedEditorLanguage(problemId, contestId));
+  }, [problemId, contestId, propLanguageId]);
+
+  useEffect(() => () => {
+    contestRunGenerationRef.current += 1;
+    contestRunControllerRef.current?.abort();
+    contestRunControllerRef.current = null;
+    activeRunIdRef.current = null;
+  }, [problemId, contestId]);
 
   //for line numbers in editor
   const [lineCount, setLineCount] = useState(1);
-  const textareaRef = React.useRef(null);
   const lineRef = React.useRef(null);
 
   // Initialize timer when component mounts
@@ -128,39 +224,11 @@ const Judge0CodeEditor = ({
       .padStart(2, "0")}`;
   };
 
-  //for numbers in code editor
-  const syncScroll = () => {
-    if (textareaRef.current && lineRef.current) {
-      lineRef.current.scrollTop = textareaRef.current.scrollTop;
-    }
-  };
-
-  // Store code in localStorage when it changes
+  const noteDraftEdit = draft.noteEdit;
   useEffect(() => {
-    if (problemId && sourceCode) {
-      localStorage.setItem(`code_${problemId}_${languageId}`, sourceCode);
-    }
-  }, [sourceCode, problemId, languageId]);
-
-  // Load stored code when component mounts or problemId changes
-  useEffect(() => {
-    if (problemId) {
-      const storedCode = localStorage.getItem(
-        `code_${problemId}_${languageId}`
-      );
-      if (storedCode && !propSetEditorCode) {
-        setInternalSourceCode(storedCode);
-      } else if (!storedCode && !propSetEditorCode) {
-        // Only load template if no stored code exists
-        if (!initialCode || initialCode.trim() === "") {
-          const template = getTemplate(languageId);
-          setInternalSourceCode(template);
-        } else {
-          setInternalSourceCode(initialCode);
-        }
-      }
-    }
-  }, [problemId, languageId]);
+    if (!draftEnabled) return;
+    noteDraftEdit(sourceCode ?? "");
+  }, [sourceCode, draftEnabled, noteDraftEdit]);
 
   // UtilityFunctions.jsx
   let downloadCode = (sourceCode, languageId) => {
@@ -197,12 +265,6 @@ const Judge0CodeEditor = ({
     link.href = URL.createObjectURL(blob);
     link.click();
   };
-
-  // Normalize class name
-  const normalizedCode = sourceCode.replace(
-    /public\s+class\s+\w+/,
-    "public class Main"
-  );
 
   // Helper to wrap user code for Java
   function generateJavaCode(userCode, functionName, testInput, parameters) {
@@ -338,7 +400,16 @@ const Judge0CodeEditor = ({
     
     const statusId = res.status?.id;
     const statusDescription = res.status?.description;
-    
+
+    if (statusId === 13 || res.errorType === "INTERNAL_ERROR" || res.errorCode === "JUDGE0_PROVIDER_ERROR") {
+      return {
+        type: "INTERNAL_ERROR",
+        message: "Execution service is temporarily unavailable. Please retry.",
+        details: "Judging infrastructure failed. This is not a wrong answer.",
+        code: "JUDGE0_PROVIDER_ERROR"
+      };
+    }
+
     // Compilation error
     if (statusId === 6 || res.compile_output) {
       return {
@@ -384,16 +455,7 @@ const Judge0CodeEditor = ({
     let lastErr;
     while (attempt <= maxRetries) {
       try {
-        return await axios.post(
-          "/api/judge0/execute",
-          payload,
-          // {
-          //   headers: {
-          //     "content-type": "application/json",
-          //   },
-          // },
-          auth.getAuthConfig()
-        );
+        return await api.judge0.execute(payload);
       } catch (error) {
         lastErr = error;
         const status = error?.response?.status;
@@ -409,14 +471,146 @@ const Judge0CodeEditor = ({
     throw lastErr;
   }
 
+  const cancelContestRunPolling = () => {
+    contestRunGenerationRef.current += 1;
+    contestRunControllerRef.current?.abort();
+    contestRunControllerRef.current = null;
+    activeRunIdRef.current = null;
+  };
+
+  const applyContestRunPayload = (payload) => {
+    const remoteResults = payload.results || [];
+    const allResults = [];
+    for (let i = 0; i < remoteResults.length; i++) {
+      const r = remoteResults[i];
+      const errorType = r.errorType;
+      const error = errorType && errorType !== "WRONG_ANSWER"
+        ? { type: errorType, message: r.errorMessage || errorType }
+        : null;
+      allResults.push({
+        input: r.input || "",
+        expected: r.expectedOutput || "",
+        actual: r.actualOutput || "No Output",
+        passed: !!r.passed,
+        runtime: r.runtime,
+        memory: r.memory,
+        error,
+      });
+      if (r.runtime && (!executionTime || r.runtime > executionTime)) {
+        setExecutionTime(r.runtime);
+      }
+      if (r.memory && (!executionMemory || r.memory > executionMemory)) {
+        setExecutionMemory(r.memory);
+      }
+      if (error) {
+        setErrorDetails(error);
+      }
+    }
+    setResults(allResults);
+    setOutput("");
+  };
+
+  const pollContestRun = async (runId, generation, signal) => {
+    for (let poll = 0; poll < CONTEST_RUN_MAX_POLLS; poll++) {
+      if (signal.aborted || generation !== contestRunGenerationRef.current || activeRunIdRef.current !== runId) {
+        return;
+      }
+      await sleep(getContestRunPollDelay(poll));
+      if (signal.aborted || generation !== contestRunGenerationRef.current || activeRunIdRef.current !== runId) {
+        return;
+      }
+      const response = await api.contests.getRun(runId);
+      const payload = response.data || {};
+      if (payload.status === "QUEUED" || payload.status === "RUNNING") {
+        const completed = payload.completedTests;
+        const total = payload.totalTests;
+        setOutput(
+          Number.isFinite(completed) && Number.isFinite(total) && total > 0
+            ? `Running public tests ${completed}/${total}`
+            : payload.status === "QUEUED" ? "Contest run queued" : "Running public tests..."
+        );
+        continue;
+      }
+      if (isTerminalContestRun(payload.status)) {
+        if (payload.status === "FAILED") {
+          setOutput(payload.errorMessage || "Contest run failed. You can retry.");
+          setResults([]);
+          return;
+        }
+        applyContestRunPayload(payload);
+        return;
+      }
+    }
+    setOutput("Contest run is taking longer than expected. You can retry.");
+  };
+
+  const handleContestRun = async () => {
+    if (runLocked) {
+      return;
+    }
+    if (!testCases || testCases.length === 0) {
+      setOutput("No public tests available for this contest problem.");
+      return;
+    }
+    cancelContestRunPolling();
+    const generation = contestRunGenerationRef.current;
+    const controller = new AbortController();
+    contestRunControllerRef.current = controller;
+    setIsLoading(true);
+    setResults([]);
+    setOutput("");
+    setSubmitResult(null);
+    setExecutionTime(null);
+    setExecutionMemory(null);
+    setErrorDetails(null);
+    try {
+      const response = await api.contests.run(contestId, problemId, {
+        code: sourceCode,
+        language: languageNames[languageId] || "Unknown",
+        languageId,
+        codingDurationSeconds: codingDurationSecondsFromElapsedMs(elapsedTime),
+      });
+      if (generation !== contestRunGenerationRef.current) {
+        return;
+      }
+      const runId = response.data?.runId;
+      if (!runId) {
+        setOutput("Contest run was not accepted. Please retry.");
+        return;
+      }
+      activeRunIdRef.current = runId;
+      setOutput("Contest run queued");
+      await pollContestRun(runId, generation, controller.signal);
+    } catch (error) {
+      if (generation !== contestRunGenerationRef.current) {
+        return;
+      }
+      const status = error?.response?.status;
+      if (status === 429) {
+        setOutput(error?.response?.data?.error || "Run is busy. Please retry.");
+      } else if (status === 503) {
+        setOutput(error?.response?.data?.error || "Run service is unavailable. Please retry.");
+      } else if (status === 409) {
+        setOutput("Contest Run is available only while the contest is LIVE.");
+      } else {
+        setOutput("Error running test cases: " + (error.response?.data?.error || error.message || "Unknown error"));
+      }
+      setResults([]);
+    } finally {
+      if (generation === contestRunGenerationRef.current) {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const handleRunAll = async () => {
-    console.log("=== handleRunAll called ===");
-    console.log("testCases:", testCases);
-    console.log("testCases length:", testCases?.length);
-    console.log("languageId:", languageId);
-    console.log("sourceCode length:", sourceCode?.length);
-    
-    // Check if we have test cases
+    if (runLocked) {
+      return;
+    }
+    if (contestMode) {
+      await handleContestRun();
+      return;
+    }
     if (!testCases || testCases.length === 0) {
       console.warn("No test cases available!");
       setOutput("No test cases available for this problem.");
@@ -436,109 +630,40 @@ const Judge0CodeEditor = ({
     
     try {
       const allResults = [];
-      console.log(`Running ${testCases.length} test cases...`);
-      
-      for (let i = 0; i < testCases.length; i++) {
-        const tc = testCases[i];
-        console.log(`Test case ${i + 1}:`, { input: tc.input, expected: tc.output });
-        
-        // For STDIN_STDOUT mode, use source code directly (no main method required)
-        // Users write complete programs that read from stdin and write to stdout
-        let codeToRun = sourceCode;
-        
-        // Only wrap Java code if we have function-based problem (old mode, not STDIN_STDOUT)
-        if (languageId === 62 && functionName && parameters && parameters.length > 0 && executionMode !== "STDIN_STDOUT") {
-          codeToRun = generateJavaCode(
-            sourceCode,
-            functionName,
-            tc.input,
-            parameters
-          );
-        }
-        
-        const stdinInput = typeof tc.input === 'string' ? tc.input : (buildStdinForParams(tc.input) ?? "");
-        console.log(`Sending to Judge0 - stdin:`, stdinInput.substring(0, 100));
-        
-        const response = await postToJudge0({
-          language_id: languageId,
-          source_code: codeToRun,
-          stdin: stdinInput + "\n",
-        });
-        
-        const res = response.data;
-        console.log(`Judge0 response ${i + 1}:`, {
-          status: res.status?.id,
-          stdout: res.stdout?.substring(0, 50),
-          stderr: res.stderr?.substring(0, 50),
-          time: res.time,
-          memory: res.memory,
-        });
-        
-        // Extract execution metrics
-        const runtime = res.time ? Math.round(parseFloat(res.time) * 1000) : null;
-        const memory = res.memory ? res.memory * 1024 : null;
-        
-        // Parse errors - check status first
-        const error = parseError(res);
-        
-        // Determine actual output - prioritize stdout, then stderr, then compile_output
-        let actual = "";
-        let hasOutput = false;
-        if (res.stdout && res.stdout.trim()) {
-          actual = res.stdout.trim();
-          hasOutput = true;
-        } else if (res.stderr && res.stderr.trim()) {
-          actual = res.stderr.trim();
-          hasOutput = true;
-        } else if (res.compile_output && res.compile_output.trim()) {
-          actual = res.compile_output.trim();
-          hasOutput = true;
-        } else {
-          actual = "No Output";
-        }
-        
-        const expected = String(tc.output || "").trim();
-        // Only pass if no error AND output matches
-        const noOutputExpected = expected === "" || expected.toUpperCase() === "N/A";
-        const passed = !error && ((noOutputExpected && !hasOutput) || actual === expected);
-        
-        console.log(`Test ${i + 1} result:`, { actual, expected, passed, runtime, memory, error });
-        
-        allResults.push({ 
-          input: tc.input || "", 
-          expected: expected || "", 
-          actual: actual || "No Output", 
-          passed,
-          runtime,
-          memory,
+      const response = await api.problems.runPublic(problemId, {
+        source_code: sourceCode,
+        language_id: languageId,
+      });
+      const payload = response.data || {};
+      const remoteResults = payload.results || [];
+      for (let i = 0; i < remoteResults.length; i++) {
+        const r = remoteResults[i];
+        const errorType = r.errorType;
+        const error = errorType && errorType !== "WRONG_ANSWER"
+          ? { type: errorType, message: r.errorMessage || errorType }
+          : null;
+        allResults.push({
+          input: r.input || "",
+          expected: r.expectedOutput || "",
+          actual: r.actualOutput || "No Output",
+          passed: !!r.passed,
+          runtime: r.runtime,
+          memory: r.memory,
           error,
-          statusId: res.status?.id,
-          statusDescription: res.status?.description
         });
-        
-        // Update execution metrics (use max values)
-        if (runtime && (!executionTime || runtime > executionTime)) {
-          setExecutionTime(runtime);
+        if (r.runtime && (!executionTime || r.runtime > executionTime)) {
+          setExecutionTime(r.runtime);
         }
-        if (memory && (!executionMemory || memory > executionMemory)) {
-          setExecutionMemory(memory);
+        if (r.memory && (!executionMemory || r.memory > executionMemory)) {
+          setExecutionMemory(r.memory);
         }
-        
-        // Set error details if any
         if (error) {
           setErrorDetails(error);
         }
-        
-        // small delay between calls to reduce 429
-        await sleep(600);
       }
       
-      console.log("All results:", allResults);
       setResults(allResults);
       setOutput(""); // Clear output since we're showing results instead
-      
-      // Force a re-render check
-      console.log("Results state set, length:", allResults.length);
       
     } catch (error) {
       console.error("Error in handleRunAll:", error);
@@ -558,7 +683,6 @@ const Judge0CodeEditor = ({
       setResults([]); // Clear results on error
     } finally {
       setIsLoading(false);
-      console.log("handleRunAll completed, isLoading set to false");
     }
   };
 
@@ -567,6 +691,9 @@ const Judge0CodeEditor = ({
 
   // Old single-run handler for normal editor
   const handleSingleRun = async () => {
+    if (customRunLocked) {
+      return;
+    }
     setIsLoading(true);
     setOutput("");
     setErrorDetails(null);
@@ -586,12 +713,16 @@ const Judge0CodeEditor = ({
         );
       }
       
-      const stdinInput = useCustomInput ? userInput : (buildStdinForParams(userInput) ?? "");
+      const preserveExactly = !isTestCaseMode || useCustomInput;
+      const stdinInput = executionStdin({
+        preserveExactly,
+        value: preserveExactly ? userInput : (buildStdinForParams(userInput) ?? ""),
+      });
       
       const response = await postToJudge0({
         language_id: languageId,
         source_code: codeToRun,
-        stdin: stdinInput + "\n",
+        stdin: stdinInput,
       });
       
       const res = response.data;
@@ -609,7 +740,7 @@ const Judge0CodeEditor = ({
       // Determine output
       let result = "";
       if (res.stdout) {
-        result = res.stdout.trim();
+        result = useCustomInput ? String(res.stdout) : res.stdout.trim();
       } else if (res.compile_output) {
         result = res.compile_output.trim();
       } else if (res.stderr) {
@@ -639,7 +770,14 @@ const Judge0CodeEditor = ({
   };
 
   // Helper to run a single test case (for submit)
-  const handleSubmitSolution = async (publicCases) => {
+  const contestSubmitEnabled = Boolean(contestId) && contestStatus === "LIVE";
+  const submitLocked = contestId ? !contestSubmitEnabled : executionLocked;
+
+  const handleSubmitSolution = async () => {
+    if (submitLocked) {
+      return;
+    }
+    cancelContestRunPolling();
     const submissionGeneration = ++submissionGenerationRef.current;
     pollingControllerRef.current?.abort();
     eventSourceRef.current?.close();
@@ -648,12 +786,12 @@ const Judge0CodeEditor = ({
     activeJobIdRef.current = null;
     // Check submission limits before submitting
     try {
-      const limitsResponse = await axios.get(`/api/submissions/limits?problemId=${problemId}`, auth.getAuthConfig());
+      const limitsResponse = await api.submissions.getLimits(problemId);
       const limits = limitsResponse.data;
 
       if (!limits.canSubmitNow) {
         const cooldown = limits.cooldownSeconds || 0;
-        setOutput(`⏳ Please wait ${cooldown} seconds before submitting again.`);
+        setOutput(`Please wait ${cooldown} seconds before submitting again.`);
         setErrorDetails({
           type: 'Rate Limit',
           message: `You must wait ${cooldown} seconds between submissions.`,
@@ -663,7 +801,7 @@ const Judge0CodeEditor = ({
       }
 
       if (limits.hasExceededDailyLimit) {
-        setOutput(`❌ Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
+        setOutput(`Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
         setErrorDetails({
           type: 'Daily Limit Exceeded',
           message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
@@ -673,7 +811,7 @@ const Judge0CodeEditor = ({
       }
 
       if (limits.hasExceededProblemLimit) {
-        setOutput(`❌ Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
+        setOutput(`Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
         setErrorDetails({
           type: 'Problem Limit Exceeded',
           message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
@@ -698,32 +836,23 @@ const Judge0CodeEditor = ({
     setErrorDetails(null);
 
     try {
-
-      const normalizeCases = (cases) => {
-        return (cases || []).map(tc => ({
-          input: tc.input,
-          expectedOutput: tc.expectedOutput ?? tc.output,
-          explanation: tc.explanation
-        }));
-      };
-
       // Create async submission job - only send identifiers and code
 
       // Create async submission job
 
-      const jobRequest = {
-        problemId: problemId,
+      const executionPayload = {
         code: sourceCode,
         language: languageNames[languageId] || "Unknown",
-        languageId: languageId
+        languageId: languageId,
+        codingDurationSeconds: codingDurationSecondsFromElapsedMs(elapsedTime)
       };
 
-      console.log("Submitting job request to backend:", jobRequest);
-      const jobResponse = await axios.post('/api/submission-jobs', jobRequest, auth.getAuthConfig());
+      const jobResponse = contestId
+        ? await api.contests.submit(contestId, problemId, executionPayload)
+        : await api.submissionJobs.create({ problemId, ...executionPayload });
       if (submissionGeneration !== submissionGenerationRef.current) return;
       const { jobId } = jobResponse.data;
       activeJobIdRef.current = jobId;
-      console.log("Received submission job ID:", jobId, "response:", jobResponse.data);
 
       await subscribeToJobEvents(jobId);
 
@@ -746,7 +875,7 @@ const Judge0CodeEditor = ({
   const subscribeToJobEvents = async (jobId) => {
     let ticket;
     try {
-      const ticketResponse = await axios.post(`/api/submission-jobs/${jobId}/events/ticket`, {}, auth.getAuthConfig());
+      const ticketResponse = await api.submissionJobs.createEventTicket(jobId);
       ticket = ticketResponse.data.ticket;
     } catch (error) {
       console.warn("Unable to create SSE ticket; switching to polling", error);
@@ -755,7 +884,7 @@ const Judge0CodeEditor = ({
     }
 
     if (activeJobIdRef.current !== jobId) return;
-    const source = new EventSource(`/api/submission-jobs/${jobId}/events?ticket=${encodeURIComponent(ticket)}`);
+    const source = new EventSource(apiUrl(`/api/submission-jobs/${jobId}/events?ticket=${encodeURIComponent(ticket)}`));
     let fallbackStarted = false;
     const fallbackTimer = setTimeout(() => {
       if (activeJobIdRef.current !== jobId || fallbackStarted) return;
@@ -806,10 +935,7 @@ const Judge0CodeEditor = ({
       try {
         await sleep(getPollDelay(poll));
         if (signal.aborted || activeJobIdRef.current !== jobId) return;
-        const response = await axios.get(`/api/submission-jobs/${jobId}`, {
-          ...auth.getAuthConfig(),
-          signal,
-        });
+        const response = await api.submissionJobs.getStatus(jobId, { signal });
         const job = response.data;
 
         const statusMessage = getJobStatusMessage(job);
@@ -817,7 +943,6 @@ const Judge0CodeEditor = ({
 
         if (isTerminalJobState(job.status)) {
           setOutput("");
-          console.log("Submission job completed:", job);
           setIsLoading(false);
 
           if (job.status === 'TIMEOUT') {
@@ -834,11 +959,22 @@ const Judge0CodeEditor = ({
             return;
           }
           if (job.status === 'FAILED') {
-            const message = job.error || job.lastError || "Submission processing failed";
             setSubmissionStatus("FAILED");
-            setOutput(`Submission failed: ${message}`);
-            setErrorDetails({ type: "Submission Error", message, details: "The execution could not be completed." });
-            setSubmitResult({ status: "failed", failedCase: null, failureReason: job.result || "FAILED" });
+            setOutput("Execution service is temporarily unavailable. Please retry.");
+            setErrorDetails({
+              type: "INTERNAL_ERROR",
+              message: "Execution service is temporarily unavailable. Please retry.",
+              details: "Judging infrastructure failed. This is not a wrong answer.",
+              code: "JUDGE0_PROVIDER_ERROR"
+            });
+            setSubmitResult({
+              status: "failed",
+              failedCase: null,
+              failureReason: "INTERNAL_ERROR",
+              errorCode: job.errorCode || "JUDGE0_PROVIDER_ERROR",
+              diagnosticMessage: job.diagnosticMessage,
+              reference: job.reference || job.jobId
+            });
             return;
           }
 
@@ -865,21 +1001,24 @@ const Judge0CodeEditor = ({
                 error.details = `Expected: ${failedTest.expected}, Got: ${failedTest.actual}`;
               }
 
-              setSubmitResult({
-                status: "failed",
-                failedCase: {
-                  input: failedTest.input,
-                  output: failedTest.expected,
-                  expected: failedTest.expected,
-                  actual: failedTest.actual,
-                  type: failedTest.type,
-                  index: failedIndex,
-                  error: error
-                },
-                passedCount: normalizedResults.filter(r => r.passed).length,
-                totalCount: normalizedResults.length,
-                failureReason: job.result
-              });
+            setSubmitResult({
+              status: "failed",
+              failedCase: {
+                input: failedTest.input,
+                output: failedTest.expected,
+                expected: failedTest.expected,
+                actual: failedTest.actual,
+                type: failedTest.type,
+                index: failedIndex,
+                error: error
+              },
+              passedCount: normalizedResults.filter(r => r.passed).length,
+              totalCount: normalizedResults.length,
+              failureReason: job.result,
+              errorCode: job.errorCode,
+              diagnosticMessage: job.diagnosticMessage,
+              reference: job.reference || job.jobId || job.submissionId
+            });
 
               if (error) {
                 setErrorDetails(error);
@@ -935,96 +1074,18 @@ const Judge0CodeEditor = ({
 
   // Reset function
   const handleReset = () => {
-    const template = getTemplate(languageId);
+    const template = chooseStarterCode(languageId, initialCode, preferredLanguageId);
     setInternalSourceCode(template);
+    draft.noteEdit(template);
     setOutput("");
     setResults([]);
     setSubmitResult(null);
     setShowAccepted(false);
-    setUserInput("");
     setSubmissionStatus(null);
     // Reset timer
     setStartTime(Date.now());
     setElapsedTime(0);
     setIsTimerRunning(true);
-  };
-
-  // Function to save submission to backend with enhanced details
-  const saveSubmission = async (
-    result, 
-    output, 
-    runtime = null, 
-    memory = null, 
-    statusId = null,
-    stderr = '',
-    errorMessage = '',
-    passedTestCases = 0,
-    totalTestCases = 0,
-    executionDetails = null
-  ) => {
-    try {
-      const token = auth.getToken();
-      if (!token) {
-        console.log("No token found, skipping submission save");
-        return;
-      }
-
-      // Get problem ID from URL or props
-      const problemIdFromUrl = window.location.pathname.split("/").pop();
-      const problemIdToSave = problemId || problemIdFromUrl;
-
-      const submissionData = {
-        problemId: problemIdToSave,
-        code: sourceCode,
-        language: languageNames[languageId] || "Unknown",
-        result: result,
-        output: output,
-        runtime: runtime,
-        memory: memory,
-        statusId: statusId,
-        stderr: stderr,
-        errorMessage: errorMessage,
-        passedTestCases: passedTestCases,
-        totalTestCases: totalTestCases,
-        executionDetails: executionDetails
-      };
-
-      const response = await axios.post("/api/submissions", submissionData, auth.getAuthConfig());
-
-      console.log("Submission saved with details:", response.data);
-      setSubmissionStatus("saved");
-    } catch (error) {
-      console.error("Error saving submission:", error);
-      
-      // Handle rate limiting and submission limit errors
-      if (error.response && error.response.status === 429) {
-        const errorData = error.response.data;
-        if (errorData && errorData.error) {
-          if (errorData.error === "RATE_LIMIT_EXCEEDED") {
-            const cooldown = errorData.cooldownSeconds || 0;
-            setErrorDetails({
-              type: 'Rate Limit Exceeded',
-              message: `Please wait ${cooldown} seconds before submitting again.`,
-              details: 'This helps prevent abuse and ensures fair usage.'
-            });
-          } else if (errorData.error === "DAILY_LIMIT_EXCEEDED") {
-            setErrorDetails({
-              type: 'Daily Limit Exceeded',
-              message: `You have exceeded your daily submission limit of ${errorData.limit || 100}.`,
-              details: 'Please try again tomorrow.'
-            });
-          } else if (errorData.error === "PROBLEM_LIMIT_EXCEEDED") {
-            setErrorDetails({
-              type: 'Problem Limit Exceeded',
-              message: `You have exceeded your submission limit for this problem (${errorData.limit || 50} per day).`,
-              details: 'Please try again tomorrow or work on other problems.'
-            });
-          }
-        }
-      }
-      
-      setSubmissionStatus("error");
-    }
   };
 
   useEffect(() => {
@@ -1040,7 +1101,7 @@ const Judge0CodeEditor = ({
         <select
           value={languageId}
           onChange={(e) => setLanguageId(Number(e.target.value))}
-          className="bg-gray-700 text-white px-3 py-1 rounded text-sm focus:outline-none"
+          className="app-input px-3 py-1 rounded text-sm focus:outline-none"
         >
           <option value={62}>Java</option>
           <option value={71}>Python</option>
@@ -1060,12 +1121,12 @@ const Judge0CodeEditor = ({
 
         {/* Timer */}
         <div className="flex items-center space-x-2">
-          <span className="text-sm text-gray-400">Timer:</span>
+          <span className="text-sm app-muted">Timer:</span>
           <span
-            className={`text-sm font-mono px-2 py-1 rounded ${
+            className={`text-sm font-mono px-2 py-1 rounded border ${
               isTimerRunning
-                ? "bg-green-600 text-white"
-                : "bg-gray-600 text-gray-300"
+                ? "bg-green-100 text-green-900 border-green-600 dark:bg-green-700 dark:text-white dark:border-green-500"
+                : "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-500"
             }`}
           >
             {formatTime(elapsedTime)}
@@ -1091,43 +1152,25 @@ const Judge0CodeEditor = ({
         >
           Reset
         </button>
-        
-        {/* Theme Toggle */}
-        <button
-          onClick={() => setIsDarkTheme(!isDarkTheme)}
-          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 shadow-md hover:shadow-lg"
-          title="Toggle theme"
-        >
-          {isDarkTheme ? 'Light' : 'Dark'}
-        </button>
       </div>
     </div>
   );
-  
-  // Get language name for syntax highlighting
-  const getLanguageName = (langId) => {
-    const langMap = {
-      50: 'c',
-      54: 'cpp',
-      62: 'java',
-      71: 'python',
-      63: 'javascript',
-      74: 'typescript',
-      60: 'go',
-      68: 'php',
-      72: 'ruby',
-      73: 'rust',
-      78: 'kotlin',
-      81: 'scala',
-      83: 'swift',
-      51: 'csharp'
-    };
-    return langMap[langId] || 'text';
-  };
 
   return (
-    <div className="max-w-4xl mx-auto mt-8 p-6 bg-gray-900 text-white rounded-lg shadow-lg">
+    <div className={`max-w-4xl mx-auto mt-8 p-6 rounded-lg shadow-lg ${theme === "light" ? "bg-white text-gray-900" : "bg-gray-900 text-white"}`}>
       {/* REMOVED: Main method warning modal - no longer needed as users can submit full programs */}
+      {draftEnabled && draft.status ? (
+        <p className="text-xs app-muted mb-2" data-testid="draft-status">{draft.status}</p>
+      ) : null}
+      {draftEnabled && draft.conflict ? (
+        <div className="mb-2 text-sm" data-testid="draft-conflict">
+          <p>This draft changed on another device.</p>
+          <div className="mt-1 flex gap-2">
+            <button type="button" className="underline text-xs" onClick={draft.useCloud}>Use cloud</button>
+            <button type="button" className="underline text-xs" onClick={draft.keepLocal}>Keep this draft</button>
+          </div>
+        </div>
+      ) : null}
       <EditorContextAPI.Provider
         value={{
           setLanguageId,
@@ -1140,11 +1183,11 @@ const Judge0CodeEditor = ({
         {/* Show language selector and download in test case mode, UtilBar otherwise */}
         {isTestCaseMode ? utilBarRow : <UtilBar />}
       </EditorContextAPI.Provider>
-      <div className="relative flex mb-4 border border-gray-700 rounded-lg overflow-hidden">
+      <div className={`relative flex mb-4 border rounded-lg overflow-hidden ${theme === "light" ? "border-gray-300" : "border-gray-700"}`}>
         {/* Line Numbers */}
         <div
           ref={lineRef}
-          className="bg-gray-800 text-gray-400 text-sm font-mono px-3 py-4 select-none overflow-hidden"
+          className={`${theme === "light" ? "bg-gray-100 text-gray-500" : "bg-gray-800 text-gray-400"} text-sm font-mono px-3 py-4 select-none overflow-hidden`}
           style={{ minWidth: "48px" }}
         >
           {Array.from({ length: lineCount }, (_, i) => (
@@ -1156,8 +1199,10 @@ const Judge0CodeEditor = ({
         <textarea
           rows={isTestCaseMode ? 18 : 12}
           id="codeArea"
-          className="w-full p-4 mb-4 rounded-lg bg-gray-800 border border-gray-700 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-green-400"
-          placeholder="Type your code here..."
+          data-language={languageId}
+          spellCheck={false}
+          className={`w-full p-4 mb-4 rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-green-400 ${editorChrome}`}
+          placeholder={`${languageNames[languageId] || "Code"} — a missing template stays empty`}
           value={sourceCode}
           onChange={(e) => setSourceCode(e.target.value)}
           onKeyDown={(e) => {
@@ -1294,40 +1339,41 @@ const Judge0CodeEditor = ({
       {/* Normal editor mode: single input/output */}
       {!isTestCaseMode && (
         <>
-          <input
-            type="text"
-            className="w-full p-3 mb-4 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-            placeholder="Enter input (stdin)"
+          <textarea
+            className="w-full min-h-28 p-3 mb-4 rounded-lg app-input text-sm font-mono whitespace-pre focus:outline-none focus:ring-2 focus:ring-green-400"
+            placeholder={"Enter input (stdin)\n5 2\n10 20 30 40 50"}
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
+            spellCheck={false}
+            aria-label="Custom program input"
           />
           <button
             onClick={handleSingleRun}
             className={`w-full py-3 text-lg font-semibold rounded-lg ${
-              isLoading
+              isLoading || customRunLocked
                 ? "bg-green-800 cursor-not-allowed"
                 : "bg-green-500 hover:bg-green-600"
             }`}
-            disabled={isLoading}
+            disabled={isLoading || customRunLocked}
           >
-            {isLoading ? "⏳ Running..." : "▶️ Run Code"}
+            {isLoading ? "Running..." : "Run Code"}
           </button>
           {output && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-600">
-              <h3 className="text-xl font-semibold mb-2 text-gray-300">
-                🧾 Output:
+            <div className="mt-6 p-4 rounded-lg border border-gray-300 dark:border-gray-600 app-surface">
+              <h3 className="text-xl font-semibold mb-2">
+                Output:
               </h3>
-              <pre className="bg-gray-800 border border-gray-700 text-green-300 p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
+              <pre className="app-code p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
                 {output}
               </pre>
             </div>
           )}
           {!output && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-600">
-              <h3 className="text-xl font-semibold mb-2 text-gray-300">
-                🧾 Output:
+            <div className="mt-6 p-4 rounded-lg border border-gray-300 dark:border-gray-600 app-surface">
+              <h3 className="text-xl font-semibold mb-2">
+                Output:
               </h3>
-              <pre className="bg-gray-800 border border-gray-700 text-gray-500 p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
+              <pre className="app-code app-muted p-4 rounded-lg whitespace-pre-wrap min-h-[120px]">
                 Output will appear here.
               </pre>
             </div>
@@ -1340,96 +1386,114 @@ const Judge0CodeEditor = ({
         <>
           <div>{/* Editor stays above */}</div>
 
-          {/* Custom input checkbox and input field */}
+          {!contestMode && (
           <div className="mt-4">
             <label className="flex items-center space-x-2 mb-3">
               <input
                 type="checkbox"
                 checked={useCustomInput}
                 onChange={(e) => setUseCustomInput(e.target.checked)}
-                className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
+                className="w-4 h-4 text-blue-600 border-gray-400 rounded focus:ring-blue-500 focus:ring-2"
               />
-              <span className="text-sm text-gray-300">
+              <span className="text-sm">
                 Use custom input for testing
               </span>
             </label>
 
             {useCustomInput && (
-              <input
-                type="text"
-                className="w-full p-3 mb-4 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                placeholder="Enter custom input (stdin)"
+              <textarea
+                className="w-full min-h-28 p-3 mb-4 rounded-lg app-input text-sm font-mono whitespace-pre focus:outline-none focus:ring-2 focus:ring-green-400"
+                placeholder={"Enter custom input (stdin)\n5 2\n10 20 30 40 50"}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
+                spellCheck={false}
+                aria-label="Custom program input"
               />
             )}
           </div>
+          )}
 
           
           {/* Show message if no test cases */}
           {!useCustomInput && (!testCases || testCases.length === 0) && !isLoading && (
-            <div className="mt-4 p-3 bg-gray-800 border border-gray-600 rounded-lg text-gray-300 text-sm">
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
               No test cases available for this problem. Use "Use custom input" checkbox to test your code.
             </div>
           )}
           
+          {contestMode && !contestLive && (
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
+              Contest Run and Submit are available only while the contest is LIVE.
+            </div>
+          )}
+          {contestMode && contestLive && (
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
+              Contest Run uses public snapshot tests only. Custom input is disabled during contests.
+            </div>
+          )}
+          {executionLocked && !contestMode && (
+            <div className="mt-4 p-3 app-inset rounded-lg text-sm">
+              Contest Run and Submit are not available yet. You can still edit code locally.
+            </div>
+          )}
           <div className="flex gap-2 mt-4">
             <button
               onClick={() => {
-                console.log("=== Run button clicked ===");
-                console.log("useCustomInput:", useCustomInput);
-                console.log("testCases:", testCases);
-                console.log("testCases.length:", testCases?.length);
-                console.log("current results.length:", results.length);
-                
-                if (useCustomInput) {
-                  console.log("Using handleSingleRun (custom input)");
+                if (runLocked) {
+                  return;
+                }
+                if (!contestMode && useCustomInput) {
                   handleSingleRun();
                 } else if (testCases && testCases.length > 0) {
-                  console.log("Using handleRunAll");
                   handleRunAll();
-                } else {
+                } else if (!contestMode) {
                   console.warn("No test cases available, using handleSingleRun");
                   setOutput("No test cases available. Use custom input or check problem configuration.");
                   handleSingleRun();
+                } else {
+                  setOutput("No public tests available for this contest problem.");
                 }
               }}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-green-500 hover:bg-green-600 disabled:bg-green-800 disabled:cursor-not-allowed`}
-              disabled={isLoading}
+              disabled={isLoading || runLocked}
+              title={runLocked ? "Contest run is available only while LIVE" : "Run tests"}
             >
-              {isLoading ? "⏳ Running..." : `▶️ Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
+              {isLoading ? "Running..." : `Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
             </button>
             <button
               onClick={() => handleSubmitSolution(testCases || [])}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 disabled:cursor-not-allowed`}
-              disabled={isLoading}
+              disabled={isLoading || submitLocked}
+              title={submitLocked
+                ? (contestId ? "Contest submit is available only while LIVE" : "Contest submit is not available yet")
+                : "Submit"}
             >
               {isLoading ? "Submitting..." : "Submit"}
             </button>
           </div>
           {/* Output - Show when there's output OR when running with custom input */}
           {(output || (useCustomInput && !isLoading && !results.length && !submitResult)) && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-600 bg-gray-800">
+            <div className="mt-6 p-4 rounded-lg border border-gray-200 dark:border-gray-600 app-surface">
               <div className="flex justify-between items-center mb-2">
-                <h3 className="text-xl font-semibold text-gray-300">
-                  🧾 Output:
+                <h3 className="text-xl font-semibold">
+                  Output:
                 </h3>
                 {output && (
                   <button
                     onClick={() => copyToClipboard(output)}
-                    className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center space-x-1"
+                    className="px-3 py-1 app-btn-secondary rounded text-sm flex items-center space-x-1"
                     title="Copy to clipboard"
                   >
-                    {copySuccess ? '✓ Copied!' : '📋 Copy'}
+                    {copySuccess ? "Copied!" : <span className="inline-flex items-center gap-1"><CopyIcon /> Copy</span>}
                   </button>
                 )}
               </div>
-              <pre className="bg-gray-900 border border-gray-700 text-green-300 p-4 rounded-lg whitespace-pre-wrap min-h-[120px] max-h-96 overflow-auto">
+              <pre className="app-code text-green-700 dark:text-green-300 p-4 rounded-lg whitespace-pre-wrap min-h-[120px] max-h-96 overflow-auto">
                 {output || "Output will appear here after running your code."}
               </pre>
               {(executionTime || executionMemory) && (
-                <div className="mt-2 flex gap-4 text-sm text-gray-400">
-                  {executionTime && <span>⏱️ Time: {formatExecutionTime(executionTime)}</span>}
+                <div className="mt-2 flex gap-4 text-sm app-muted">
+                  {executionTime && <span>Time: {formatExecutionTime(executionTime)}</span>}
                   {executionMemory && <span>Memory: {formatMemory(executionMemory)}</span>}
                 </div>
               )}
@@ -1438,47 +1502,47 @@ const Judge0CodeEditor = ({
           
           {/* Error Display */}
           {errorDetails && (
-            <div className="mt-6 p-4 rounded-lg border-2 border-red-500 bg-red-900/20">
+            <div className="mt-6 p-4 rounded-lg border-2 border-red-600 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100">
               <div className="flex justify-between items-start mb-2">
-                <h3 className="text-xl font-semibold text-red-400">
-                  ⚠️ {errorDetails.type}
+                <h3 className="text-xl font-semibold">
+                  {errorDetails.type}
                 </h3>
                 <div className="flex gap-2">
                   {(executionTime || executionMemory) && (
                     <div className="text-xs text-red-300 flex gap-2">
-                      {executionTime && <span>⏱️ {formatExecutionTime(executionTime)}</span>}
+                      {executionTime && <span>{formatExecutionTime(executionTime)}</span>}
                       {executionMemory && <span>{formatMemory(executionMemory)}</span>}
                     </div>
                   )}
                   <button
                     onClick={() => copyToClipboard(errorDetails.message)}
-                    className="px-3 py-1 bg-red-800 hover:bg-red-700 rounded text-sm"
+                    className="px-3 py-1 app-btn-secondary rounded text-sm"
                     title="Copy error to clipboard"
                   >
-                    {copySuccess ? '✓' : '📋'}
+                    {copySuccess ? "Copied" : <CopyIcon />}
                   </button>
                 </div>
               </div>
-              <div className="bg-gray-900 border border-red-700 p-3 rounded mt-2">
-                <pre className="text-red-300 whitespace-pre-wrap text-sm">
+              <div className="app-code border border-red-300 dark:border-red-700 p-3 rounded mt-2">
+                <pre className="whitespace-pre-wrap text-sm">
                   {errorDetails.message}
                 </pre>
                 {errorDetails.details && (
-                  <p className="text-red-400 text-xs mt-2">{errorDetails.details}</p>
+                  <p className="text-xs mt-2">{errorDetails.details}</p>
                 )}
               </div>
             </div>
           )}
           {/* Run results - Show test case results */}
           {results.length > 0 && !submitResult && (
-            <div className="mt-6 p-4 rounded-lg border-2 border-gray-600 bg-gray-800">
+            <div className="mt-6 p-4 rounded-lg border-2 border-gray-300 dark:border-gray-600 app-surface">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-semibold text-gray-300">
+                <h3 className="text-xl font-semibold">
                   Public Test Case Results ({results.length} test cases):
                 </h3>
                 {/* Overall execution metrics */}
                 {(executionTime || executionMemory) && (
-                  <div className="text-sm text-gray-300 flex gap-4">
+                  <div className="text-sm app-muted flex gap-4">
                     {executionTime && <span>Avg Time: {formatExecutionTime(executionTime)}</span>}
                     {executionMemory && <span>Max Memory: {formatMemory(executionMemory)}</span>}
                   </div>
@@ -1488,73 +1552,69 @@ const Judge0CodeEditor = ({
                 {results.map((r, idx) => (
                   <li
                     key={idx}
-                    className={`p-4 rounded-lg border-2 text-sm whitespace-pre-wrap ${
-                      r.passed
-                        ? "bg-green-900/50 border-green-500 text-green-200"
-                        : "bg-red-900/50 border-red-500 text-red-200"
-                    }`}
+                    className={`p-4 rounded-lg border-2 text-sm whitespace-pre-wrap ${resultCardClasses(r.passed)}`}
                   >
                     <div className="flex justify-between items-center mb-2">
                       <div className="font-semibold text-lg">
-                        Test Case {idx + 1}: {r.passed ? "✅ Passed" : "❌ Failed"}
+                        Test Case {idx + 1}: {r.passed ? "Passed" : "Failed"}
                       </div>
                       {(r.runtime || r.memory) && (
-                        <div className="text-xs text-gray-300 flex gap-2">
-                          {r.runtime && <span>⏱️ {formatExecutionTime(r.runtime)}</span>}
+                        <div className="text-xs flex gap-2 opacity-90">
+                          {r.runtime && <span>{formatExecutionTime(r.runtime)}</span>}
                           {r.memory && <span>{formatMemory(r.memory)}</span>}
                         </div>
                       )}
                     </div>
                     {r.error && (
-                      <div className="mb-2 p-2 bg-red-900/30 border border-red-700 rounded">
-                        <div className="text-red-400 font-semibold text-sm mb-1">{r.error.type}</div>
-                        <pre className="text-red-300 text-xs whitespace-pre-wrap">{r.error.message}</pre>
+                      <div className="mb-2 p-2 app-inset rounded">
+                        <div className="font-semibold text-sm mb-1">{r.error.type}</div>
+                        <pre className="text-xs whitespace-pre-wrap">{r.error.message}</pre>
                       </div>
                     )}
                     {isHiddenResult(r) ? (
-                      <div className="mb-2 text-gray-300">Hidden testcase details are not shown.</div>
+                      <div className="mb-2 text-sm">Hidden testcase details are not shown.</div>
                     ) : <div className="mb-2">
-                      <span className="font-bold text-gray-300">Input:</span>
+                      <span className="font-bold">Input:</span>
                       <div className="mt-1 flex items-center gap-2">
-                        <pre className="flex-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-xs">
+                        <pre className="flex-1 app-code p-2 rounded whitespace-pre-wrap text-xs">
                           {String(r.input || 'N/A')}
                         </pre>
                         <button
                           onClick={() => copyToClipboard(String(r.input || ''))}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                          className="px-2 py-1 app-btn-secondary rounded text-xs"
                           title="Copy input"
                         >
-                          📋
+                          <CopyIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>}
                     {!isHiddenResult(r) && <div className="mb-2">
-                      <span className="font-bold text-gray-300">Expected Output:</span>
+                      <span className="font-bold">Expected Output:</span>
                       <div className="mt-1 flex items-center gap-2">
-                        <pre className="flex-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-xs text-green-300">
+                        <pre className="flex-1 app-code p-2 rounded whitespace-pre-wrap text-xs">
                           {String(r.expected || 'N/A')}
                         </pre>
                         <button
                           onClick={() => copyToClipboard(String(r.expected || ''))}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                          className="px-2 py-1 app-btn-secondary rounded text-xs"
                           title="Copy expected output"
                         >
-                          📋
+                          <CopyIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>}
                     {!isHiddenResult(r) && <div>
-                      <span className="font-bold text-gray-300">Your Output:</span>
+                      <span className="font-bold">Your Output:</span>
                       <div className="mt-1 flex items-center gap-2">
-                        <pre className="flex-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-xs">
+                        <pre className="flex-1 app-code p-2 rounded whitespace-pre-wrap text-xs">
                           {String(r.actual || 'No Output')}
                         </pre>
                         <button
                           onClick={() => copyToClipboard(String(r.actual || ''))}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                          className="px-2 py-1 app-btn-secondary rounded text-xs"
                           title="Copy your output"
                         >
-                          📋
+                          <CopyIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>}
@@ -1565,7 +1625,7 @@ const Judge0CodeEditor = ({
           )}
           {/* Submit result panel - Show this prominently */}
           {submitResult && (
-            <div className="mt-6 p-4 rounded-lg border-2 border-blue-500 bg-gray-800">
+            <div className="mt-6 p-4 rounded-lg border-2 border-blue-500 app-surface">
               {submitResult.status === "timeout" && (
                 <div className="p-6 text-center text-yellow-300">
                   <div className="text-xl font-bold mb-2">Submission timed out</div>
@@ -1592,81 +1652,23 @@ const Judge0CodeEditor = ({
               {submitResult.status === "accepted" ? (
                 <div className="flex flex-col items-center justify-center p-6">
                   {showAccepted && (
-                    <div className="animate-bounce text-4xl mb-2">🎉</div>
+                    <div className="text-4xl mb-2 font-bold text-green-600 dark:text-green-400">Accepted</div>
                   )}
-                  <div className="text-green-400 text-2xl font-bold mb-2">
-                    ✅ Solution Accepted!
+                  <div className="text-green-700 dark:text-green-400 text-2xl font-bold mb-2">
+                    Solution Accepted!
                   </div>
-                  <div className="text-green-200 text-lg mb-2">
+                  <div className="text-green-800 dark:text-green-200 text-lg mb-2">
                     All {submitResult.totalCount} test cases passed.
                   </div>
                   {(executionTime || executionMemory) && (
-                    <div className="text-green-300 text-sm flex gap-4 justify-center">
-                      {executionTime && <span>⏱️ Time: {formatExecutionTime(executionTime)}</span>}
+                    <div className="text-green-800 dark:text-green-300 text-sm flex gap-4 justify-center">
+                      {executionTime && <span>Time: {formatExecutionTime(executionTime)}</span>}
                       {executionMemory && <span>Memory: {formatMemory(executionMemory)}</span>}
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="bg-red-900/50 border-2 border-red-600 text-red-200 p-6 rounded-lg">
-                  <div className="font-bold text-xl mb-4 text-red-400">
-                    ❌ Test Case Failed (
-                    {submitResult.failedCase?.type === "public"
-                      ? "Public"
-                      : submitResult.failedCase?.type === "hidden"
-                        ? "Hidden"
-                        : "Test Case"}{" "}
-                    #{submitResult.failedCase?.index !== undefined ? submitResult.failedCase.index + 1 : 'N/A'})
-                    {submitResult.failureReason && (
-                      <span className="ml-2 text-sm font-normal text-red-300">
-                        ({submitResult.failureReason.replace(/_/g, ' ')})
-                      </span>
-                    )}
-                  </div>
-                  {submitResult.failedCase?.error && (
-                    <div className="mb-4 p-3 bg-red-950 border border-red-700 rounded">
-                      <div className="font-semibold text-red-300 mb-1">{submitResult.failedCase.error.type}</div>
-                      <pre className="text-red-200 text-xs whitespace-pre-wrap">
-                        {submitResult.failedCase.error.message}
-                      </pre>
-                    </div>
-                  )}
-                  {submitResult.failedCase && (
-                    <>
-                      {submitResult.failedCase.type === 'hidden' ? (
-                        <div className="mb-3">
-                          <span className="font-bold text-red-300">Hidden Testcase</span>
-                          <div className="mt-2 text-gray-300">Failed on a hidden testcase. Details are not shown.</div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="mb-3">
-                            <span className="font-bold text-red-300">Input:</span>
-                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm">
-                              {submitResult.failedCase.input || 'N/A'}
-                            </pre>
-                          </div>
-                          <div className="mb-3">
-                            <span className="font-bold text-red-300">Expected Output:</span>
-                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-green-300">
-                              {submitResult.failedCase.output || 'N/A'}
-                            </pre>
-                          </div>
-                          <div className="mb-3">
-                            <span className="font-bold text-red-300">Your Output:</span>
-                            <pre className="mt-1 bg-gray-900 p-2 rounded whitespace-pre-wrap text-sm text-red-300">
-                              {submitResult.failedCase.actual || 'N/A'}
-                            </pre>
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                  <div className="mt-4 pt-4 border-t border-red-700">
-                    Passed {submitResult.passedCount || 0} out of{" "}
-                    {submitResult.totalCount || 0} test cases.
-                  </div>
-                </div>
+                <SubmitFailurePanel submitResult={submitResult} />
               )}
               </>
               )}
@@ -1677,5 +1679,81 @@ const Judge0CodeEditor = ({
     </div>
   );
 };
+
+function SubmitFailurePanel({ submitResult }) {
+  const hidden = submitResult.failedCase?.type === "hidden";
+  const verdict = submitResult.failureReason || submitResult.failedCase?.error?.type || "WRONG_ANSWER";
+  const copy = studentVerdictCopy({
+    verdict,
+    hidden,
+    passedCount: submitResult.passedCount,
+    totalCount: submitResult.totalCount,
+    errorMessage: submitResult.failedCase?.error?.message || submitResult.diagnosticMessage,
+    errorCode: submitResult.errorCode,
+    diagnosticMessage: submitResult.diagnosticMessage
+  });
+  const reference = formatSupportReference(submitResult.reference);
+  const showPublicIo = copy.showHiddenIo && submitResult.failedCase;
+  return (
+    <div className={`p-6 rounded-lg border-2 ${resultCardClasses(false)}`}>
+      <div className="font-bold text-xl mb-2">
+        {copy.title}
+        {verdict && (
+          <span className="ml-2 text-sm font-normal">({String(verdict).replace(/_/g, " ")})</span>
+        )}
+      </div>
+      <div className="mb-3">{copy.summary}</div>
+      {copy.detail && <div className="mb-3">{copy.detail}</div>}
+      {copy.code === "COMPILATION_ERROR" && submitResult.failedCase?.error?.message && (
+        <pre className="app-code p-3 rounded text-xs whitespace-pre-wrap mb-3">
+          {submitResult.failedCase.error.message}
+        </pre>
+      )}
+      {copy.code === "RUNTIME_ERROR" && submitResult.failedCase?.error?.message && (
+        <pre className="app-code p-3 rounded text-xs whitespace-pre-wrap mb-3">
+          {submitResult.failedCase.error.message}
+        </pre>
+      )}
+      {hidden && copy.code === "WRONG_ANSWER" && (
+        <div className="mb-3">Hidden test details are not shown.</div>
+      )}
+      {showPublicIo && (
+        <>
+          <div className="mb-3">
+            <span className="font-bold">Input:</span>
+            <pre className="mt-1 app-code p-2 rounded whitespace-pre-wrap text-sm">
+              {submitResult.failedCase.input || "N/A"}
+            </pre>
+          </div>
+          <div className="mb-3">
+            <span className="font-bold">Expected Output:</span>
+            <pre className="mt-1 app-code p-2 rounded whitespace-pre-wrap text-sm">
+              {submitResult.failedCase.output || "N/A"}
+            </pre>
+          </div>
+          <div className="mb-3">
+            <span className="font-bold">Your Output:</span>
+            <pre className="mt-1 app-code p-2 rounded whitespace-pre-wrap text-sm">
+              {submitResult.failedCase.actual || "N/A"}
+            </pre>
+          </div>
+        </>
+      )}
+      {Number.isFinite(submitResult.passedCount) && Number.isFinite(submitResult.totalCount) && (
+        <div className="mt-4 pt-4 border-t border-current/30">
+          Passed {submitResult.passedCount} of {submitResult.totalCount} test cases.
+        </div>
+      )}
+      {reference && (
+        <div className="mt-3 text-sm">
+          Reference: {reference}
+        </div>
+      )}
+      {copy.code && (
+        <div className="mt-1 text-xs app-muted">{copy.code}</div>
+      )}
+    </div>
+  );
+}
 
 export default Judge0CodeEditor;

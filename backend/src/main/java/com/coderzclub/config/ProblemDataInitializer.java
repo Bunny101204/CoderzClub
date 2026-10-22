@@ -256,7 +256,7 @@
 //                 new TestCase("0 3\n\n1 2 3", "1 2 3", "Merge when first array is empty.")
 //             ),
 //             Arrays.asList(
-//                 new TestCase("3 2\n2 4 6\n1 3", "1 2 3 4 6 6"),
+//                 new TestCase("3 2\n2 4 6\n1 3", "1 2 3 4 6"),
 //                 new TestCase("1 1\n5\n5", "5 5")
 //             )
 //         ));
@@ -856,7 +856,7 @@
 //         ));
 
 //         problemRepository.saveAll(problems);
-//         System.out.println("✅ Seeded 30 basic array and string problems successfully.");
+//         System.out.println("Seeded 30 basic array and string problems successfully.");
 //     }
 
 //     private Problem createProblem(

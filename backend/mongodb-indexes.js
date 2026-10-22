@@ -75,6 +75,9 @@ ensureIndex(db.problems, { "numericId": 1 }, { unique: true, sparse: true, name:
 ensureIndex(db.problems, { "title": 1 }, { name: "title_idx" });
 ensureIndex(db.problems, { "difficulty": 1 }, { name: "difficulty_idx" });
 ensureIndex(db.problems, { "difficulty": 1, "tags": 1 }, { name: "difficulty_tags_idx" });
+// Practice list uses availability $ne CONTEST_ONLY. That predicate is not equality-selective
+// (almost every document matches), so it is applied as a residual on existing list indexes.
+// Do not add a dedicated availability index for listing.
 
 // ===== USERS COLLECTION INDEXES =====
 // Leaderboard, role lookup, streak ordering, and email verification filtering.
@@ -102,6 +105,13 @@ ensureIndex(db.submissions, { "userId": 1 }, { name: "userId_idx" });
 ensureIndex(db.submissions, { "problemId": 1 }, { name: "problemId_idx" });
 ensureIndex(db.submissions, { "result": 1 }, { name: "result_idx" });
 ensureIndex(db.submissions, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
+// Unique job-backed submissions. Legacy documents omit submissionJobId and are excluded
+// by the partial filter (safer than a naive unique index, and safer than sparse+null).
+ensureIndex(db.submissions, { "submissionJobId": 1 }, {
+  unique: true,
+  name: "submissionJobId_unique_sparse_idx",
+  partialFilterExpression: { submissionJobId: { $type: "string" } }
+});
 
 // ===== SUBMISSION_JOBS COLLECTION INDEXES =====
 // Queue scanning and recovery for pending/locked jobs.
@@ -138,7 +148,93 @@ ensureIndex(db.problem_bundles, { "createdAt": -1 }, { name: "createdAt_desc_idx
 // ===== SUBSCRIPTIONS COLLECTION INDEXES =====
 ensureIndex(db.subscriptions, { "userId": 1 }, { name: "userId_idx" });
 ensureIndex(db.subscriptions, { "status": 1 }, { name: "status_idx" });
-ensureIndex(db.subscriptions, { "expiryDate": 1 }, { name: "expiryDate_idx" });
+ensureIndex(db.subscriptions, { "endDate": 1 }, { name: "endDate_idx" });
+dropIndexIfPresent(db.subscriptions, "expiryDate_idx");
+// Batch member picker GET /api/admin/batches/users excludes DELETED accounts.
+ensureIndex(db.users, { "accountStatus": 1 }, { name: "accountStatus_idx" });
+
+// ===== BATCH / CLASSROOM INDEXES =====
+// List batches by recency and optional active filter.
+ensureIndex(db.batches, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
+ensureIndex(db.batches, { "active": 1, "createdAt": -1 }, { name: "active_createdAt_desc_idx" });
+ensureIndex(db.batches, { "name": 1 }, { name: "name_idx" });
+// Membership uniqueness and per-batch member scans / counts.
+ensureIndex(db.batch_members, { "batchId": 1, "userId": 1 }, { unique: true, name: "batchId_userId_unique_idx" });
+ensureIndex(db.batch_members, { "batchId": 1, "addedAt": 1 }, { name: "batchId_addedAt_idx" });
+// userId -> batchIds for bundle access resolution (memberships of a user).
+ensureIndex(db.batch_members, { "userId": 1, "batchId": 1 }, { name: "userId_batchId_idx" });
+// Assignment uniqueness and per-batch assignment scans / counts.
+ensureIndex(db.batch_assignments, { "batchId": 1, "problemId": 1 }, { unique: true, name: "batchId_problemId_unique_idx" });
+ensureIndex(db.batch_assignments, { "batchId": 1, "assignedAt": 1 }, { name: "batchId_assignedAt_idx" });
+// One coordinator row per user per batch. userId supports the coordinator's own batch list.
+ensureIndex(db.batch_coordinators, { "batchId": 1, "userId": 1 }, { unique: true, name: "batchId_userId_unique_idx" });
+ensureIndex(db.batch_coordinators, { "userId": 1, "batchId": 1 }, { name: "userId_batchId_idx" });
+// Bundle access grants: uniqueness and subject lookup for USER/BATCH grants.
+ensureIndex(db.bundle_access_grants, { "bundleId": 1, "subjectType": 1, "subjectId": 1 }, { unique: true, name: "bundle_subject_unique_idx" });
+ensureIndex(db.bundle_access_grants, { "subjectType": 1, "subjectId": 1, "bundleId": 1 }, { name: "subject_bundle_idx" });
+ensureIndex(db.problem_bundles, { "isActive": 1, "visibility": 1 }, { name: "isActive_visibility_idx" });
+// Batch reports query submissions with userId $in page-or-all members AND problemId $in assigned IDs/aliases.
+// Existing submissions.userId_problemId_createdAt_desc_idx already covers that compound lookup.
+
+// ===== CONTESTS COLLECTION INDEXES =====
+// Keep names/keys identical to Contest @CompoundIndexes.
+// Admin list GET /api/admin/contests: no predicate, sort createdAt desc, skip/limit.
+ensureIndex(db.contests, { "createdAt": -1 }, { name: "createdAt_desc_idx" });
+// User list GET /api/contests:
+//   published=true, audienceType=BATCHES, batchIds $in memberships, sort startAt asc, skip/limit.
+// endAt $gt/$lte is a residual range filter on that result (status is derived, not stored).
+ensureIndex(db.contests, { "published": 1, "audienceType": 1, "batchIds": 1, "startAt": 1 }, {
+  name: "published_audienceType_batchIds_startAt_idx"
+});
+// CONTEST_ONLY detail: exists({ published:true, problemIds:<id>, $or live/ended eligibility }).
+// Indexed prefix is published + problemIds (one array). Do NOT compound batchIds onto this
+// index — MongoDB cannot index two parallel arrays (problemIds + batchIds) together.
+// Eligibility on audienceType/batchIds/startAt/endAt is a residual filter on the few
+// contests that contain that problemId.
+ensureIndex(db.contests, { "published": 1, "problemIds": 1 }, { name: "published_problemIds_idx" });
+// Contest problem snapshots: publish idempotency, contest problem detail, admission, worker lookup.
+ensureIndex(db.contest_problem_snapshots, { "contestId": 1, "problemId": 1 }, {
+  unique: true,
+  name: "contestId_problemId_unique_idx"
+});
+ensureIndex(db.contest_problem_solves, { "contestId": 1, "userId": 1, "problemId": 1 }, {
+  unique: true,
+  name: "contestId_userId_problemId_unique_idx"
+});
+ensureIndex(db.contest_scores, { "contestId": 1, "userId": 1 }, {
+  unique: true,
+  name: "contestId_userId_unique_idx"
+});
+ensureIndex(db.contest_scores, { "contestId": 1, "totalPoints": -1, "solvedCount": -1, "userId": 1 }, {
+  name: "contestId_totalPoints_solvedCount_userId_idx"
+});
+ensureIndex(db.submissions, { "contestScoringStatus": 1, "createdAt": 1 }, {
+  name: "contestScoringStatus_createdAt_idx",
+  partialFilterExpression: { "contestScoringStatus": "PENDING" }
+});
+// contest_run_jobs GET /api/contest-runs/{runId} and worker claim use _id (default).
+// TTL cleanup: Mongo deletes the ephemeral document after expiresAt.
+// This is not the queue-age cutoff that skips Judge0 for a run that waited too long.
+ensureIndex(db.contest_run_jobs, { "expiresAt": 1 }, {
+  name: "expiresAt_ttl_idx",
+  expireAfterSeconds: 0
+});
+// Queue admission oldest QUEUED job age: status=QUEUED sort createdAt.
+ensureIndex(db.contest_run_jobs, { "status": 1, "createdAt": 1 }, {
+  name: "status_createdAt_idx"
+});
+// Worker recovery scan: status=RUNNING and leaseExpiresAt <= now.
+ensureIndex(db.contest_run_jobs, { "status": 1, "leaseExpiresAt": 1 }, {
+  name: "status_leaseExpiresAt_idx"
+});
+// One current code draft per user, scope, problem, and language. No TTL.
+ensureIndex(db.code_drafts, { "userId": 1, "scopeKey": 1, "problemId": 1, "languageId": 1 }, {
+  unique: true,
+  name: "userId_scopeKey_problemId_languageId_unique_idx"
+});
+dropIndexIfPresent(db.contests, "published_startAt_idx");
+dropIndexIfPresent(db.contests, "published_endAt_idx");
+dropIndexIfPresent(db.contests, "audienceType_batchIds_startAt_idx");
 
 print('Index creation script completed. Verify indexes with db.collection.getIndexes().');
 
@@ -148,6 +244,9 @@ assertIndex(db.problems, "numericId_unique_sparse_idx", function(idx) {
   return idx.unique === true && idx.sparse === true;
 });
 assertIndex(db.submissions, "userId_createdAt_desc_idx");
+assertIndex(db.submissions, "submissionJobId_unique_sparse_idx", function(idx) {
+  return idx.unique === true && idx.partialFilterExpression != null;
+});
 assertIndex(db.submission_jobs, "status_lockedUntil_idx");
 assertIndexKeys(db.user_solved_problems, { "userId": 1, "problemId": 1 }, function(idx) {
   return idx.unique === true;
@@ -156,3 +255,40 @@ assertIndex(db.submission_outbox, "aggregate_event_unique_idx", function(idx) {
   return idx.unique === true;
 });
 assertIndex(db.submission_outbox, "status_nextAttempt_locked_idx");
+assertIndex(db.batch_members, "batchId_userId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.batch_coordinators, "batchId_userId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.batch_coordinators, "userId_batchId_idx");
+assertIndex(db.batch_assignments, "batchId_problemId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.batch_members, "userId_batchId_idx");
+assertIndex(db.bundle_access_grants, "bundle_subject_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.bundle_access_grants, "subject_bundle_idx");
+assertIndex(db.contests, "published_problemIds_idx");
+assertIndex(db.contest_problem_snapshots, "contestId_problemId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.contest_problem_solves, "contestId_userId_problemId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.contest_scores, "contestId_userId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.contest_scores, "contestId_totalPoints_solvedCount_userId_idx");
+assertIndex(db.submissions, "contestScoringStatus_createdAt_idx", function(idx) {
+  return idx.partialFilterExpression != null;
+});
+assertIndex(db.contest_run_jobs, "expiresAt_ttl_idx", function(idx) {
+  return idx.expireAfterSeconds === 0;
+});
+assertIndex(db.contest_run_jobs, "status_createdAt_idx");
+assertIndex(db.contest_run_jobs, "status_leaseExpiresAt_idx");
+assertIndex(db.code_drafts, "userId_scopeKey_problemId_languageId_unique_idx", function(idx) {
+  return idx.unique === true;
+});

@@ -19,8 +19,14 @@ import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionValidationService;
 import com.coderzclub.service.SubmissionJobEventService;
 import com.coderzclub.service.SubmissionQueueAdmissionService;
+import com.coderzclub.service.ProblemAccessService;
 import com.coderzclub.service.SubmissionJobAccessService;
 import com.coderzclub.service.SubmissionJobSseTicketService;
+import com.coderzclub.service.ExecutionCompatibilityService;
+import com.coderzclub.service.ExecutionUserFacing;
+import com.coderzclub.service.ExecutionVerdictMapper;
+import com.coderzclub.service.OperationalMetrics;
+import com.coderzclub.service.IncompatibleExecutionException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +36,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -60,6 +67,9 @@ public class SubmissionJobController {
     @Autowired
     private ProblemRepository problemRepository;
 
+    @Autowired
+    private ProblemAccessService problemAccessService;
+
 
 
     @Autowired
@@ -77,12 +87,25 @@ public class SubmissionJobController {
     @Autowired
     private SubmissionJobSseTicketService sseTicketService;
 
+    @Autowired
+    private ExecutionCompatibilityService compatibilityService;
+
+    @Autowired(required = false)
+    private com.coderzclub.config.Judge0ProviderProperties providerProperties;
+
+    @Autowired(required = false)
+    private com.coderzclub.config.SubmissionLimitsConfig limitsConfig;
+
+    @Autowired(required = false)
+    private OperationalMetrics operationalMetrics;
+
 
     /**
      * Create a new submission job with strict validation
      */
     @PostMapping
     public ResponseEntity<?> createJob(@Valid @RequestBody CreateSubmissionJobRequest request) {
+        Timer.Sample total = startAdmissionStage();
         try {
             // Step 1: Validate code size and content
             try {
@@ -104,14 +127,26 @@ public class SubmissionJobController {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             String username = auth.getName();
 
-            Optional<User> userOpt = userRepository.findByUsername(username);
+            Timer.Sample userLookup = startAdmissionStage();
+            Optional<User> userOpt;
+            try {
+                userOpt = userRepository.findByUsername(username);
+            } finally {
+                stopAdmissionStage(userLookup, "user_lookup");
+            }
             if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
 
             User user = userOpt.get();
 
-            SubmissionQueueAdmissionService.Admission admission = queueAdmissionService.check();
+            Timer.Sample queueAdmission = startAdmissionStage();
+            SubmissionQueueAdmissionService.Admission admission;
+            try {
+                admission = queueAdmissionService.check();
+            } finally {
+                stopAdmissionStage(queueAdmission, "queue_admission");
+            }
             if (!admission.allowed()) {
                 return ResponseEntity.status(admission.reason().equals("QUEUE_UNAVAILABLE")
                     ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
@@ -120,7 +155,13 @@ public class SubmissionJobController {
                         "retryAfterSeconds", 30));
             }
 
-            SubmissionLimitDecision decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), request.getProblemId());
+            Timer.Sample rateLimit = startAdmissionStage();
+            SubmissionLimitDecision decision;
+            try {
+                decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), request.getProblemId());
+            } finally {
+                stopAdmissionStage(rateLimit, "rate_limit");
+            }
             if (!decision.isAllowed()) {
                 switch (decision.getReason()) {
                     case "COOLDOWN" ->
@@ -148,11 +189,18 @@ public class SubmissionJobController {
             }
 
             // Step 4: Load problem and validate it exists
-            Optional<Problem> problemOpt = problemRepository.findById(request.getProblemId());
+            Timer.Sample problemLookup = startAdmissionStage();
+            Optional<Problem> problemOpt;
+            try {
+                problemOpt = problemRepository.findById(request.getProblemId());
+            } finally {
+                stopAdmissionStage(problemLookup, "problem_lookup");
+            }
             if (problemOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Problem not found"));
             }
             Problem problem = problemOpt.get();
+            problemAccessService.requirePracticeExecute(user, problem);
 
             int totalTests = (problem.getPublicTestCases() != null ? problem.getPublicTestCases().size() : 0)
                 + (problem.getHiddenTestCases() != null ? problem.getHiddenTestCases().size() : 0);
@@ -161,60 +209,87 @@ public class SubmissionJobController {
                 username, request.getProblemId(), request.getLanguage(), request.getLanguageId(),
                 totalTests, request.getCode() != null ? request.getCode().length() : 0);
 
-            // Step 5: Validate problem testcases against limits
+            Timer.Sample problemValidation = startAdmissionStage();
             try {
-                submissionValidator.validateProblemTestCases(problem);
-            } catch (IllegalArgumentException e) {
-                logger.error("Problem testcases validation failed: {}", e.getMessage());
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Problem configuration error: " + e.getMessage()));
+                // Step 5: Validate problem testcases against limits
+                try {
+                    submissionValidator.validateProblemTestCases(problem);
+                } catch (IllegalArgumentException e) {
+                    logger.error("Problem testcases validation failed: {}", e.getMessage());
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("error", "Problem configuration error: " + e.getMessage()));
+                }
+
+                validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), request.getLanguageId());
+            } finally {
+                stopAdmissionStage(problemValidation, "problem_validation");
             }
 
-            // Step 6: Create job using server-side testcases
+            List<SubmissionJob.TestCase> publicTests = convertTests(problem.getPublicTestCases());
+            List<SubmissionJob.TestCase> hiddenTests = convertTests(problem.getHiddenTestCases());
+            Timer.Sample compatibility = startAdmissionStage();
+            try {
+                compatibilityService.validate(problem.getExecutionMode(), request.getLanguageId(),
+                    request.getCode(), publicTests, hiddenTests, problem.getTestcaseVersion());
+            } catch (IncompatibleExecutionException incompatible) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", incompatible.getMessage(),
+                    "reason", incompatible.getReason()
+                ));
+            } finally {
+                stopAdmissionStage(compatibility, "compatibility_validation");
+            }
 
-            validationService.validateSubmissionRequest(request.getProblemId(), request.getCode(), request.getLanguageId());
+            Timer.Sample jobCreate = startAdmissionStage();
+            SubmissionJob job;
+            try {
+                job = jobService.createJob(
+                    user.getId(),
+                    request.getProblemId(),
+                    request.getCode(),
+                    request.getLanguage(),
+                    request.getLanguageId(),
 
-            // Resolve problem test cases server-side so hidden data never travels in the public submission payload.
-            SubmissionJob job = jobService.createJob(
-                user.getId(),
-                request.getProblemId(),
-                request.getCode(),
-                request.getLanguage(),
-                request.getLanguageId(),
-
-                problem.getTestcaseVersion(),
-                totalTests,
-                problem.getExecutionMode()
-
-                //publicTests,
-                //hiddenTests
-
-            );
+                    problem.getTestcaseVersion(),
+                    totalTests,
+                    problem.getExecutionMode(),
+                    request.getCodingDurationSeconds()
+                );
+            } finally {
+                stopAdmissionStage(jobCreate, "job_create");
+            }
 
             // Note: the submission attempt is already acquired atomically above.
             // If job creation fails after acquisition, the attempt is counted and not compensated.
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());
+            resp.setReference(job.getId());
             resp.setStatus(job.getStatus().toString());
             resp.setCreatedAt(job.getCreatedAt());
+            resp.setCorrelationId(ExecutionUserFacing.correlationId());
+            resp.setCodingDurationSeconds(job.getCodingDurationSeconds());
 
             logger.info("Created submission job {} for user {} problemId={} totalTests={}",
                 job.getId(), username, request.getProblemId(), job.getTotalTests());
 
             return ResponseEntity.accepted().body(resp);
 
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             logger.error("Failed to create submission job", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to create submission job: " + e.getMessage()));
+        } finally {
+            stopAdmissionStage(total, "total");
         }
     }
 
     /**
-     * Get job status
+     * Get job status. Ownership matches SSE ticket: owner or ADMIN via SubmissionJobAccessService.
      */
     @GetMapping("/{jobId}")
-    public ResponseEntity<?> getJobStatus(@PathVariable String jobId) {
+    public ResponseEntity<?> getJobStatus(@PathVariable String jobId, Authentication authentication) {
         try {
             Optional<SubmissionJob> jobOpt = jobService.getJob(jobId);
             if (!jobOpt.isPresent()) {
@@ -222,9 +297,16 @@ public class SubmissionJobController {
             }
 
             SubmissionJob job = jobOpt.get();
+            if (!canViewJob(authentication, job)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());
+            resp.setReference(job.getId());
+            resp.setSubmissionId(job.getSubmissionId());
+            resp.setCorrelationId(ExecutionUserFacing.correlationId());
+            resp.setCodingDurationSeconds(job.getCodingDurationSeconds());
             resp.setStatus(job.getStatus().toString());
             resp.setCreatedAt(job.getCreatedAt());
             resp.setStartedAt(job.getStartedAt());
@@ -236,40 +318,24 @@ public class SubmissionJobController {
                 resp.setResult(job.getFinalResult());
                 resp.setRuntime(job.getTotalRuntime());
                 resp.setMemory(job.getTotalMemory());
+                applyJobVerdictDiagnostics(resp, job.getFinalResult());
 
                 // Sanitize test results: do not leak hidden test input/expected output
                 List<com.coderzclub.model.SubmissionTestResult> storedResults = jobService.getResults(job);
                 List<TestResultResponse> sanitized = new java.util.ArrayList<>();
                 for (int i = 0; i < (storedResults != null ? storedResults.size() : 0); i++) {
                     com.coderzclub.model.SubmissionTestResult r = storedResults.get(i);
-                    if (r.getTestcaseType() == com.coderzclub.model.SubmissionTestResult.TestcaseType.PUBLIC) {
-                        TestResultResponse tr = new TestResultResponse();
-                        tr.setInput(r.getInput());
-                        tr.setExpectedOutput(r.getExpectedOutput());
-                        tr.setActualOutput(r.getActualOutput());
-                        tr.setPassed(r.isPassed());
-                        tr.setRuntime(r.getRuntime());
-                        tr.setMemory(r.getMemory());
-                        tr.setErrorType(r.getErrorType());
-                        tr.setErrorMessage(r.getErrorMessage());
-                        sanitized.add(tr);
-                    } else {
-                        // Hidden test: never expose input or expected output
-                        TestResultResponse tr = new TestResultResponse();
-                        tr.setType("hidden");
-                        tr.setStatus(r.isPassed() ? "PASSED" : "FAILED");
-                        tr.setPassed(r.isPassed());
-                        tr.setRuntime(r.getRuntime());
-                        tr.setMemory(r.getMemory());
-                        if (!r.isPassed()) tr.setMessage("Failed on hidden testcase");
-                        sanitized.add(tr);
-                    }
+                    boolean hidden = r.getTestcaseType() != com.coderzclub.model.SubmissionTestResult.TestcaseType.PUBLIC;
+                    TestResultResponse tr = toSafeTestResult(r, hidden);
+                    sanitized.add(tr);
                 }
 
                 resp.setTestResults(sanitized);
 
             } else if (job.getStatus() == SubmissionJob.JobStatus.FAILED) {
-                resp.setError(job.getErrorMessage());
+                resp.setErrorCode(ExecutionUserFacing.JUDGE0_PROVIDER_ERROR);
+                resp.setError(ExecutionUserFacing.infrastructureMessage());
+                resp.setDiagnosticMessage(ExecutionUserFacing.INFRASTRUCTURE_NOT_WRONG_ANSWER);
             }
 
             return ResponseEntity.ok(resp);
@@ -322,9 +388,11 @@ public class SubmissionJobController {
     ) {
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-
-            List<SubmissionJob> jobs = jobService.getUserJobs(username);
+            Optional<User> userOpt = userRepository.findByUsername(auth.getName());
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "User not found"));
+            }
+            List<SubmissionJob> jobs = jobService.getUserJobs(userOpt.get().getId());
             // Limit results
             if (jobs.size() > limit) {
                 jobs = jobs.subList(0, limit);
@@ -373,6 +441,96 @@ public class SubmissionJobController {
         } catch (Exception e) {
             logger.error("Failed to get queue stats", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to get queue stats: " + e.getMessage()));
+        }
+    }
+
+    private List<SubmissionJob.TestCase> convertTests(List<com.coderzclub.model.TestCase> testCases) {
+        return testCases == null ? List.of() : testCases.stream()
+            .map(test -> new SubmissionJob.TestCase(test.getInput(), test.getOutput(), test.getExplanation()))
+            .toList();
+    }
+
+    private void applyJobVerdictDiagnostics(SubmissionJobResponse resp, String verdict) {
+        if (verdict == null || verdict.isBlank() || "ACCEPTED".equals(verdict)) {
+            return;
+        }
+        resp.setErrorCode(ExecutionUserFacing.clientErrorCode(verdict));
+        if (ExecutionVerdictMapper.INTERNAL_ERROR.equals(verdict)
+            || ExecutionVerdictMapper.isInfrastructureFailure(verdict)) {
+            resp.setError(ExecutionUserFacing.infrastructureMessage());
+            resp.setDiagnosticMessage(ExecutionUserFacing.INFRASTRUCTURE_NOT_WRONG_ANSWER);
+            return;
+        }
+        if (ExecutionVerdictMapper.WRONG_ANSWER.equals(verdict)) {
+            resp.setDiagnosticMessage("Wrong answer.");
+            return;
+        }
+        resp.setDiagnosticMessage(limitAwareDetail(verdict, null));
+    }
+
+    private TestResultResponse toSafeTestResult(com.coderzclub.model.SubmissionTestResult r, boolean hidden) {
+        TestResultResponse tr = new TestResultResponse();
+        tr.setPassed(r.isPassed());
+        tr.setRuntime(r.getRuntime());
+        tr.setMemory(r.getMemory());
+        if (hidden) {
+            tr.setType("hidden");
+            tr.setStatus(r.isPassed() ? "PASSED" : "FAILED");
+        } else {
+            tr.setInput(r.getInput());
+            tr.setExpectedOutput(r.getExpectedOutput());
+            tr.setActualOutput(r.getActualOutput());
+        }
+        if (r.isPassed()) {
+            return tr;
+        }
+        String mapped = (r.getErrorType() == null || r.getErrorType().isBlank())
+            ? ExecutionVerdictMapper.WRONG_ANSWER
+            : ExecutionVerdictMapper.fromErrorType(r.getErrorType());
+        tr.setErrorType(mapped);
+        tr.setErrorCode(ExecutionUserFacing.clientErrorCode(mapped));
+        String detail = limitAwareDetail(mapped, r.getErrorMessage());
+        if (hidden && ExecutionVerdictMapper.WRONG_ANSWER.equals(mapped)) {
+            detail = ExecutionUserFacing.HIDDEN_WRONG_ANSWER;
+        } else if (hidden) {
+            detail = ExecutionUserFacing.studentDetail(mapped, r.getErrorMessage(), true);
+            if (ExecutionVerdictMapper.INTERNAL_ERROR.equals(mapped)) {
+                detail = ExecutionUserFacing.infrastructureMessage();
+            }
+        }
+        tr.setErrorMessage(detail);
+        tr.setDiagnosticMessage(detail);
+        if (hidden) {
+            tr.setMessage(detail);
+        }
+        return tr;
+    }
+
+    private String limitAwareDetail(String verdict, String providerText) {
+        if (ExecutionVerdictMapper.TIME_LIMIT_EXCEEDED.equals(verdict)) {
+            int seconds = limitsConfig != null ? limitsConfig.getMaxExecutionTimeSeconds() : 0;
+            if (seconds > 0) {
+                return "Time limit exceeded (" + seconds + "s per test).";
+            }
+            return "Time limit exceeded.";
+        }
+        if (ExecutionVerdictMapper.MEMORY_LIMIT_EXCEEDED.equals(verdict)) {
+            int kb = providerProperties != null ? providerProperties.getMemoryLimitKb() : 0;
+            if (kb > 0) {
+                return "Memory limit exceeded (" + kb + " KB).";
+            }
+            return "Memory limit exceeded.";
+        }
+        return ExecutionUserFacing.studentDetail(verdict, providerText, false);
+    }
+
+    private Timer.Sample startAdmissionStage() {
+        return operationalMetrics == null ? null : operationalMetrics.admissionStageTimer();
+    }
+
+    private void stopAdmissionStage(Timer.Sample sample, String stage) {
+        if (operationalMetrics != null) {
+            operationalMetrics.stopAdmissionStageTimer(sample, stage);
         }
     }
 

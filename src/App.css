@@ -1,1 +1,64 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-white;
+  }
+  .app-surface {
+    @apply bg-white border border-gray-200 text-gray-900 dark:bg-gray-800 dark:border-gray-700 dark:text-white;
+  }
+  .app-muted {
+    @apply text-gray-600 dark:text-gray-400;
+  }
+  .app-code {
+    @apply bg-gray-100 text-gray-900 border border-gray-200 dark:bg-gray-900 dark:text-gray-200 dark:border-gray-700;
+  }
+  .app-inset {
+    @apply bg-gray-50 border border-gray-200 dark:bg-gray-900 dark:border-gray-700;
+  }
+  .app-input {
+    @apply bg-white border border-gray-300 text-gray-900 placeholder:text-gray-500 dark:bg-gray-900 dark:border-gray-500 dark:text-gray-100 dark:placeholder:text-gray-400;
+  }
+  .app-input:disabled {
+    @apply bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700;
+  }
+  .app-btn-secondary {
+    @apply bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-500 dark:text-gray-100 dark:hover:bg-gray-700;
+  }
+  .app-btn-secondary:disabled {
+    @apply opacity-100 bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700;
+  }
+  select.app-input,
+  select.app-input option {
+    color-scheme: inherit;
+    @apply bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+  }
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+html.dark body {
+  background-color: #111827;
+  color: #f9fafb;
+}
+
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}

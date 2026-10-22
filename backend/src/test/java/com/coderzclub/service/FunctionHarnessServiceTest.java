@@ -64,6 +64,26 @@ class FunctionHarnessServiceTest {
     }
 
     @Test
+    void providerStatus13IsInternalErrorNotWrongAnswer() {
+        List<SubmissionJob.TestResult> results = harness.mapResults(
+            response(13, "Internal Error", "1"), tests("1"));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).isPassed());
+        assertEquals("INTERNAL_ERROR", results.get(0).getErrorType());
+        assertNotEquals("WRONG_ANSWER", results.get(0).getErrorType());
+    }
+
+    @Test
+    void missingProviderStatusIsInternalErrorNotWrongAnswer() {
+        List<SubmissionJob.TestResult> results = harness.mapResults(Map.of("stdout", "1"), tests("1"));
+
+        assertFalse(results.get(0).isPassed());
+        assertEquals("INTERNAL_ERROR", results.get(0).getErrorType());
+        assertNotEquals("WRONG_ANSWER", results.get(0).getErrorType());
+    }
+
+    @Test
     void hiddenValuesAreNotPresentInEventPayload() throws Exception {
         SubmissionJob job = new SubmissionJob();
         job.setId("job");

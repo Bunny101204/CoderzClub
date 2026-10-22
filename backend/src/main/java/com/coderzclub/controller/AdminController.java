@@ -6,12 +6,17 @@ import com.coderzclub.model.Submission;
 import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.SubmissionRepository;
+import com.coderzclub.service.AccountDeletionService;
+import com.coderzclub.service.AccountRoles;
+import com.coderzclub.service.StudentAccountService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +35,12 @@ public class AdminController {
     
     @Autowired
     private SubmissionRepository submissionRepository;
+
+    @Autowired
+    private AccountDeletionService accountDeletionService;
+
+    @Autowired
+    private StudentAccountService studentAccountService;
 
     @GetMapping("/dashboard")
     public ResponseEntity<?> getDashboardStats() {
@@ -74,7 +85,16 @@ public class AdminController {
             
             Map<String, Object> response = new HashMap<>();
             response.put("users", usersPage.getContent().stream()
-                .peek(user -> user.setPasswordHash(null))  // Remove sensitive data
+                .map(user -> {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("id", user.getId());
+                    row.put("username", user.getUsername());
+                    row.put("email", user.getEmail());
+                    row.put("role", user.getRole());
+                    row.put("createdAt", user.getCreatedAt());
+                    row.put("accountStatus", user.getAccountStatus() == null ? "ACTIVE" : user.getAccountStatus());
+                    return row;
+                })
                 .collect(Collectors.toList()));
             response.put("currentPage", page);
             response.put("totalPages", usersPage.getTotalPages());
@@ -111,8 +131,19 @@ public class AdminController {
     @DeleteMapping("/users/{userId}")
     public ResponseEntity<?> deleteUser(@PathVariable String userId) {
         try {
-            userRepository.deleteById(userId);
-            return ResponseEntity.ok("User deleted successfully");
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return ResponseEntity.badRequest().body("User not found");
+            }
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getName() != null) {
+                User actor = userRepository.findByUsername(auth.getName()).orElse(null);
+                if (actor != null && userId.equals(actor.getId())) {
+                    return ResponseEntity.badRequest().body(Map.of("error", "Admins cannot delete their own account from this endpoint"));
+                }
+            }
+            accountDeletionService.delete(user);
+            return ResponseEntity.ok(Map.of("deleted", true));
             
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error deleting user: " + e.getMessage());
@@ -127,7 +158,10 @@ public class AdminController {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
-            user.setRole(request.getRole());
+            String nextRole = AccountRoles.assignableRole(request == null ? null : request.getRole());
+            String status = user.getAccountStatus() == null ? "ACTIVE" : user.getAccountStatus();
+            studentAccountService.assertRetainsAdministrator(user, nextRole, status);
+            user.setRole(nextRole);
             userRepository.save(user);
             
             return ResponseEntity.ok("User role updated successfully");
@@ -137,6 +171,43 @@ public class AdminController {
         }
     }
     
+    @GetMapping("/students")
+    public ResponseEntity<?> searchStudents(
+        @RequestParam(required = false) String search,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(studentAccountService.search(search, page, size));
+    }
+
+    @GetMapping("/students/{userId}")
+    public ResponseEntity<?> student(@PathVariable String userId) {
+        return ResponseEntity.ok(studentAccountService.profile(userId));
+    }
+
+    @PatchMapping("/students/{userId}")
+    public ResponseEntity<?> updateStudent(@PathVariable String userId, @RequestBody StudentProfileUpdate request) {
+        return ResponseEntity.ok(studentAccountService.updateProfile(
+            userId,
+            request == null ? null : request.getBio(),
+            request == null ? null : request.getLocation(),
+            request == null ? null : request.getWebsite()));
+    }
+
+    @PostMapping("/students/{userId}/deactivate")
+    public ResponseEntity<?> deactivateStudent(@PathVariable String userId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String actor = auth == null ? null : auth.getName();
+        return ResponseEntity.ok(studentAccountService.setActive(userId, false, actor));
+    }
+
+    @PostMapping("/students/{userId}/activate")
+    public ResponseEntity<?> activateStudent(@PathVariable String userId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String actor = auth == null ? null : auth.getName();
+        return ResponseEntity.ok(studentAccountService.setActive(userId, true, actor));
+    }
+
     @GetMapping("/analytics/submissions")
     public ResponseEntity<?> getSubmissionAnalytics() {
         try {
@@ -192,5 +263,18 @@ public class AdminController {
         
         public String getRole() { return role; }
         public void setRole(String role) { this.role = role; }
+    }
+
+    public static class StudentProfileUpdate {
+        private String bio;
+        private String location;
+        private String website;
+
+        public String getBio() { return bio; }
+        public void setBio(String bio) { this.bio = bio; }
+        public String getLocation() { return location; }
+        public void setLocation(String location) { this.location = location; }
+        public String getWebsite() { return website; }
+        public void setWebsite(String website) { this.website = website; }
     }
 }

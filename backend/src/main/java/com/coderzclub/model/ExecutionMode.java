@@ -16,4 +16,15 @@ public enum ExecutionMode {
         if ("FUNCTION".equalsIgnoreCase(value)) return FUNCTION;
         return valueOf(value.toUpperCase());
     }
+
+    public static ExecutionMode canonical(ExecutionMode mode) {
+        if (mode == null || mode == FUNCTION) {
+            return STANDARD_PER_CASE;
+        }
+        return mode;
+    }
+
+    public static boolean isLegacyAlias(ExecutionMode mode) {
+        return mode == FUNCTION;
+    }
 }

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
+import { apiFetch } from "../apiClient";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { CheckIcon } from "../icons/AppIcons.jsx";
 
 const BundleProblems = () => {
   const { id } = useParams();
@@ -19,20 +21,29 @@ const BundleProblems = () => {
   const fetchBundleData = async () => {
     try {
       console.log("[BundleProblems] Fetching bundle data for ID:", id);
-      const response = await fetch(`/api/bundles/${id}`);
+      const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
+      const response = await apiFetch(`/api/bundles/${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (response.status === 404 || response.status === 403) {
+        setBundle(null);
+        setProblems([]);
+        setLoading(false);
+        return;
+      }
       if (response.ok) {
         const data = await response.json();
-        console.log("[BundleProblems] Bundle data received:", data);
         setBundle(data);
-        
-        // Fetch all problems in the bundle
-        // Check if problemIds exists and is a non-empty array
-        if (data.problemIds && Array.isArray(data.problemIds) && data.problemIds.length > 0) {
-          console.log("[BundleProblems] Bundle has", data.problemIds.length, "problem IDs");
+        const problemsResponse = await apiFetch(`/api/bundles/${id}/problems`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (problemsResponse.ok) {
+          const payload = await problemsResponse.json();
+          const rows = Array.isArray(payload.problems) ? payload.problems : [];
+          setProblems(rows);
+        } else if (data.problemIds && Array.isArray(data.problemIds) && data.problemIds.length > 0) {
           await fetchBundleProblems(data.problemIds);
         } else {
-          console.warn("[BundleProblems] Bundle has no problemIds or empty array");
-          console.log("[BundleProblems] problemIds value:", data.problemIds);
           setProblems([]);
         }
       } else {
@@ -61,10 +72,10 @@ const BundleProblems = () => {
       
       const params = new URLSearchParams();
       idsArray.forEach(problemId => params.append("ids", problemId));
-      let response = await fetch(`/api/problems/by-ids?${params.toString()}`);
+      let response = await apiFetch(`/api/problems/by-ids?${params.toString()}`);
       if (response.status === 404) {
         // Support an already-running backend that predates the exact-ID endpoint.
-        response = await fetch("/api/problems?page=0&size=1000");
+        response = await apiFetch("/api/problems?page=0&size=1000");
       }
       if (response.ok) {
         const data = await response.json();
@@ -108,7 +119,7 @@ const BundleProblems = () => {
         
         // Fetch user progress if authenticated
         if (user) {
-          await fetchUserProgress(idsArray);
+          await fetchUserProgress();
         }
       } else {
         console.error("Failed to fetch problems:", response.status);
@@ -120,40 +131,25 @@ const BundleProblems = () => {
     }
   };
 
-  const fetchUserProgress = async (problemIds) => {
+  const fetchUserProgress = async () => {
     try {
       const token = localStorage.getItem('jwtToken');
       if (!token) return;
-
-      // Fetch submissions for each problem
-      const progress = {};
-      for (const problemId of problemIds) {
-        try {
-          const response = await fetch(`/api/submissions/problem/${problemId}`, {
-            headers: {
-              "Authorization": `Bearer ${token}`
-            }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            // Handle both paginated and non-paginated responses
-            const submissions = Array.isArray(data) ? data : (data.submissions || []);
-            const hasAccepted = submissions.some(s => 
-              s.result === "ACCEPTED" || s.status === "ACCEPTED" || s.verdict === "ACCEPTED"
-            );
-            progress[problemId] = {
-              attempted: submissions.length > 0,
-              solved: hasAccepted,
-              submissions: submissions.length
-            };
-          }
-        } catch (err) {
-          console.error(`Error fetching progress for problem ${problemId}:`, err);
-          // Continue with other problems even if one fails
-        }
-      }
-      setUserProgress(progress);
+      const response = await apiFetch("/api/submissions/my-progress", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const index = {};
+      (data.progress || []).forEach((entry) => {
+        const solved = entry.status === "SOLVED";
+        const attempted = entry.status === "SOLVED" || entry.status === "ATTEMPTED";
+        [entry.problemId, entry.numericId, ...(entry.aliases || [])].forEach((id) => {
+          if (id == null) return;
+          index[String(id)] = { attempted, solved };
+        });
+      });
+      setUserProgress(index);
     } catch (error) {
       console.error("Error fetching user progress:", error);
     }
@@ -188,7 +184,7 @@ const BundleProblems = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-white text-xl">Loading bundle...</div>
       </div>
     );
@@ -196,7 +192,7 @@ const BundleProblems = () => {
 
   if (!bundle) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="app-shell flex items-center justify-center">
         <div className="text-center">
           <div className="text-white text-xl mb-4">Bundle not found</div>
           <Link to="/bundles" className="text-blue-400 hover:text-blue-300">
@@ -210,7 +206,7 @@ const BundleProblems = () => {
   const stats = getProgressStats();
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="app-shell">
       {/* Bundle Header */}
       <div className="bg-gradient-to-r from-blue-900 to-purple-900 py-12 px-8">
         <div className="max-w-6xl mx-auto">
@@ -316,21 +312,21 @@ const BundleProblems = () => {
               return (
                 <div
                   key={problem.id}
-                  className={`bg-gray-800 rounded-xl p-6 border transition-all duration-300 hover:scale-[1.02] ${
+                  className={`app-surface rounded-xl p-6 border transition-all duration-300 hover:scale-[1.02] ${
                     isSolved
                       ? 'border-green-500'
                       : isAttempted
                       ? 'border-yellow-500'
-                      : 'border-gray-700 hover:border-blue-500'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-blue-500'
                   }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-start space-x-4 flex-1">
                       {/* Problem Number */}
                       <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${
-                        isSolved ? 'bg-green-500' : isAttempted ? 'bg-yellow-500' : 'bg-gray-700'
+                        isSolved ? 'bg-green-500 text-white' : isAttempted ? 'bg-yellow-500 text-black' : 'bg-gray-200 dark:bg-gray-700'
                       }`}>
-                        {isSolved ? '✓' : index + 1}
+                        {isSolved ? <CheckIcon className="h-5 w-5" /> : index + 1}
                       </div>
 
                       {/* Problem Info */}
@@ -342,7 +338,7 @@ const BundleProblems = () => {
                           </span>
                         </div>
                         
-                        <p className="text-gray-400 mb-3">{problem.description}</p>
+                        <p className="app-muted mb-3">{problem.description}</p>
 
                         {/* Tags */}
                         {problem.tags && problem.tags.length > 0 && (
@@ -350,7 +346,7 @@ const BundleProblems = () => {
                             {problem.tags.map((tag, i) => (
                               <span
                                 key={i}
-                                className="px-2 py-1 bg-gray-700 text-xs rounded-full text-gray-300"
+                                className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-xs rounded-full app-muted"
                               >
                                 {tag}
                               </span>
@@ -360,13 +356,11 @@ const BundleProblems = () => {
 
                         {/* Progress Info */}
                         {user && isAttempted && (
-                          <div className="flex items-center space-x-4 text-sm">
-                            <span className="text-gray-400">
+                          <div className="flex items-center space-x-4 text-sm app-muted">
                               {progress.submissions} attempt{progress.submissions !== 1 ? 's' : ''}
-                            </span>
                             {isSolved && (
                               <span className="text-green-400 font-semibold flex items-center">
-                                <span className="mr-1">✓</span> Solved
+                                <CheckIcon className="h-4 w-4 mr-1" /> Solved
                               </span>
                             )}
                           </div>

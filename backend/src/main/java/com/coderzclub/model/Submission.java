@@ -1,16 +1,36 @@
 package com.coderzclub.model;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
+import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
 
 @Document(collection = "submissions")
+@CompoundIndexes({
+    @CompoundIndex(
+        name = "submissionJobId_unique_sparse_idx",
+        def = "{'submissionJobId': 1}",
+        unique = true,
+        partialFilter = "{ 'submissionJobId': { $type: 'string' } }"
+    ),
+    @CompoundIndex(
+        name = "contestScoringStatus_createdAt_idx",
+        def = "{'contestScoringStatus': 1, 'createdAt': 1}",
+        partialFilter = "{ 'contestScoringStatus': 'PENDING' }"
+    )
+})
 public class Submission {
     @Id
     private String id;
     private String userId;
     private String problemId;
+    /** Present on job-backed submissions. Absent on legacy rows so the unique index stays sparse/partial. */
+    @Field(write = Field.Write.NON_NULL)
+    private String submissionJobId;
     private String code;
     private String language;
     private String result;  // ACCEPTED, WRONG_ANSWER, TIME_LIMIT_EXCEEDED, RUNTIME_ERROR, COMPILATION_ERROR, MEMORY_LIMIT_EXCEEDED
@@ -27,6 +47,20 @@ public class Submission {
     private Integer totalTestCases;    // Total number of test cases
     private Map<String, Object> executionDetails; // Full Judge0 response for debugging
     private boolean statsCounted;
+    /** Client-supplied editor timer seconds. Informational only; not used for judging. */
+    private Integer codingDurationSeconds;
+    /** Copied from the admitting SubmissionJob; omitted for practice. */
+    @Field(write = Field.Write.NON_NULL)
+    private String contestId;
+    /** Copied from the admitting SubmissionJob; omitted for practice. */
+    @Field(write = Field.Write.NON_NULL)
+    private Instant contestSubmittedAt;
+    /** Copied from the admitting SubmissionJob; omitted for practice. */
+    @Field(write = Field.Write.NON_NULL)
+    private String contestProblemSnapshotId;
+    /** Contest scoring processing state. Omitted for practice submissions. */
+    @Field(write = Field.Write.NON_NULL)
+    private ContestScoringStatus contestScoringStatus;
 
     // Default constructor
     public Submission() {}
@@ -52,6 +86,7 @@ public class Submission {
         private String id;
         private String userId;
         private String problemId;
+        private String submissionJobId;
         private String code;
         private String language;
         private String result;
@@ -65,6 +100,11 @@ public class Submission {
         private Integer passedTestCases;
         private Integer totalTestCases;
         private Map<String, Object> executionDetails;
+        private Integer codingDurationSeconds;
+        private String contestId;
+        private Instant contestSubmittedAt;
+        private String contestProblemSnapshotId;
+        private ContestScoringStatus contestScoringStatus;
 
         public Builder id(String id) {
             this.id = id;
@@ -78,6 +118,11 @@ public class Submission {
 
         public Builder problemId(String problemId) {
             this.problemId = problemId;
+            return this;
+        }
+
+        public Builder submissionJobId(String submissionJobId) {
+            this.submissionJobId = submissionJobId;
             return this;
         }
 
@@ -146,6 +191,31 @@ public class Submission {
             return this;
         }
 
+        public Builder codingDurationSeconds(Integer codingDurationSeconds) {
+            this.codingDurationSeconds = codingDurationSeconds;
+            return this;
+        }
+
+        public Builder contestId(String contestId) {
+            this.contestId = contestId;
+            return this;
+        }
+
+        public Builder contestSubmittedAt(Instant contestSubmittedAt) {
+            this.contestSubmittedAt = contestSubmittedAt;
+            return this;
+        }
+
+        public Builder contestProblemSnapshotId(String contestProblemSnapshotId) {
+            this.contestProblemSnapshotId = contestProblemSnapshotId;
+            return this;
+        }
+
+        public Builder contestScoringStatus(ContestScoringStatus contestScoringStatus) {
+            this.contestScoringStatus = contestScoringStatus;
+            return this;
+        }
+
         public Submission build() {
             Submission submission = new Submission(id, userId, problemId, code, language, result, output, createdAt);
             submission.setRuntime(runtime);
@@ -156,6 +226,12 @@ public class Submission {
             submission.setPassedTestCases(passedTestCases);
             submission.setTotalTestCases(totalTestCases);
             submission.setExecutionDetails(executionDetails);
+            submission.setSubmissionJobId(submissionJobId);
+            submission.setCodingDurationSeconds(codingDurationSeconds);
+            submission.setContestId(contestId);
+            submission.setContestSubmittedAt(contestSubmittedAt);
+            submission.setContestProblemSnapshotId(contestProblemSnapshotId);
+            submission.setContestScoringStatus(contestScoringStatus);
             return submission;
         }
     }
@@ -171,6 +247,9 @@ public class Submission {
 
     public String getProblemId() { return problemId; }
     public void setProblemId(String problemId) { this.problemId = problemId; }
+
+    public String getSubmissionJobId() { return submissionJobId; }
+    public void setSubmissionJobId(String submissionJobId) { this.submissionJobId = submissionJobId; }
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
@@ -211,4 +290,25 @@ public class Submission {
 
     public Map<String, Object> getExecutionDetails() { return executionDetails; }
     public void setExecutionDetails(Map<String, Object> executionDetails) { this.executionDetails = executionDetails; }
+
+    public Integer getCodingDurationSeconds() { return codingDurationSeconds; }
+    public void setCodingDurationSeconds(Integer codingDurationSeconds) {
+        this.codingDurationSeconds = com.coderzclub.service.CodingDuration.sanitize(codingDurationSeconds);
+    }
+
+    public String getContestId() { return contestId; }
+    public void setContestId(String contestId) { this.contestId = contestId; }
+
+    public Instant getContestSubmittedAt() { return contestSubmittedAt; }
+    public void setContestSubmittedAt(Instant contestSubmittedAt) { this.contestSubmittedAt = contestSubmittedAt; }
+
+    public String getContestProblemSnapshotId() { return contestProblemSnapshotId; }
+    public void setContestProblemSnapshotId(String contestProblemSnapshotId) {
+        this.contestProblemSnapshotId = contestProblemSnapshotId;
+    }
+
+    public ContestScoringStatus getContestScoringStatus() { return contestScoringStatus; }
+    public void setContestScoringStatus(ContestScoringStatus contestScoringStatus) {
+        this.contestScoringStatus = contestScoringStatus;
+    }
 } 

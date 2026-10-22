@@ -42,7 +42,7 @@ public class UserService implements UserDetailsService {
     @Value("${app.password-reset.token-expiration-ms:3600000}")
     private long resetTokenExpirationMs;
 
-    public User registerUser(String username, String email, String password, String role) {
+    public User registerUser(String username, String email, String password) {
         if (userRepository.findByUsername(username).isPresent()) {
             throw new RuntimeException("Username already exists");
         }
@@ -56,8 +56,9 @@ public class UserService implements UserDetailsService {
             throw new RuntimeException("An account already exists with that email address. Please verify your email or use password reset.");
         }
 
-        User user = new User(null, username, email, passwordEncoder.encode(password), role, new Date());
+        User user = new User(null, username, email, passwordEncoder.encode(password), AccountRoles.publicRegistrationRole(), new Date());
         user.setEmailVerified(false);
+        user.setAccountStatus("ACTIVE");
         user.setEmailVerificationToken(generateToken());
         user.setEmailVerificationTokenExpiry(new Date(System.currentTimeMillis() + verificationTokenExpirationMs));
         return userRepository.save(user);
@@ -100,17 +101,20 @@ public class UserService implements UserDetailsService {
         return userRepository.save(user);
     }
 
-    public User createPasswordResetToken(String email) {
-        User user = findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
-
+    public Optional<User> createPasswordResetToken(String email) {
+        Optional<User> userOpt = findByEmail(email).filter(candidate -> !candidate.isDeleted());
+        if (userOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        User user = userOpt.get();
         user.setPasswordResetToken(generateToken());
         user.setPasswordResetTokenExpiry(new Date(System.currentTimeMillis() + resetTokenExpirationMs));
-        return userRepository.save(user);
+        return Optional.of(userRepository.save(user));
     }
 
     public User resetPassword(String token, String newPassword) {
         User user = findByPasswordResetToken(token)
+                .filter(candidate -> !candidate.isDeleted())
                 .orElseThrow(() -> new RuntimeException("Invalid reset token"));
         if (user.getPasswordResetTokenExpiry() == null || user.getPasswordResetTokenExpiry().before(new Date())) {
             throw new RuntimeException("Password reset token has expired");
@@ -124,15 +128,36 @@ public class UserService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+        return toUserDetails(loadUserForAuthentication(null, username));
+    }
+
+    public User loadUserForAuthentication(String userId, String username) throws UsernameNotFoundException {
+        User user;
+        if (userId != null && !userId.isBlank()) {
+            user = userRepository.findById(userId)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+            if (username != null && user.getUsername() != null
+                && !user.getUsername().equalsIgnoreCase(username)) {
+                throw new UsernameNotFoundException("User not found");
+            }
+        } else {
+            user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        }
+        if (!user.canAuthenticate()) {
+            throw new UsernameNotFoundException("User not found");
+        }
+        return user;
+    }
+
+    public UserDetails toUserDetails(User user) {
         String normalizedRole = (user.getRole() == null ? "USER" : user.getRole().trim().toUpperCase());
         String roleAuthority = "ROLE_" + normalizedRole;
-
+        String password = user.getPasswordHash() == null ? "" : user.getPasswordHash();
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getUsername())
-                .password(user.getPasswordHash())
-                .disabled(!user.isEmailVerified())
+                .password(password)
+                .disabled(!user.isEmailVerified() || !user.canAuthenticate())
                 .authorities(roleAuthority)
                 .accountExpired(false)
                 .credentialsExpired(false)
@@ -141,17 +166,15 @@ public class UserService implements UserDetailsService {
     }
 
     public boolean checkPassword(String rawPassword, String encodedPassword) {
-        System.out.println("=== PASSWORD CHECK DEBUG ===");
-        System.out.println("Raw password: " + rawPassword);
-        System.out.println("Stored encoded password: " + encodedPassword);
-        
-        boolean matches = passwordEncoder.matches(rawPassword, encodedPassword);
-        System.out.println("Password matches: " + matches);
-        return matches;
+        if (rawPassword == null || encodedPassword == null) {
+            return false;
+        }
+        return passwordEncoder.matches(rawPassword, encodedPassword);
     }
 
     public User resendVerificationEmail(String usernameOrEmail) {
         User user = findByUsernameOrEmail(usernameOrEmail)
+                .filter(candidate -> !candidate.isDeleted())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (user.isEmailVerified()) {

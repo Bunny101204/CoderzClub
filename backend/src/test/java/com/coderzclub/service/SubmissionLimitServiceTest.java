@@ -102,6 +102,28 @@ class SubmissionLimitServiceTest {
     }
 
     @Test
+    void runSlotsUseSeparateRedisKeysFromSubmissions() {
+        when(redisTemplate.execute(any(), anyList(), any(Object[].class))).thenReturn(3L);
+        SubmissionLimitService service = serviceWithDefaults();
+        assertTrue(service.tryAcquireRunSlot("user-1", "problem-1").isAllowed());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> keys = ArgumentCaptor.forClass(List.class);
+        verify(redisTemplate).execute(any(), keys.capture(), any(Object[].class));
+        assertTrue(keys.getValue().get(0).contains("coderzclub:run:cooldown:user-1"));
+        assertTrue(keys.getValue().get(1).matches("coderzclub:run:daily:\\d{8}:user-1"));
+        assertTrue(keys.getValue().get(2).matches("coderzclub:run:problem:\\d{8}:user-1:problem-1"));
+    }
+
+    @Test
+    void runCooldownDoesNotInvokeCallerWhenRejected() {
+        when(redisTemplate.execute(any(), anyList(), any(Object[].class))).thenReturn(0L);
+        SubmissionLimitDecision decision = serviceWithDefaults().tryAcquireRunSlot("user-1", "custom-stdin");
+        assertFalse(decision.isAllowed());
+        assertTrue(decision.getReason().contains("COOLDOWN"));
+    }
+
+    @Test
     void redisFailureRespectsFailOpenSetting() {
         doThrow(new RedisSystemException("boom", new RuntimeException("boom"))).when(redisTemplate).execute(any(), anyList(), any(Object[].class));
 

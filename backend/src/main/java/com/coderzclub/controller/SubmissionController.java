@@ -1,5 +1,6 @@
 package com.coderzclub.controller;
 
+import com.coderzclub.config.AuthenticatedUser;
 import com.coderzclub.model.Submission;
 import com.coderzclub.repository.SubmissionRepository;
 import com.coderzclub.repository.UserRepository;
@@ -9,16 +10,18 @@ import com.coderzclub.model.Problem;
 import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionValidationService;
+import com.coderzclub.service.ProblemAccessService;
+import com.coderzclub.service.UserProgressService;
 import com.coderzclub.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Map;
 import java.util.HashMap;
@@ -48,15 +51,17 @@ public class SubmissionController {
     @Autowired
     private SubmissionValidationService validationService;
 
+    @Autowired
+    private UserProgressService userProgressService;
+
+    @Autowired
+    private ProblemAccessService problemAccessService;
+
     @PostMapping
     public ResponseEntity<?> submitSolution(@RequestBody SubmissionRequest request) {
         try {
-            // Get current user from JWT
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -69,6 +74,7 @@ public class SubmissionController {
             }
             
             Problem problem = problemOpt.get();
+            problemAccessService.requirePracticeExecute(user, problem);
             
             SubmissionLimitDecision decision = submissionLimitService.tryAcquireSubmissionSlot(user.getId(), problem.getId());
             if (!decision.isAllowed()) {
@@ -141,6 +147,8 @@ public class SubmissionController {
             
             return ResponseEntity.ok(submission);
             
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error saving submission: " + e.getMessage());
         }
@@ -153,18 +161,15 @@ public class SubmissionController {
         @RequestParam(defaultValue = "20") int size
     ) {
         try {
-            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-            Page<Submission> submissions = submissionRepository.findByUserId(userId, pageable);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("submissions", submissions.getContent());
-            response.put("currentPage", submissions.getNumber());
-            response.put("totalPages", submissions.getTotalPages());
-            response.put("totalItems", submissions.getTotalElements());
-            response.put("hasNext", submissions.hasNext());
-            response.put("hasPrevious", submissions.hasPrevious());
-            
-            return ResponseEntity.ok(response);
+            Optional<User> current = currentUser();
+            if (current.isEmpty()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+            }
+            if (!current.get().getId().equals(userId)) {
+                return ResponseEntity.status(403).body(Map.of("error", "Cannot read another user's submissions"));
+            }
+            Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
+            return ResponseEntity.ok(pagePayload(submissionRepository.findByUserId(userId, pageable)));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
         }
@@ -177,21 +182,26 @@ public class SubmissionController {
         @RequestParam(defaultValue = "20") int size
     ) {
         try {
-            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-            Page<Submission> submissions = submissionRepository.findByProblemId(problemId, pageable);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("submissions", submissions.getContent());
-            response.put("currentPage", submissions.getNumber());
-            response.put("totalPages", submissions.getTotalPages());
-            response.put("totalItems", submissions.getTotalElements());
-            response.put("hasNext", submissions.hasNext());
-            response.put("hasPrevious", submissions.hasPrevious());
-            
-            return ResponseEntity.ok(response);
+            Optional<User> current = currentUser();
+            if (current.isEmpty()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+            }
+            Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
+            Page<Submission> submissions = submissionRepository.findByUserIdAndProblemIdIn(
+                current.get().getId(), problemAliases(problemId), pageable);
+            return ResponseEntity.ok(pagePayload(submissions));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/my-progress")
+    public ResponseEntity<?> getMyProgress() {
+        Optional<User> current = currentUser();
+        if (current.isEmpty()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+        }
+        return ResponseEntity.ok(Map.of("progress", userProgressService.progressForUser(current.get().getId())));
     }
     
     @GetMapping("/my-submissions")
@@ -202,41 +212,30 @@ public class SubmissionController {
         @RequestParam(required = false) String result
     ) {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
-            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+            Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
             Page<Submission> submissions;
+            String userId = userOpt.get().getId();
             
             // Apply filters
             if (problemId != null && result != null) {
                 submissions = submissionRepository.findByUserIdAndProblemIdAndResult(
-                    userOpt.get().getId(), problemId, result, pageable);
+                    userId, problemId, result, pageable);
             } else if (problemId != null) {
-                submissions = submissionRepository.findByUserIdAndProblemId(
-                    userOpt.get().getId(), problemId, pageable);
+                submissions = submissionRepository.findByUserIdAndProblemIdIn(
+                    userId, problemAliases(problemId), pageable);
             } else if (result != null) {
                 submissions = submissionRepository.findByUserIdAndResult(
-                    userOpt.get().getId(), result, pageable);
+                    userId, result, pageable);
             } else {
-                submissions = submissionRepository.findByUserId(
-                    userOpt.get().getId(), pageable);
+                submissions = submissionRepository.findByUserId(userId, pageable);
             }
             
-            Map<String, Object> response = new HashMap<>();
-            response.put("submissions", submissions.getContent());
-            response.put("currentPage", submissions.getNumber());
-            response.put("totalPages", submissions.getTotalPages());
-            response.put("totalItems", submissions.getTotalElements());
-            response.put("hasNext", submissions.hasNext());
-            response.put("hasPrevious", submissions.hasPrevious());
-            
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(pagePayload(submissions));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
         }
@@ -245,11 +244,8 @@ public class SubmissionController {
     @GetMapping("/limits")
     public ResponseEntity<?> getSubmissionLimits(@RequestParam(required = false) String problemId) {
         try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String username = auth.getName();
-            
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            if (!userOpt.isPresent()) {
+            Optional<User> userOpt = currentUser();
+            if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
             
@@ -275,6 +271,52 @@ public class SubmissionController {
         }
     }
     
+    private Optional<User> currentUser() {
+        return AuthenticatedUser.current(userRepository);
+    }
+
+    private int clampSize(int size) {
+        return Math.min(50, Math.max(1, size));
+    }
+
+    private List<String> problemAliases(String problemId) {
+        List<String> ids = new ArrayList<>();
+        if (problemId != null && !problemId.isBlank()) {
+            ids.add(problemId);
+        }
+        problemRepository.findById(problemId).ifPresent(problem -> {
+            if (problem.getId() != null && !ids.contains(problem.getId())) {
+                ids.add(problem.getId());
+            }
+            if (problem.getNumericId() != null) {
+                String numeric = String.valueOf(problem.getNumericId());
+                if (!ids.contains(numeric)) {
+                    ids.add(numeric);
+                }
+            }
+        });
+        try {
+            problemRepository.findByNumericId(Integer.valueOf(problemId)).ifPresent(problem -> {
+                if (problem.getId() != null && !ids.contains(problem.getId())) {
+                    ids.add(problem.getId());
+                }
+            });
+        } catch (NumberFormatException ignored) {
+        }
+        return ids;
+    }
+
+    private Map<String, Object> pagePayload(Page<Submission> submissions) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("submissions", submissions.getContent());
+        response.put("currentPage", submissions.getNumber());
+        response.put("totalPages", submissions.getTotalPages());
+        response.put("totalItems", submissions.getTotalElements());
+        response.put("hasNext", submissions.hasNext());
+        response.put("hasPrevious", submissions.hasPrevious());
+        return response;
+    }
+
     /**
      * Maps Judge0 status ID to human-readable verdict
      * Judge0 status IDs: https://ce.judge0.com/#statuses-and-languages-status-get

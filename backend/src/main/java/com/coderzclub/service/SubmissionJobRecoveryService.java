@@ -1,8 +1,10 @@
 package com.coderzclub.service;
 
 import com.coderzclub.config.WorkerProperties;
+import com.coderzclub.model.Submission;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.queue.SubmissionQueuePublisher;
+import com.coderzclub.repository.SubmissionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +38,15 @@ public class SubmissionJobRecoveryService {
     @Autowired
     private SubmissionJobEventService eventService;
 
+    @Autowired
+    private SubmissionRepository submissionRepository;
+
+    @Autowired
+    private SubmissionService submissionService;
+
+    @Autowired
+    private SubmissionJobLeaseService leaseService;
+
     @Scheduled(fixedDelayString = "${worker.recoveryIntervalSeconds:30}000")
     public void recoverStuckJobs() {
         Date now = new Date();
@@ -45,6 +56,9 @@ public class SubmissionJobRecoveryService {
 
         List<SubmissionJob> runningJobs = mongoTemplate.find(runningQuery, SubmissionJob.class);
         for (SubmissionJob job : runningJobs) {
+            if (finishMaterializedJob(job, now)) {
+                continue;
+            }
             if (job.getAttemptCount() != null && job.getAttemptCount() >= job.getMaxAttempts()) {
                 Update update = new Update();
                 update.set("status", SubmissionJob.JobStatus.TIMEOUT);
@@ -103,5 +117,59 @@ public class SubmissionJobRecoveryService {
                 logger.info("Job {} retry window opened; published back to queue", job.getId());
             }
         }
+    }
+
+    @Scheduled(fixedDelayString = "${submission.materialization.repair-ms:30000}")
+    public void repairCompletedJobsMissingSubmission() {
+        Query missing = new Query();
+        missing.addCriteria(Criteria.where("status").is(SubmissionJob.JobStatus.COMPLETED));
+        missing.addCriteria(new Criteria().orOperator(
+            Criteria.where("submissionId").is(null),
+            Criteria.where("submissionId").exists(false)
+        ));
+        missing.limit(50);
+        List<SubmissionJob> jobs = mongoTemplate.find(missing, SubmissionJob.class);
+        for (SubmissionJob job : jobs) {
+            Submission submission = submissionService.createSubmissionFromJob(job);
+            if (submission != null) {
+                leaseService.attachSubmissionIdIfCompleted(job.getId(), submission.getId());
+                logger.info("Repaired missing submission {} for completed job {}", submission.getId(), job.getId());
+            }
+        }
+    }
+
+    private boolean finishMaterializedJob(SubmissionJob job, Date now) {
+        Submission existing = submissionRepository.findBySubmissionJobId(job.getId()).orElse(null);
+        boolean judged = job.getFinalResult() != null && !job.getFinalResult().isBlank();
+        if (existing == null && !judged) {
+            return false;
+        }
+        if (existing == null) {
+            existing = submissionService.createSubmissionFromJob(job);
+        }
+        SubmissionJob payload = new SubmissionJob();
+        payload.setFinalResult(job.getFinalResult() != null
+            ? job.getFinalResult()
+            : (existing == null ? "INTERNAL_ERROR" : existing.getResult()));
+        payload.setTotalRuntime(job.getTotalRuntime() != null
+            ? job.getTotalRuntime()
+            : (existing == null ? null : existing.getRuntime()));
+        payload.setTotalMemory(job.getTotalMemory() != null
+            ? job.getTotalMemory()
+            : (existing == null ? null : existing.getMemory()));
+        payload.setCompletedTests(job.getCompletedTests());
+        payload.setCompletedAt(now);
+        payload.setMetadata(job.getMetadata());
+        if (existing != null) {
+            payload.setSubmissionId(existing.getId());
+        }
+        if (leaseService.completeExpiredRunningWithResult(job.getId(), payload)) {
+            job.setStatus(SubmissionJob.JobStatus.COMPLETED);
+            eventService.publish(job, SubmissionJob.JobStatus.COMPLETED);
+            logger.warn("Job {} expired after judgement/materialization; completed without re-executing Judge0",
+                job.getId());
+            return true;
+        }
+        return submissionRepository.findBySubmissionJobId(job.getId()).isPresent();
     }
 }

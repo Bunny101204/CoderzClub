@@ -1,6 +1,7 @@
 package com.coderzclub.dto;
 
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 
 import java.util.List;
@@ -17,8 +18,18 @@ public class AdminProblemResponse {
     private int points;
     private int estimatedTime;
     private String executionMode;
+    private String testcaseVersion;
+    private Integer numericId;
+    private String inputFormat;
+    private String outputFormat;
+    private String constraints;
+    private String exampleInput;
+    private String exampleOutput;
+    private String exampleExplanation;
+    private String bundleId;
     private List<TestCase> publicTestCases;
     private List<TestCase> hiddenTestCases;
+    private String availability;
 
     public AdminProblemResponse() {}
 
@@ -33,8 +44,18 @@ public class AdminProblemResponse {
         this.points = problem.getPoints();
         this.estimatedTime = problem.getEstimatedTime();
         this.executionMode = problem.getExecutionMode() == null ? null : problem.getExecutionMode().name();
+        this.testcaseVersion = problem.getTestcaseVersion();
+        this.numericId = problem.getNumericId();
+        this.inputFormat = problem.getInputFormat();
+        this.outputFormat = problem.getOutputFormat();
+        this.constraints = problem.getConstraints();
+        this.exampleInput = problem.getExampleInput();
+        this.exampleOutput = problem.getExampleOutput();
+        this.exampleExplanation = problem.getExampleExplanation();
+        this.bundleId = problem.getBundleId();
         this.publicTestCases = sanitize(problem.getPublicTestCases());
         this.hiddenTestCases = sanitize(problem.getHiddenTestCases());
+        this.availability = ProblemAvailability.of(problem).name();
     }
 
     private List<TestCase> sanitize(List<TestCase> testCases) {
@@ -70,8 +91,28 @@ public class AdminProblemResponse {
     public void setEstimatedTime(int estimatedTime) { this.estimatedTime = estimatedTime; }
     public String getExecutionMode() { return executionMode; }
     public void setExecutionMode(String executionMode) { this.executionMode = executionMode; }
+    public String getTestcaseVersion() { return testcaseVersion; }
+    public void setTestcaseVersion(String testcaseVersion) { this.testcaseVersion = testcaseVersion; }
+    public Integer getNumericId() { return numericId; }
+    public void setNumericId(Integer numericId) { this.numericId = numericId; }
+    public String getInputFormat() { return inputFormat; }
+    public void setInputFormat(String inputFormat) { this.inputFormat = inputFormat; }
+    public String getOutputFormat() { return outputFormat; }
+    public void setOutputFormat(String outputFormat) { this.outputFormat = outputFormat; }
+    public String getConstraints() { return constraints; }
+    public void setConstraints(String constraints) { this.constraints = constraints; }
+    public String getExampleInput() { return exampleInput; }
+    public void setExampleInput(String exampleInput) { this.exampleInput = exampleInput; }
+    public String getExampleOutput() { return exampleOutput; }
+    public void setExampleOutput(String exampleOutput) { this.exampleOutput = exampleOutput; }
+    public String getExampleExplanation() { return exampleExplanation; }
+    public void setExampleExplanation(String exampleExplanation) { this.exampleExplanation = exampleExplanation; }
+    public String getBundleId() { return bundleId; }
+    public void setBundleId(String bundleId) { this.bundleId = bundleId; }
     public List<TestCase> getPublicTestCases() { return publicTestCases; }
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
     public List<TestCase> getHiddenTestCases() { return hiddenTestCases; }
     public void setHiddenTestCases(List<TestCase> hiddenTestCases) { this.hiddenTestCases = hiddenTestCases; }
+    public String getAvailability() { return availability; }
+    public void setAvailability(String availability) { this.availability = availability; }
 }
