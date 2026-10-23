@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import com.coderzclub.service.ProblemReadCache;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -49,16 +51,21 @@ class ProblemControllerSecurityTest {
     @SpyBean
     private MongoTemplate mongoTemplate;
 
+    @MockBean
+    private ProblemReadCache problemReadCache;
+
+    private Problem visibleProblem;
+
     @BeforeEach
     void setUp() {
-        Problem problem = new Problem();
-        problem.setId("p1");
-        problem.setTitle("Two Sum");
-        problem.setStatement("Solve it");
-        problem.setPublicTestCases(List.of(new TestCase("1", "2", "public")));
-        problem.setHiddenTestCases(List.of(new TestCase("9", "10", "secret")));
+        visibleProblem = new Problem();
+        visibleProblem.setId("p1");
+        visibleProblem.setTitle("Two Sum");
+        visibleProblem.setStatement("Solve it");
+        visibleProblem.setPublicTestCases(List.of(new TestCase("1", "2", "public")));
+        visibleProblem.setHiddenTestCases(List.of(new TestCase("9", "10", "secret")));
 
-        when(problemRepository.findById("p1")).thenReturn(Optional.of(problem));
+        when(problemRepository.findById("p1")).thenReturn(Optional.of(visibleProblem));
         when(problemRepository.save(any(Problem.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -95,11 +102,24 @@ class ProblemControllerSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Renamed"))
                 .andExpect(jsonPath("$.hiddenTestCases[0].input").value("9"));
+        verify(problemReadCache).evictDetail("p1");
+        verify(problemReadCache).bumpListVersion();
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void deleteInvalidatesPublicDetailCache() throws Exception {
+        mockMvc.perform(delete("/api/problems/p1"))
+            .andExpect(status().isOk());
+        verify(problemReadCache).evictDetail("p1");
+        verify(problemReadCache).bumpListVersion();
     }
 
     @Test
     @WithMockUser(roles = "USER")
     void publicUserCanReadProblemsWithoutHiddenCases() throws Exception {
+        doReturn(visibleProblem).when(mongoTemplate).findOne(any(Query.class), eq(Problem.class));
+        when(problemReadCache.lookupDetail("p1")).thenReturn(ProblemReadCache.DetailLookup.miss());
         mockMvc.perform(get("/api/problems/p1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hiddenTestCases").doesNotExist())
@@ -150,6 +170,7 @@ class ProblemControllerSecurityTest {
         org.junit.jupiter.api.Assertions.assertEquals(2L, pageQuery.getSkip());
         org.junit.jupiter.api.Assertions.assertEquals(2, pageQuery.getLimit());
         org.junit.jupiter.api.Assertions.assertEquals(1, pageQuery.getSortObject().get("numericId"));
+        org.junit.jupiter.api.Assertions.assertEquals(0, pageQuery.getFieldsObject().get("hiddenTestCases"));
     }
 
     @Test

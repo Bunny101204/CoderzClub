@@ -67,13 +67,19 @@ function assertIndexKeys(coll, keys, predicate) {
 // ProblemController filters difficulty/category/tags and prefixes title or _id,
 // then sorts by numericId and _id before applying skip/limit.
 ensureIndex(db.problems, { "difficulty": 1, "category": 1 }, { name: "difficulty_category_idx" });
-ensureIndex(db.problems, { "tags": 1 }, { name: "tags_idx" });
 ensureIndex(db.problems, { "numericId": 1, "_id": 1 }, { name: "numericId_id_idx" });
 // Run the numericId backfill and duplicate cleanup before this unique index is created.
 ensureIndex(db.problems, { "numericId": 1 }, { unique: true, sparse: true, name: "numericId_unique_sparse_idx" });
-// Prefix search uses title or _id regex; title supports the title branch.
+// ProblemSearchCriteria uses a case-insensitive prefix regex on title and _id, plus exact
+// numericId when the term is all digits. A normal title btree does not serve /^term/i.
+// The numericId unique index serves the exact-id branch. Do not add a text index here.
 ensureIndex(db.problems, { "title": 1 }, { name: "title_idx" });
-ensureIndex(db.problems, { "difficulty": 1 }, { name: "difficulty_idx" });
+// Practice list equality filters plus sort numericId, _id. availability $ne CONTEST_ONLY
+// stays a residual predicate (it matches almost every document).
+dropIndexIfPresent(db.problems, "difficulty_idx");
+ensureIndex(db.problems, { "difficulty": 1, "numericId": 1, "_id": 1 }, { name: "difficulty_numericId_id_idx" });
+dropIndexIfPresent(db.problems, "tags_idx");
+ensureIndex(db.problems, { "tags": 1, "numericId": 1, "_id": 1 }, { name: "tags_numericId_id_idx" });
 ensureIndex(db.problems, { "difficulty": 1, "tags": 1 }, { name: "difficulty_tags_idx" });
 // Practice list uses availability $ne CONTEST_ONLY. That predicate is not equality-selective
 // (almost every document matches), so it is applied as a residual on existing list indexes.
@@ -173,6 +179,8 @@ ensureIndex(db.batch_coordinators, { "userId": 1, "batchId": 1 }, { name: "userI
 ensureIndex(db.bundle_access_grants, { "bundleId": 1, "subjectType": 1, "subjectId": 1 }, { unique: true, name: "bundle_subject_unique_idx" });
 ensureIndex(db.bundle_access_grants, { "subjectType": 1, "subjectId": 1, "bundleId": 1 }, { name: "subject_bundle_idx" });
 ensureIndex(db.problem_bundles, { "isActive": 1, "visibility": 1 }, { name: "isActive_visibility_idx" });
+// User bundle list: isActive=true, visibility residual, sort createdAt desc.
+ensureIndex(db.problem_bundles, { "isActive": 1, "createdAt": -1 }, { name: "isActive_createdAt_desc_idx" });
 // Batch reports query submissions with userId $in page-or-all members AND problemId $in assigned IDs/aliases.
 // Existing submissions.userId_problemId_createdAt_desc_idx already covers that compound lookup.
 

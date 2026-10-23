@@ -1,8 +1,6 @@
 package com.coderzclub.service;
 
 import com.coderzclub.model.ProblemBundle;
-import com.coderzclub.model.Problem;
-import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.ProblemBundleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -18,19 +16,27 @@ public class ProblemBundleService {
     private ProblemBundleRepository problemBundleRepository;
 
     @Autowired
-    private ProblemRepository problemRepository;
+    private ProblemIdentityResolver problemIdentityResolver;
 
     public List<ProblemBundle> getAllActiveBundles() {
-        return problemBundleRepository.findByIsActiveTrue().stream().map(this::normalize).toList();
+        List<ProblemBundle> bundles = new java.util.ArrayList<>(problemBundleRepository.findByIsActiveTrue());
+        normalizeAll(bundles);
+        return bundles;
     }
 
     public List<ProblemBundle> getAllBundles() {
-        return problemBundleRepository.findAllByOrderByCreatedAtDesc().stream().map(this::normalize).toList();
+        List<ProblemBundle> bundles = new java.util.ArrayList<>(problemBundleRepository.findAllByOrderByCreatedAtDesc());
+        normalizeAll(bundles);
+        return bundles;
     }
 
     public ProblemBundle getBundleById(String id) {
         Optional<ProblemBundle> bundle = problemBundleRepository.findById(id);
-        return bundle.map(this::normalize).orElse(null);
+        if (bundle.isEmpty()) {
+            return null;
+        }
+        normalizeAll(java.util.List.of(bundle.get()));
+        return bundle.get();
     }
 
     public List<ProblemBundle> getBundlesByDifficulty(String difficulty) {
@@ -50,7 +56,7 @@ public class ProblemBundleService {
         }
         
         // Calculate totals if not provided
-        normalize(bundle);
+        normalizeAll(java.util.List.of(bundle));
         
         // Set createdBy to current user (you might want to get this from SecurityContext)
         // For now, we'll set it to a default admin user
@@ -76,7 +82,7 @@ public class ProblemBundleService {
             }
             
             // Calculate totals if not provided
-            normalize(bundle);
+            normalizeAll(java.util.List.of(bundle));
             
             return problemBundleRepository.save(bundle);
         }
@@ -104,23 +110,8 @@ public class ProblemBundleService {
         }
     }
 
-    private ProblemBundle normalize(ProblemBundle bundle) {
-        java.util.List<String> ids = new java.util.ArrayList<>();
-        if (bundle.getProblemIds() != null) {
-            for (String rawId : bundle.getProblemIds()) {
-                if (rawId == null || rawId.isBlank()) continue;
-                Problem problem = problemRepository.findById(rawId).orElse(null);
-                if (problem == null) {
-                    try {
-                        problem = problemRepository.findByNumericId(Integer.valueOf(rawId)).orElse(null);
-                    } catch (NumberFormatException ignored) { }
-                }
-                if (problem != null && !ids.contains(problem.getId())) ids.add(problem.getId());
-            }
-        }
-        bundle.setProblemIds(ids);
-        bundle.setTotalProblems(ids.size());
-        return bundle;
+    private void normalizeAll(java.util.List<ProblemBundle> bundles) {
+        problemIdentityResolver.applyCanonicalProblemIds(bundles);
     }
 }
 

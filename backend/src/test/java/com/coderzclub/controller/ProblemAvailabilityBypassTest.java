@@ -6,8 +6,16 @@ import com.coderzclub.model.User;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.UserRepository;
 import com.coderzclub.service.ContestAccessService;
+import com.coderzclub.service.OperationalMetrics;
 import com.coderzclub.service.ProblemAccessService;
+import com.coderzclub.service.ProblemIdentityResolver;
+import com.coderzclub.service.ProblemPublicDetailService;
+import com.coderzclub.service.ProblemReadCache;
 import com.coderzclub.service.ProblemRunService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -62,7 +72,19 @@ class ProblemAvailabilityBypassTest {
         ReflectionTestUtils.setField(controller, "userRepository", userRepository);
         ReflectionTestUtils.setField(controller, "mongoTemplate", mongoTemplate);
         ReflectionTestUtils.setField(controller, "problemRunService", problemRunService);
-        ReflectionTestUtils.setField(controller, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ProblemAccessService access = new ProblemAccessService(contestAccessService);
+        ReflectionTestUtils.setField(controller, "problemAccessService", access);
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        lenient().when(redis.opsForValue()).thenReturn(values);
+        ProblemReadCache cache = new ProblemReadCache(
+            redis, new ObjectMapper(), mongoTemplate,
+            new OperationalMetrics(new SimpleMeterRegistry()), 600, 600);
+        ReflectionTestUtils.setField(controller, "problemReadCache", cache);
+        ReflectionTestUtils.setField(controller, "problemPublicDetailService",
+            new ProblemPublicDetailService(mongoTemplate, problemRepository, access, cache));
+        ReflectionTestUtils.setField(controller, "problemIdentityResolver", new ProblemIdentityResolver(mongoTemplate));
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
@@ -97,6 +119,7 @@ class ProblemAvailabilityBypassTest {
         Problem visible = new Problem();
         visible.setId("pub");
         visible.setTitle("Two Sum");
+        when(mongoTemplate.findOne(any(Query.class), eq(Problem.class))).thenReturn(visible);
         when(problemRepository.findById("pub")).thenReturn(Optional.of(visible));
         mockMvc.perform(get("/api/problems/pub"))
             .andExpect(status().isOk())
@@ -106,13 +129,20 @@ class ProblemAvailabilityBypassTest {
     @Test
     void directIdAndNumericIdHideContestOnly() throws Exception {
         Problem secret = contestOnly("secret", 42);
+        when(mongoTemplate.findOne(any(Query.class), eq(Problem.class))).thenAnswer(invocation -> {
+            Query query = invocation.getArgument(0);
+            Object id = query.getQueryObject().get("_id");
+            Object numericId = query.getQueryObject().get("numericId");
+            if ("secret".equals(String.valueOf(id)) || Integer.valueOf(42).equals(numericId)) {
+                return secret;
+            }
+            return null;
+        });
         when(problemRepository.findById("secret")).thenReturn(Optional.of(secret));
         mockMvc.perform(get("/api/problems/secret")).andExpect(status().isNotFound());
-
-        when(problemRepository.findById("42")).thenReturn(Optional.empty());
-        when(problemRepository.findByNumericId(42)).thenReturn(Optional.of(secret));
         mockMvc.perform(get("/api/problems/42")).andExpect(status().isNotFound());
         verify(contestAccessService, never()).hasAccessibleLiveOrEndedContestContaining(any(), any());
+        verify(problemRepository, never()).findByNumericId(any());
     }
 
     @Test
@@ -121,8 +151,7 @@ class ProblemAvailabilityBypassTest {
         Problem visible = new Problem();
         visible.setId("pub");
         visible.setTitle("Visible");
-        when(problemRepository.findById("secret")).thenReturn(Optional.of(secret));
-        when(problemRepository.findById("pub")).thenReturn(Optional.of(visible));
+        when(mongoTemplate.find(any(Query.class), eq(Problem.class))).thenReturn(List.of(secret, visible));
         mockMvc.perform(get("/api/problems/by-ids").param("ids", "secret", "pub"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].id").value("pub"))

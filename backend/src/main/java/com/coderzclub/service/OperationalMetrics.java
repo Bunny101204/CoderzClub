@@ -115,6 +115,20 @@ public class OperationalMetrics {
             .increment();
     }
 
+    public void problemDetailCache(String outcome) {
+        Counter.builder("problem.cache.detail")
+            .tag("outcome", bounded(outcome, java.util.Set.of("hit", "miss", "fallback")))
+            .register(registry)
+            .increment();
+    }
+
+    public void problemListCache(String outcome) {
+        Counter.builder("problem.cache.list")
+            .tag("outcome", bounded(outcome, java.util.Set.of("hit", "miss", "fallback")))
+            .register(registry)
+            .increment();
+    }
+
     public void outboxPublish(String transport, String outcome) {
         Counter.builder("submission.outbox.publish")
             .tag("transport", bounded(transport, OUTBOX_TRANSPORTS))

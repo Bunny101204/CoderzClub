@@ -1,7 +1,6 @@
 package com.coderzclub.controller;
 
 import com.coderzclub.dto.ProblemListResponse;
-import com.coderzclub.dto.ProblemDetailResponse;
 import com.coderzclub.dto.AdminProblemResponse;
 import com.coderzclub.dto.ProblemContentUpdate;
 import com.coderzclub.dto.ProblemExecutionConfigUpdate;
@@ -17,6 +16,9 @@ import com.coderzclub.service.IncompatibleExecutionException;
 import com.coderzclub.service.ProblemExecutionConfigService;
 import com.coderzclub.service.ProblemContentService;
 import com.coderzclub.service.ProblemAccessService;
+import com.coderzclub.service.ProblemIdentityResolver;
+import com.coderzclub.service.ProblemPublicDetailService;
+import com.coderzclub.service.ProblemReadCache;
 import com.coderzclub.service.ProblemRunService;
 import com.coderzclub.service.RunLimitExceededException;
 import com.coderzclub.model.ExecutionMode;
@@ -73,6 +75,15 @@ public class ProblemController {
     @Autowired
     private ProblemAccessService problemAccessService;
 
+    @Autowired
+    private ProblemPublicDetailService problemPublicDetailService;
+
+    @Autowired
+    private ProblemReadCache problemReadCache;
+
+    @Autowired
+    private ProblemIdentityResolver problemIdentityResolver;
+
     @GetMapping
     public ResponseEntity<?> getAllProblems(
         @RequestParam(required = false) String difficulty,
@@ -95,9 +106,19 @@ public class ProblemController {
             if (tags != null && tags.isEmpty()) {
                 tags = null;
             }
+            boolean cursorMode = cursor != null && !cursor.trim().isEmpty();
+            User viewer = currentUser().orElse(null);
+            boolean adminList = problemAccessService.canListRestrictedProblems(viewer);
+            if (problemReadCache != null && problemReadCache.listCacheable(
+                    difficulty, category, tags, search, cursorMode, page, size)) {
+                Map<String, Object> cached = problemReadCache.readList(adminList, page, size, difficulty);
+                if (cached != null) {
+                    return ResponseEntity.ok(cached);
+                }
+            }
 
             Query query = new Query();
-            problemAccessService.applyPracticeListingFilter(query, currentUser().orElse(null));
+            problemAccessService.applyPracticeListingFilter(query, viewer);
             if (difficulty != null) {
                 query.addCriteria(Criteria.where("difficulty").is(difficulty));
             }
@@ -110,7 +131,6 @@ public class ProblemController {
             if (search != null) {
                 query.addCriteria(ProblemSearchCriteria.forTerm(search));
             }
-            boolean cursorMode = cursor != null && !cursor.trim().isEmpty();
             long totalItems = 0;
             int totalPages = 0;
             if (cursorMode) {
@@ -131,6 +151,7 @@ public class ProblemController {
             if (!cursorMode) {
                 query.skip((long) page * size);
             }
+            query.fields().exclude("hiddenTestCases");
             List<Problem> pageProblems = mongoTemplate.find(query, Problem.class);
             String nextCursor = null;
             if (cursorMode && pageProblems.size() > requestedLimit) {
@@ -158,6 +179,10 @@ public class ProblemController {
             response.put("hasNext", cursorMode ? nextCursor != null : page < totalPages - 1);
             response.put("hasPrevious", cursorMode ? cursorMode : page > 0);
             response.put("nextCursor", nextCursor);
+            if (problemReadCache != null && problemReadCache.listCacheable(
+                    difficulty, category, tags, search, cursorMode, page, size)) {
+                problemReadCache.writeList(adminList, page, size, difficulty, response);
+            }
 
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
@@ -183,21 +208,15 @@ public class ProblemController {
     public ResponseEntity<List<ProblemListResponse>> getProblemsByIds(
             @RequestParam List<String> ids) {
         try {
-            List<Problem> problems = new ArrayList<>();
-            for (String rawId : ids) {
-                if (rawId == null || rawId.isBlank()) continue;
-                Problem problem = problemRepository.findById(rawId).orElse(null);
-                if (problem == null) {
-                    try {
-                        problem = problemRepository.findByNumericId(Integer.valueOf(rawId)).orElse(null);
-                    } catch (NumberFormatException ignored) { }
-                }
-                if (problem != null && problemAccessService.canView(currentUser().orElse(null), problem)) {
+            User viewer = currentUser().orElse(null);
+            List<ProblemListResponse> problems = new ArrayList<>();
+            for (Problem problem : problemIdentityResolver.resolveForList(ids)) {
+                if (problemAccessService.canView(viewer, problem)) {
                     problem.setHiddenTestCases(null);
-                    problems.add(problem);
+                    problems.add(new ProblemListResponse(problem));
                 }
             }
-            return ResponseEntity.ok(problems.stream().map(ProblemListResponse::new).toList());
+            return ResponseEntity.ok(problems);
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
         }
@@ -220,29 +239,11 @@ public class ProblemController {
 
     @GetMapping("/{id}")
     public ResponseEntity<?> getProblemById(@PathVariable String id) {
-        Optional<Problem> problem = problemRepository.findById(id);
-        if (problem.isEmpty()) {
-            try {
-                problem = problemRepository.findByNumericId(Integer.valueOf(id));
-            } catch (NumberFormatException ignored) {
-                // The path was not a numeric problem ID.
-            }
-        }
-
-        if (problem.isEmpty()) return ResponseEntity.notFound().build();
-        Problem p = problem.get();
-        if (!problemAccessService.canView(currentUser().orElse(null), p)) {
+        Object body = problemPublicDetailService.read(currentUser().orElse(null), id);
+        if (body == null) {
             return ResponseEntity.notFound().build();
         }
-        // Remove hidden testcases from API response
-        p.setHiddenTestCases(null);
-        return ResponseEntity.ok(p);
-
-        /*if (problem.isEmpty()) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(new ProblemDetailResponse(problem.get()));
-        */      
+        return ResponseEntity.ok(body);
     }
 
     @GetMapping("/test")
@@ -271,6 +272,7 @@ public class ProblemController {
         }
         try {
             Problem saved = problemRepository.save(problem);
+            invalidateProblemReads(saved.getId());
             return ResponseEntity.ok(saved);
         } catch (DuplicateKeyException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -288,7 +290,9 @@ public class ProblemController {
         try {
             Problem existing = existingOpt.get();
             problemContentService.apply(existing, update);
-            return ResponseEntity.ok(new AdminProblemResponse(problemRepository.save(existing)));
+            Problem saved = problemRepository.save(existing);
+            invalidateProblemReads(saved.getId());
+            return ResponseEntity.ok(new AdminProblemResponse(saved));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -308,7 +312,9 @@ public class ProblemController {
                 : ExecutionMode.fromValue(update.getExecutionMode());
             String version = update == null ? null : update.getTestcaseVersion();
             executionConfigService.apply(existing, requested, version);
-            return ResponseEntity.ok(problemRepository.save(existing));
+            Problem saved = problemRepository.save(existing);
+            invalidateProblemReads(saved.getId());
+            return ResponseEntity.ok(saved);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -393,6 +399,15 @@ public class ProblemController {
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteProblem(@PathVariable String id) {
         problemRepository.deleteById(id);
+        invalidateProblemReads(id);
         return ResponseEntity.ok().build();
+    }
+
+    private void invalidateProblemReads(String problemId) {
+        if (problemReadCache == null) {
+            return;
+        }
+        problemReadCache.evictDetail(problemId);
+        problemReadCache.bumpListVersion();
     }
 } 

@@ -317,6 +317,36 @@ class BundleAccessServiceTest {
     }
 
     @Test
+    void bundleProblemsUseOneBatchQueryAndPreserveOrder() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        List<String> ids = new ArrayList<>();
+        List<Problem> shuffled = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            ids.add("p" + i);
+            Problem problem = new Problem();
+            problem.setId("p" + i);
+            problem.setTitle("Problem " + i);
+            shuffled.add(problem);
+        }
+        java.util.Collections.shuffle(shuffled);
+        ProblemBundle bundle = activeBundle("b1", "PUBLIC");
+        bundle.setProblemIds(ids);
+        when(mongo.findById("b1", ProblemBundle.class)).thenReturn(bundle);
+        AtomicInteger problemFinds = new AtomicInteger();
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenAnswer(invocation -> {
+            problemFinds.incrementAndGet();
+            Query query = invocation.getArgument(0);
+            assertEquals(0, query.getFieldsObject().get("hiddenTestCases"));
+            return shuffled;
+        });
+
+        List<Problem> problems = new BundleAccessService(mongo).problemsForAccessibleBundle(user("u1"), "b1");
+
+        assertEquals(1, problemFinds.get());
+        assertEquals(ids, problems.stream().map(Problem::getId).toList());
+    }
+
+    @Test
     void adminStillSeesContestOnlyBundleProblems() {
         MongoTemplate mongo = mock(MongoTemplate.class);
         ProblemBundle bundle = activeBundle("b1", "PUBLIC");

@@ -248,12 +248,17 @@ public class BundleAccessService {
     }
 
     public List<Problem> problemsForAccessibleBundle(User user, String bundleId) {
-        ProblemBundle bundle = requireAccessibleBundle(user, bundleId);
+        ProblemBundle bundle = mongoTemplate.findById(bundleId, ProblemBundle.class);
+        if (bundle == null || !canAccess(user, bundle)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Bundle not found");
+        }
         List<String> ids = bundle.getProblemIds() == null ? List.of() : bundle.getProblemIds();
         if (ids.isEmpty()) {
             return List.of();
         }
-        List<Problem> found = mongoTemplate.find(Query.query(Criteria.where("_id").in(ids)), Problem.class);
+        Query query = Query.query(Criteria.where("_id").in(ids));
+        query.fields().exclude("hiddenTestCases");
+        List<Problem> found = mongoTemplate.find(query, Problem.class);
         Map<String, Problem> byId = found.stream().collect(Collectors.toMap(Problem::getId, p -> p, (a, b) -> a));
         List<Problem> ordered = new ArrayList<>();
         boolean admin = isAdmin(user);
@@ -287,7 +292,9 @@ public class BundleAccessService {
         if (allIds.isEmpty()) {
             return;
         }
-        List<Problem> found = mongoTemplate.find(Query.query(Criteria.where("_id").in(allIds)), Problem.class);
+        Query identity = Query.query(Criteria.where("_id").in(allIds));
+        identity.fields().include("availability");
+        List<Problem> found = mongoTemplate.find(identity, Problem.class);
         Set<String> publicIds = found.stream()
             .filter(ProblemAvailability::isPublic)
             .map(Problem::getId)
