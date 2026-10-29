@@ -14,12 +14,18 @@ import socket
 import subprocess
 import sys
 
+import swap_safety as safety
+
 SAFE_ENV = {
     "APP_CORS_ALLOWED_ORIGINS",
     "APP_FRONTEND_URL",
     "SPRING_PROFILES_ACTIVE",
     "SERVER_PORT",
     "MANAGEMENT_SERVER_PORT",
+    "WORKER_SERVER_PORT",
+    "WORKER_MANAGEMENT_SERVER_PORT",
+    "SUBMISSION_QUEUE_NAME",
+    "CONTEST_RUN_QUEUE_NAME",
 }
 REQUIRED_API_CORS = "https://coderzclub.site,https://coderzclub.coderzclub1.workers.dev"
 REQUIRED_FRONTEND = "https://coderzclub.site"
@@ -102,6 +108,10 @@ def container_record(name):
         "safeEnv": safe,
         "bindings": bindings,
         "publicBindings": public_bindings,
+        "readonlyRootfs": bool(data.get("HostConfig", {}).get("ReadonlyRootfs")),
+        "capDrop": data.get("HostConfig", {}).get("CapDrop") or [],
+        "securityOpt": data.get("HostConfig", {}).get("SecurityOpt") or [],
+        "stopTimeout": (data.get("HostConfig", {}).get("StopTimeout") or safety.DOCKER_STOP_SECONDS),
     }
 
 
@@ -154,12 +164,16 @@ def validate_report(report, role):
     profile = (container.get("safeEnv") or {}).get("SPRING_PROFILES_ACTIVE")
     if profile != role:
         errors.append(f"SPRING_PROFILES_ACTIVE is {profile}")
+    errors.extend(safety.binding_errors(role, container.get("bindings")))
+    safe = container.get("safeEnv") or {}
     if role == "api":
-        safe = container.get("safeEnv") or {}
         if safe.get("APP_CORS_ALLOWED_ORIGINS") != REQUIRED_API_CORS:
             errors.append("APP_CORS_ALLOWED_ORIGINS does not match the approved pair of origins")
         if safe.get("APP_FRONTEND_URL") != REQUIRED_FRONTEND:
             errors.append("APP_FRONTEND_URL is not https://coderzclub.site")
+    if role == "worker":
+        _, _, queue_errors = safety.queue_names(safe)
+        errors.extend(queue_errors)
     present = report.get("releaseImagePresent")
     if present and present != RELEASE_IMAGE_ID:
         errors.append("local release tag points at a different image id")

@@ -260,7 +260,8 @@ class BatchManagementValidationTest {
             .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/my/batches").header("Authorization", studentToken))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.batches.length()").value(0));
+            .andExpect(jsonPath("$.batches.length()").value(0))
+            .andExpect(jsonPath("$.enrolled.totalItems").value(0));
 
         mockMvc.perform(get("/api/admin/batches/" + batchB.getId()).header("Authorization", tokenB))
             .andExpect(status().isOk());
@@ -336,6 +337,97 @@ class BatchManagementValidationTest {
                 .append("filter", new Document("batchId", "missing").append("userId", "missing")))
             .append("verbosity", "queryPlanner"));
         assertTrue(explained.toJson().contains("IXSCAN"), explained.toJson());
+    }
+
+    @Test
+    void activeStudentSeesEnrolledBatchWithoutCoordinatorAccess() throws Exception {
+        User admin = saveUser("enroll-admin", "ADMIN");
+        User student = saveUser("enroll-student", "USER");
+        User outsider = saveUser("enroll-outsider", "USER");
+        User both = saveUser("enroll-both", "USER");
+        Batch batch = batchService.create("Batch 1", "Morning section", admin.getId());
+        Batch other = batchService.create("Other batch", "Hidden", admin.getId());
+        BatchMember membership = new BatchMember();
+        membership.setBatchId(batch.getId());
+        membership.setUserId(student.getId());
+        mongoTemplate.save(membership);
+        BatchMember bothMembership = new BatchMember();
+        bothMembership.setBatchId(batch.getId());
+        bothMembership.setUserId(both.getId());
+        mongoTemplate.save(bothMembership);
+        coordinators.grant(batch.getId(), both.getId(), "North Institute", admin.getId());
+        Problem problem = new Problem();
+        problem.setTitle("Two Sum");
+        problem.setNumericId(42);
+        problem.setDifficulty("EASY");
+        problem = mongoTemplate.save(problem);
+        batchService.addAssignments(batch.getId(), List.of(problem.getId()));
+        String studentToken = token(student);
+        String outsiderToken = token(outsider);
+        String bothToken = token(both);
+        String adminToken = token(admin);
+
+        mockMvc.perform(get("/api/my/batches").header("Authorization", studentToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.batches.length()").value(0))
+            .andExpect(jsonPath("$.enrolled.totalItems").value(1))
+            .andExpect(jsonPath("$.enrolled.items[0].batchId").value(batch.getId()))
+            .andExpect(jsonPath("$.enrolled.items[0].name").value("Batch 1"))
+            .andExpect(jsonPath("$.enrolled.items[0].active").value(true))
+            .andExpect(jsonPath("$.enrolled.items[0].assignmentCount").value(1))
+            .andExpect(jsonPath("$.enrolled.items[0].problems[0].title").value("Two Sum"))
+            .andExpect(jsonPath("$.enrolled.items[0].problems[0].numericId").value(42))
+            .andExpect(jsonPath("$.enrolled.items[0].members").doesNotExist());
+
+        mockMvc.perform(get("/api/my/batches/" + batch.getId() + "/practice").header("Authorization", studentToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.name").value("Batch 1"))
+            .andExpect(jsonPath("$.problems[0].problemId").value(problem.getId()))
+            .andExpect(jsonPath("$.problems[0].hiddenTestCases").doesNotExist())
+            .andExpect(jsonPath("$.students").doesNotExist());
+        mockMvc.perform(get("/api/my/batches/" + other.getId() + "/practice").header("Authorization", studentToken))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/admin/batches/" + batch.getId()).header("Authorization", studentToken))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/admin/batches").header("Authorization", studentToken))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/my/batches").header("Authorization", outsiderToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.batches.length()").value(0))
+            .andExpect(jsonPath("$.enrolled.items.length()").value(0));
+        mockMvc.perform(get("/api/my/batches/" + batch.getId() + "/practice").header("Authorization", outsiderToken))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/my/batches").header("Authorization", bothToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.batches.length()").value(1))
+            .andExpect(jsonPath("$.batches[0].batchId").value(batch.getId()))
+            .andExpect(jsonPath("$.enrolled.items.length()").value(1))
+            .andExpect(jsonPath("$.enrolled.items[0].batchId").value(batch.getId()));
+        mockMvc.perform(get("/api/admin/batches/" + batch.getId()).header("Authorization", bothToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.viewerRole").value("COORDINATOR"));
+        mockMvc.perform(get("/api/admin/batches/" + other.getId()).header("Authorization", bothToken))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/admin/batches").header("Authorization", adminToken))
+            .andExpect(status().isOk());
+
+        student.setAccountStatus("INACTIVE");
+        mongoTemplate.save(student);
+        mockMvc.perform(get("/api/my/batches").header("Authorization", studentToken))
+            .andExpect(status().isForbidden());
+
+        User unverified = saveUser("enroll-unverified", "USER");
+        unverified.setEmailVerified(false);
+        mongoTemplate.save(unverified);
+        BatchMember unverifiedMembership = new BatchMember();
+        unverifiedMembership.setBatchId(batch.getId());
+        unverifiedMembership.setUserId(unverified.getId());
+        mongoTemplate.save(unverifiedMembership);
+        mockMvc.perform(get("/api/my/batches").header("Authorization", token(unverified)))
+            .andExpect(status().isForbidden());
     }
 
     private User saveUser(String username, String role) {

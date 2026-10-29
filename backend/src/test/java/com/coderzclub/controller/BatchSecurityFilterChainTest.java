@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -111,9 +112,29 @@ class BatchSecurityFilterChainTest {
         coord.setUsername("coord");
         when(batchAccessService.requireUser(any())).thenReturn(coord);
         when(batchCoordinatorService.listForUser("coord-id")).thenReturn(List.of());
+        when(batchService.listEnrolledForUser(eq("coord-id"), eq(0), eq(20))).thenReturn(Map.of(
+            "items", List.of(),
+            "currentPage", 0,
+            "totalPages", 0,
+            "totalItems", 0
+        ));
         mockMvc.perform(get("/api/my/batches").with(user("coord").roles("USER")))
             .andExpect(status().isOk());
         verify(batchCoordinatorService).listForUser("coord-id");
+        verify(batchService).listEnrolledForUser("coord-id", 0, 20);
+    }
+
+    @Test
+    void signedInMemberCanRequestTheirPracticePage() throws Exception {
+        User student = new User();
+        student.setId("student-id");
+        student.setUsername("student");
+        when(batchAccessService.requireUser(any())).thenReturn(student);
+        when(batchService.enrolledPractice(eq("student-id"), eq("batch-a"), eq(0), eq(20)))
+            .thenReturn(Map.of("batchId", "batch-a"));
+        mockMvc.perform(get("/api/my/batches/batch-a/practice").with(user("student").roles("USER")))
+            .andExpect(status().isOk());
+        verify(batchService).enrolledPractice("student-id", "batch-a", 0, 20);
     }
 
     @Test
@@ -126,6 +147,8 @@ class BatchSecurityFilterChainTest {
                 }
             });
         verify(batchCoordinatorService, never()).listForUser(any());
+        verify(batchService, never()).listEnrolledForUser(any(), anyInt(), anyInt());
+        verify(batchService, never()).enrolledPractice(any(), any(), anyInt(), anyInt());
     }
 
     @Test

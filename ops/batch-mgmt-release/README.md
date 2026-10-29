@@ -71,17 +71,33 @@ The check script runs first. It creates indexes only when `batch_coordinators` o
 
 ## Swap one container
 
-Re-run inspect immediately before the swap. Then, on that VM only:
+Re-run inspect immediately before any swap so the file includes `readonlyRootfs`, `capDrop`, `securityOpt`, and `stopTimeout`. Do not reuse an inspect file from before that change.
+
+Dry-run is read-only and must not be combined with `CONFIRM_DEPLOY`:
 
 ```bash
+export DRY_RUN=yes
+export EXPECTED_HOSTNAME=coderzclub-worker-1
+export RELEASE_ROLE=worker
+export CONTAINER_NAME=coderzclub-worker
+export INSPECT_FILE=/root/batch-mgmt-worker-inspect.json
+python3 ops/batch-mgmt-release/swap_container.py
+```
+
+A successful dry-run prints `mutation=none`. The worker plan expects `10.20.0.7:8082` and `10.20.0.7:8083`, stops the old container for 30 seconds before the new one starts, and does not treat `/api/problems/test` as worker readiness.
+
+A real swap, only after that dry-run is approved:
+
+```bash
+unset DRY_RUN
 export CONFIRM_DEPLOY=batch-mgmt-20261017
 export INSPECT_FILE=/root/batch-mgmt-api-inspect.json
 python3 ops/batch-mgmt-release/swap_container.py
 ```
 
-The swap stops if the live container id, image id, ports, mounts, environment hash, or CORS values differ from the inspect file. It renames the current container to `<name>-before-batch-mgmt`, starts the release image with the same private bindings and environment, and keeps the old container. If readiness does not pass within 120 seconds, it removes the new container and starts the old one under the original name.
+The swap stops if the live container id, image id, ports, mounts, environment hash, runtime security settings, or CORS values differ from the inspect file. It renames the current container to `<name>-before-batch-mgmt`, stops it, and starts the release image with the same private bindings, user, read-only root, capability drops, security options, and environment. Historical `coderzclub-api-before-*` containers are never removed. If readiness does not pass within 120 seconds, it removes only the new container and starts the old one under the original name.
 
-API readiness is `http://<private-bind>/api/problems/test` plus `/actuator/health/readiness`. The worker gate is readiness on the management binding recorded from the live container.
+API readiness is HTTP 200 on `http://10.20.0.4:8080/api/problems/test` and top-level `"status":"UP"` on `http://10.20.0.4:8081/actuator/health/readiness`. Worker readiness is top-level `"status":"UP"` on `http://10.20.0.7:8083/actuator/health/readiness` plus log lines `Started on queue 'coderzclub.submissions'` and `Started on queue 'coderzclub.contest-runs'`. A dead-letter queue name does not satisfy the submission consumer. Do not run this against production until the dry-run output has been reviewed.
 
 Leave the named tunnel on `http://10.20.0.4:8080`. Do not change RabbitMQ, Redis, Atlas, or Judge0 settings.
 

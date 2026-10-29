@@ -483,6 +483,107 @@ public class BatchService {
         return pageResponse("users", users, safePage, safeSize, total);
     }
 
+    public static final int ENROLLED_PROBLEM_PREVIEW = 5;
+
+    /**
+     * Batches the user belongs to as a student. One membership page, then one batch
+     * query, one assignment query, and one problem query. Coordinator reports and
+     * other students are not included.
+     */
+    public Map<String, Object> listEnrolledForUser(String userId, int page, int size) {
+        int safeSize = boundSize(size);
+        int safePage = Math.max(0, page);
+        if (userId == null || userId.isBlank()) {
+            return pageResponse("items", List.of(), safePage, safeSize, 0);
+        }
+        long total = mongoTemplate.count(Query.query(Criteria.where("userId").is(userId)), BatchMember.class);
+        Query membershipQuery = Query.query(Criteria.where("userId").is(userId))
+            .with(Sort.by(Sort.Direction.DESC, "addedAt"))
+            .skip((long) safePage * safeSize)
+            .limit(safeSize);
+        List<BatchMember> memberships = mongoTemplate.find(membershipQuery, BatchMember.class);
+        if (memberships.isEmpty()) {
+            return pageResponse("items", List.of(), safePage, safeSize, total);
+        }
+        List<String> batchIds = memberships.stream().map(BatchMember::getBatchId).distinct().toList();
+        Map<String, Batch> batches = new HashMap<>();
+        for (Batch batch : mongoTemplate.find(Query.query(Criteria.where("_id").in(batchIds)), Batch.class)) {
+            batches.put(batch.getId(), batch);
+        }
+        Query assignmentQuery = Query.query(Criteria.where("batchId").in(batchIds))
+            .with(Sort.by(Sort.Direction.ASC, "assignedAt"));
+        assignmentQuery.fields().include("batchId").include("problemId").include("assignedAt");
+        Map<String, List<BatchAssignment>> assignmentsByBatch = new HashMap<>();
+        for (BatchAssignment assignment : mongoTemplate.find(assignmentQuery, BatchAssignment.class)) {
+            assignmentsByBatch.computeIfAbsent(assignment.getBatchId(), ignored -> new ArrayList<>()).add(assignment);
+        }
+        List<String> previewIds = new ArrayList<>();
+        for (BatchMember membership : memberships) {
+            List<BatchAssignment> assigned = assignmentsByBatch.getOrDefault(membership.getBatchId(), List.of());
+            int preview = Math.min(ENROLLED_PROBLEM_PREVIEW, assigned.size());
+            for (int i = 0; i < preview; i++) {
+                previewIds.add(assigned.get(i).getProblemId());
+            }
+        }
+        Map<String, Problem> problems = loadPracticeProblems(previewIds);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (BatchMember membership : memberships) {
+            Batch batch = batches.get(membership.getBatchId());
+            if (batch == null) {
+                continue;
+            }
+            List<BatchAssignment> assigned = assignmentsByBatch.getOrDefault(batch.getId(), List.of());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("batchId", batch.getId());
+            item.put("name", batch.getName());
+            item.put("description", batch.getDescription());
+            item.put("active", batch.isActive());
+            item.put("memberSince", membership.getAddedAt());
+            item.put("assignmentCount", assigned.size());
+            item.put("problems", practiceRows(assigned, problems, ENROLLED_PROBLEM_PREVIEW));
+            items.add(item);
+        }
+        return pageResponse("items", items, safePage, safeSize, total);
+    }
+
+    /**
+     * Practice problems for one batch the caller belongs to. Missing membership is
+     * a 404 so unrelated batch ids are not distinguishable from unknown ids.
+     */
+    public Map<String, Object> enrolledPractice(String userId, String batchId, int page, int size) {
+        if (userId == null || userId.isBlank() || batchId == null || batchId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found");
+        }
+        BatchMember membership = mongoTemplate.findOne(
+            Query.query(Criteria.where("batchId").is(batchId).and("userId").is(userId)),
+            BatchMember.class);
+        if (membership == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found");
+        }
+        Batch batch = mongoTemplate.findById(batchId, Batch.class);
+        if (batch == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found");
+        }
+        int safeSize = boundSize(size);
+        int safePage = Math.max(0, page);
+        long total = mongoTemplate.count(Query.query(Criteria.where("batchId").is(batchId)), BatchAssignment.class);
+        Query assignmentQuery = Query.query(Criteria.where("batchId").is(batchId))
+            .with(Sort.by(Sort.Direction.ASC, "assignedAt"))
+            .skip((long) safePage * safeSize)
+            .limit(safeSize);
+        assignmentQuery.fields().include("problemId").include("assignedAt");
+        List<BatchAssignment> assignments = mongoTemplate.find(assignmentQuery, BatchAssignment.class);
+        List<String> problemIds = assignments.stream().map(BatchAssignment::getProblemId).toList();
+        Map<String, Problem> problems = loadPracticeProblems(problemIds);
+        Map<String, Object> response = pageResponse("problems", practiceRows(assignments, problems, assignments.size()), safePage, safeSize, total);
+        response.put("batchId", batch.getId());
+        response.put("name", batch.getName());
+        response.put("description", batch.getDescription());
+        response.put("active", batch.isActive());
+        response.put("memberSince", membership.getAddedAt());
+        return response;
+    }
+
     public static int boundSize(int size) {
         if (size <= 0) {
             return 20;
@@ -666,6 +767,35 @@ public class BatchService {
             map.put(problem.getId(), problem);
         }
         return map;
+    }
+
+    private Map<String, Problem> loadPracticeProblems(List<String> ids) {
+        Map<String, Problem> map = new HashMap<>();
+        if (ids.isEmpty()) {
+            return map;
+        }
+        Query query = Query.query(Criteria.where("_id").in(ids));
+        query.fields().include("title").include("numericId").include("difficulty");
+        for (Problem problem : mongoTemplate.find(query, Problem.class)) {
+            map.put(problem.getId(), problem);
+        }
+        return map;
+    }
+
+    private static List<Map<String, Object>> practiceRows(List<BatchAssignment> assignments, Map<String, Problem> problems, int limit) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        int count = Math.min(limit, assignments.size());
+        for (int i = 0; i < count; i++) {
+            BatchAssignment assignment = assignments.get(i);
+            Problem problem = problems.get(assignment.getProblemId());
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("problemId", assignment.getProblemId());
+            row.put("numericId", problem == null ? null : problem.getNumericId());
+            row.put("title", problem == null ? null : problem.getTitle());
+            row.put("difficulty", problem == null ? null : problem.getDifficulty());
+            rows.add(row);
+        }
+        return rows;
     }
 
     private Map<String, Long> counts(String collection, List<String> batchIds) {
