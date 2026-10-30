@@ -245,7 +245,11 @@ export const api = {
 
   // Submission Jobs (async)
   submissionJobs: {
-    create: (job) => apiClient.post('/api/submission-jobs', job),
+    create: (job, operationId) => apiClient.post(
+      "/api/submission-jobs",
+      job,
+      operationId ? { headers: { "Idempotency-Key": operationId } } : undefined
+    ),
     getStatus: (jobId, config) => apiClient.get(`/api/submission-jobs/${jobId}`, config),
     createEventTicket: (jobId) => apiClient.post(`/api/submission-jobs/${jobId}/events/ticket`, {}),
     getMyJobs: (params) => apiClient.get('/api/submission-jobs/my-jobs', { params }),
@@ -290,9 +294,10 @@ export const api = {
       `/api/contests/${contestId}/leaderboard`,
       { params }
     ),
-    submit: (contestId, problemId, payload) => apiClient.post(
+    submit: (contestId, problemId, payload, operationId) => apiClient.post(
       `/api/contests/${contestId}/problems/${problemId}/submission-jobs`,
-      payload
+      payload,
+      operationId ? { headers: { "Idempotency-Key": operationId } } : undefined
     ),
     run: (contestId, problemId, payload) => apiClient.post(
       `/api/contests/${contestId}/problems/${problemId}/runs`,

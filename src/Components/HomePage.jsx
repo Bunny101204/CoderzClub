@@ -4,6 +4,7 @@ import { api } from "../apiClient";
 import { useAuth } from "../context/AuthContext";
 import { useProblemStatus } from "../hooks/useProblemStatus";
 import ProblemStatusMark from "./ProblemStatusMark";
+import { catalogStatus, filtersAreActive } from "../catalog/problemCatalog.js";
 
 const HomePage = ({ problems: propsProblems }) => {
   const { user } = useAuth();
@@ -17,6 +18,7 @@ const HomePage = ({ problems: propsProblems }) => {
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // Use optimized custom hook for problem status (batches requests, prevents N+1 queries)
@@ -64,6 +66,7 @@ const HomePage = ({ problems: propsProblems }) => {
 
   const fetchProblems = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const params = {
         page: currentPage,
@@ -167,6 +170,7 @@ const HomePage = ({ problems: propsProblems }) => {
       }
       
       setProblems(problemsArray);
+      setLoadError(null);
     } catch (error) {
       console.error('Error fetching problems:', error);
       // Fallback to props if available
@@ -194,19 +198,37 @@ const HomePage = ({ problems: propsProblems }) => {
         setProblems([]);
         setTotalPages(0);
         setTotalItems(0);
+        const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+        setLoadError(offline ? "offline" : "error");
       }
     } finally {
       setLoading(false);
     }
   };
 
+  const activeFilters = filtersAreActive({ search, difficulty, topic });
+  const listStatus = catalogStatus({
+    loading,
+    error: loadError,
+    offline: loadError === "offline",
+    count: problems.length,
+    filtersActive: activeFilters,
+  });
+  const clearFilters = () => {
+    setSearch("");
+    setDifficulty("");
+    setTopic("");
+    setCurrentPage(0);
+  };
+
   return (
-    <div className="app-shell p-8">
+    <div className="app-shell px-4 py-6 sm:p-8 pb-24">
       <div className="max-w-3xl mx-auto">
         <h1 className="text-3xl font-bold mb-6">Problem List</h1>
         <div className="flex flex-col lg:flex-row gap-4 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <select
+              aria-label="Difficulty"
               value={difficulty}
               onChange={(e) => {
                 setDifficulty(e.target.value);
@@ -220,6 +242,7 @@ const HomePage = ({ problems: propsProblems }) => {
               <option value="HARD">Hard</option>
             </select>
             <select
+              aria-label="Topic"
               value={topic}
               onChange={(e) => {
                 setTopic(e.target.value);
@@ -244,6 +267,7 @@ const HomePage = ({ problems: propsProblems }) => {
             <div className="flex items-center">
               <label className="text-sm app-muted mr-2">Items:</label>
               <select
+                aria-label="Items per page"
                 value={itemsPerPage}
                 onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(0); }}
                 className="px-3 py-2 app-input rounded focus:outline-none"
@@ -263,9 +287,52 @@ const HomePage = ({ problems: propsProblems }) => {
               setSearch(e.target.value);
               setCurrentPage(0);
             }}
-            className="flex-1 p-3 rounded app-input focus:outline-none"
+            className="flex-1 min-w-0 p-3 rounded app-input focus:outline-none"
+            aria-label="Search by ID or title prefix"
           />
         </div>
+        {activeFilters && (
+          <div className="mb-4">
+            <button type="button" onClick={clearFilters} className="px-3 py-2 rounded bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white">
+              Clear filters
+            </button>
+          </div>
+        )}
+        {listStatus.kind !== "ready" && (
+          <div className="mb-4 app-surface rounded-lg p-4" role="status">
+            <p>{listStatus.text}</p>
+            {(listStatus.kind === "error" || listStatus.kind === "offline") && (
+              <button type="button" onClick={fetchProblems} className="mt-3 px-3 py-2 rounded bg-blue-600 text-white">
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+        <div className="md:hidden space-y-3">
+          {listStatus.kind === "ready" && problems.map((problem) => {
+            const status = problemStatus[String(problem.id)] || problemStatus[String(problem.numericId)] || "UNSOLVED";
+            const displayId = problem.numericId != null ? problem.numericId : problem.id;
+            return (
+              <button
+                key={problem.id}
+                type="button"
+                onClick={() => navigate(`/problem/${problem.id}`)}
+                className="w-full text-left app-surface rounded-lg p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm app-muted">#{displayId}</p>
+                    <p className="font-semibold break-words">{problem.title}</p>
+                  </div>
+                  {getStatusIcon(status)}
+                </div>
+                <p className="mt-2 text-sm">{problem.difficulty || "N/A"}</p>
+                <p className="mt-1 text-sm app-muted break-words">{(problem.tags || []).join(", ") || "No tags"}</p>
+              </button>
+            );
+          })}
+        </div>
+        <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left app-surface rounded-lg shadow">
           <thead>
             <tr>
@@ -277,15 +344,7 @@ const HomePage = ({ problems: propsProblems }) => {
             </tr>
           </thead>
           <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5} className="app-muted text-center py-4">Loading...</td>
-              </tr>
-            ) : problems.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="app-muted text-center py-4">No problems found.</td>
-              </tr>
-            ) : (
+            {listStatus.kind === "ready" ? (
               problems.map((problem) => {
                 const status = problemStatus[String(problem.id)] || problemStatus[String(problem.numericId)] || 'UNSOLVED';
                 const displayId = problem.numericId != null ? problem.numericId : problem.id;
@@ -311,9 +370,10 @@ const HomePage = ({ problems: propsProblems }) => {
                   </tr>
                 );
               })
-            )}
+            ) : null}
           </tbody>
         </table>
+        </div>
         {/* Pagination Controls */}
         {totalPages > 1 && (
           <div className="flex justify-center items-center mt-6 space-x-2">

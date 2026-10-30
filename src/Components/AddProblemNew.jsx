@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch } from "../apiClient";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 import { useNavigate, useParams } from "react-router-dom";
 import { selectableExecutionModes, helpForExecutionMode } from "./executionModes";
 import TestcaseFileImport from "./TestcaseFileImport";
@@ -8,6 +9,7 @@ const AddProblemNew = () => {
   const navigate = useNavigate();
   const { id: editId } = useParams();
   const isEdit = Boolean(editId);
+  const formGate = useMutationGate();
   
   // Basic problem details
   const [title, setTitle] = useState("");
@@ -136,6 +138,7 @@ const AddProblemNew = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    await runExclusive(formGate, async () => {
     setError("");
     setSuccess("");
     setLoading(true);
@@ -265,6 +268,7 @@ const AddProblemNew = () => {
     } finally {
       setLoading(false);
     }
+    });
   };
 
   return (

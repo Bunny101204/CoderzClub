@@ -148,6 +148,7 @@ export function createDraftSession({
       expectedRevision: current.record.baseRevision || 0,
     };
     const key = dedupeKey(snapshot);
+    // The map is updated before any await, so a second sync joins the request already running.
     if (inflight.has(key)) return inflight.get(key);
     if (recentlyStarted(key)) return { skipped: true, reason: "deduped" };
     const run = performSync(snapshot, keepalive, key);

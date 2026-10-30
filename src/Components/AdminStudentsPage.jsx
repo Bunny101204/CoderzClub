@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../apiClient";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 
 function authHeaders(json = false) {
   const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
@@ -18,6 +19,7 @@ export default function AdminStudentsPage() {
   const [form, setForm] = useState({ bio: "", location: "", website: "" });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const studentGate = useMutationGate();
   const [loading, setLoading] = useState(false);
 
   const searchStudents = async (nextPage = 0, query = search) => {
@@ -50,6 +52,7 @@ export default function AdminStudentsPage() {
 
   const saveProfile = async (event) => {
     event.preventDefault();
+    await runExclusive(studentGate, async () => {
     if (!profile) return;
     setError("");
     const response = await apiFetch(`/api/admin/students/${profile.id}`, {
@@ -64,9 +67,11 @@ export default function AdminStudentsPage() {
     }
     setProfile(data);
     setNotice("Student profile saved.");
+    });
   };
 
   const setActive = async (active) => {
+    await runExclusive(studentGate, async () => {
     if (!profile) return;
     const verb = active ? "activate" : "deactivate";
     if (!window.confirm(`${active ? "Activate" : "Deactivate"} ${profile.username}? Historical submissions stay intact.`)) return;
@@ -82,6 +87,7 @@ export default function AdminStudentsPage() {
     }
     setProfile(data);
     setNotice(active ? "Account activated." : "Account deactivated. Existing sessions can no longer be used.");
+    });
   };
 
   return (

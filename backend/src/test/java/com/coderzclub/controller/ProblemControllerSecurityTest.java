@@ -204,4 +204,12 @@ class ProblemControllerSecurityTest {
         org.junit.jupiter.api.Assertions.assertEquals(3, cursorQuery.getLimit());
         org.junit.jupiter.api.Assertions.assertTrue(cursorQuery.getQueryObject().containsKey("$or"));
     }
+
+    @Test
+    @WithMockUser(roles = "USER")
+    void unknownApiRouteReturns404() throws Exception {
+        mockMvc.perform(get("/api/does-not-exist-audit"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").value("Not found"));
+    }
 }

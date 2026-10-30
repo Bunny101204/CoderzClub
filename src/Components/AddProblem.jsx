@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, apiFetch } from "../apiClient";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 
 const PARAMETER_TYPES = [
   "int", "int[]", "long", "long[]", "float", "float[]", "double", "double[]", "String", "String[]", "boolean", "boolean[]", "List<Integer>", "List<String>", "ListNode", "TreeNode", "Graph", "Custom Object"
@@ -17,6 +18,7 @@ const AddProblem = () => {
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const formGate = useMutationGate();
   const [parameters, setParameters] = useState([{ name: "", type: "int" }]);
   const [returnType, setReturnType] = useState("int");
   const [functionName, setFunctionName] = useState("");
@@ -91,6 +93,7 @@ const AddProblem = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    await runExclusive(formGate, async () => {
     setError("");
     setSuccess("");
     setLoading(true);
@@ -168,6 +171,7 @@ const AddProblem = () => {
     } finally {
       setLoading(false);
     }
+    });
   };
 
   return (

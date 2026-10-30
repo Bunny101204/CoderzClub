@@ -3,9 +3,11 @@ import { apiFetch } from "../apiClient";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { indexFromProgressEntries, getBundleProgress } from "./bundleProgress";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 
 const BundleDashboard = () => {
   const { user } = useAuth();
+  const bundleGate = useMutationGate();
   const [bundles, setBundles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDifficulty, setSelectedDifficulty] = useState("ALL");
@@ -117,6 +119,7 @@ const BundleDashboard = () => {
 
 
   const handleToggleBundleStatus = async (bundleId, currentStatus) => {
+    await runExclusive(bundleGate, async () => {
     try {
       const token = localStorage.getItem('jwtToken');
       const headers = {
@@ -157,9 +160,11 @@ const BundleDashboard = () => {
       console.error("Error toggling bundle status:", error);
       alert("Error updating bundle status");
     }
+    });
   };
 
   const handleDeleteBundle = async (bundleId) => {
+    await runExclusive(bundleGate, async () => {
     if (!window.confirm("Are you sure you want to delete this bundle?")) return;
     try {
       // Get JWT token for authentication
@@ -184,6 +189,7 @@ const BundleDashboard = () => {
       console.error("Error deleting bundle:", error);
       alert("Error deleting bundle");
     }
+    });
   };
 
   if (loading) {

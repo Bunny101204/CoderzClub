@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api, apiErrorMessage } from '../apiClient';
+import { runExclusive, useMutationGate } from '../actions/mutationGate.js';
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -18,6 +19,7 @@ const AuthPage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const confirmingToken = useRef("");
+  const authGate = useMutationGate();
 
   useEffect(() => {
     const verified = searchParams.get('verified');
@@ -63,6 +65,7 @@ const AuthPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    await runExclusive(authGate, async () => {
     setError('');
     setInfo('');
     setLoading(true);
@@ -112,6 +115,7 @@ const AuthPage = () => {
     } finally {
       setLoading(false);
     }
+    });
   };
 
   const toggleMode = () => {
@@ -214,6 +218,7 @@ const AuthPage = () => {
               <button
                 type="button"
                 onClick={async () => {
+                  await runExclusive(authGate, async () => {
                   setError('');
                   setInfo('');
                   setLoading(true);
@@ -230,6 +235,7 @@ const AuthPage = () => {
                   } finally {
                     setLoading(false);
                   }
+                  });
                 }}
                 disabled={loading}
                 className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg border border-blue-400 text-blue-200 hover:bg-blue-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -242,6 +248,7 @@ const AuthPage = () => {
           <button
             type="submit"
             disabled={loading}
+            aria-busy={loading}
             className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (

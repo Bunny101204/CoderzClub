@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 
 const SubscriptionPlans = () => {
   const { user } = useAuth();
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [loading, setLoading] = useState(false);
+  const planGate = useMutationGate();
 
   const plans = [
     {
@@ -97,9 +99,9 @@ const SubscriptionPlans = () => {
 
   const handlePlanSelection = async (plan) => {
     if (plan.id === "free" || plan.id === user?.subscriptionPlan) {
-      return; // Can't select current plan or free plan
+      return;
     }
-
+    await runExclusive(planGate, async () => {
     setSelectedPlan(plan);
     setLoading(true);
 
@@ -117,6 +119,7 @@ const SubscriptionPlans = () => {
     } finally {
       setLoading(false);
     }
+    });
   };
 
   const getCurrentPlan = () => {

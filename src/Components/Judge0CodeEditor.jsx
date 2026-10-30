@@ -19,6 +19,14 @@ import { CopyIcon } from "../icons/AppIcons.jsx";
 import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.js";
 import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
 import { api, apiUrl } from "../apiClient";
+import { createMutationGate, isUncertainOutcome } from "../actions/mutationGate.js";
+import {
+  adoptServerAttempt,
+  attachAcceptedJob,
+  claimAttempt,
+  readAttempt,
+  settleAttempt,
+} from "../actions/submissionAttempt.js";
 import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } from "../contests/contestRunPolling";
 import { useAuth } from "../context/AuthContext";
 import { readInitialDraftCode } from "../drafts/codeDraft";
@@ -125,6 +133,10 @@ const Judge0CodeEditor = ({
   const contestRunGenerationRef = useRef(0);
   const contestRunControllerRef = useRef(null);
   const activeRunIdRef = useRef(null);
+  const runGateRef = useRef(null);
+  const submitGateRef = useRef(null);
+  if (runGateRef.current == null) runGateRef.current = createMutationGate();
+  if (submitGateRef.current == null) submitGateRef.current = createMutationGate();
   const contestMode = Boolean(contestId);
   const contestLive = contestMode && contestStatus === "LIVE";
   const runLocked = contestMode ? !contestLive : executionLocked;
@@ -552,6 +564,11 @@ const Judge0CodeEditor = ({
       setOutput("No public tests available for this contest problem.");
       return;
     }
+    const attempt = runGateRef.current.tryBegin();
+    if (!attempt) {
+      setOutput("Run already in progress.");
+      return;
+    }
     cancelContestRunPolling();
     const generation = contestRunGenerationRef.current;
     const controller = new AbortController();
@@ -597,6 +614,7 @@ const Judge0CodeEditor = ({
       }
       setResults([]);
     } finally {
+      attempt.finish();
       if (generation === contestRunGenerationRef.current) {
         setIsLoading(false);
       }
@@ -614,6 +632,11 @@ const Judge0CodeEditor = ({
     if (!testCases || testCases.length === 0) {
       console.warn("No test cases available!");
       setOutput("No test cases available for this problem.");
+      return;
+    }
+    const attempt = runGateRef.current.tryBegin();
+    if (!attempt) {
+      setOutput("Run already in progress.");
       return;
     }
     
@@ -682,6 +705,7 @@ const Judge0CodeEditor = ({
       }
       setResults([]); // Clear results on error
     } finally {
+      attempt.finish();
       setIsLoading(false);
     }
   };
@@ -692,6 +716,11 @@ const Judge0CodeEditor = ({
   // Old single-run handler for normal editor
   const handleSingleRun = async () => {
     if (customRunLocked) {
+      return;
+    }
+    const attempt = runGateRef.current.tryBegin();
+    if (!attempt) {
+      setOutput("Run already in progress.");
       return;
     }
     setIsLoading(true);
@@ -765,6 +794,7 @@ const Judge0CodeEditor = ({
         details: 'Please check your code and try again'
       });
     } finally {
+      attempt.finish();
       setIsLoading(false);
     }
   };
@@ -777,68 +807,80 @@ const Judge0CodeEditor = ({
     if (submitLocked) {
       return;
     }
-    cancelContestRunPolling();
-    const submissionGeneration = ++submissionGenerationRef.current;
-    pollingControllerRef.current?.abort();
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
-    pollingControllerRef.current = null;
-    activeJobIdRef.current = null;
-    // Check submission limits before submitting
-    try {
-      const limitsResponse = await api.submissions.getLimits(problemId);
-      const limits = limitsResponse.data;
-
-      if (!limits.canSubmitNow) {
-        const cooldown = limits.cooldownSeconds || 0;
-        setOutput(`Please wait ${cooldown} seconds before submitting again.`);
-        setErrorDetails({
-          type: 'Rate Limit',
-          message: `You must wait ${cooldown} seconds between submissions.`,
-          details: 'This helps prevent abuse and ensures fair usage.'
-        });
-        return;
-      }
-
-      if (limits.hasExceededDailyLimit) {
-        setOutput(`Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
-        setErrorDetails({
-          type: 'Daily Limit Exceeded',
-          message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
-          details: `Remaining submissions: ${limits.remainingDaily}`
-        });
-        return;
-      }
-
-      if (limits.hasExceededProblemLimit) {
-        setOutput(`Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
-        setErrorDetails({
-          type: 'Problem Limit Exceeded',
-          message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
-          details: `Remaining submissions: ${limits.remainingProblem}`
-        });
-        return;
-      }
-    } catch (error) {
-      console.warn("Could not check submission limits:", error);
-      // Continue with submission if limit check fails (don't block user)
+    const attempt = submitGateRef.current.tryBegin();
+    if (!attempt) {
+      setOutput("Submission already in progress.");
+      return;
     }
-
-    if (submissionGeneration !== submissionGenerationRef.current) return;
-
+    const storage = window.localStorage;
+    const claimed = claimAttempt({ storage, problemId, contestId });
+    let accepted = false;
     setIsLoading(true);
-    setSubmitResult(null);
-    setShowAccepted(false);
-    setResults([]); // Clear previous run results when submitting
-    setOutput(""); // Clear output when submitting
-    setExecutionTime(null);
-    setExecutionMemory(null);
-    setErrorDetails(null);
-
     try {
-      // Create async submission job - only send identifiers and code
+      if (claimed.resume && claimed.jobId) {
+        activeJobIdRef.current = claimed.jobId;
+        setOutput("Checking a submission that was already accepted.");
+        accepted = true;
+        await subscribeToJobEvents(claimed.jobId);
+        return;
+      }
+      cancelContestRunPolling();
+      const submissionGeneration = ++submissionGenerationRef.current;
+      pollingControllerRef.current?.abort();
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
+      pollingControllerRef.current = null;
+      activeJobIdRef.current = null;
+      try {
+        const limitsResponse = await api.submissions.getLimits(problemId);
+        const limits = limitsResponse.data;
 
-      // Create async submission job
+        if (!limits.canSubmitNow) {
+          const cooldown = limits.cooldownSeconds || 0;
+          settleAttempt(storage, claimed.operationId, problemId, contestId);
+          setOutput(`Please wait ${cooldown} seconds before submitting again.`);
+          setErrorDetails({
+            type: 'Rate Limit',
+            message: `You must wait ${cooldown} seconds between submissions.`,
+            details: 'This helps prevent abuse and ensures fair usage.'
+          });
+          return;
+        }
+
+        if (limits.hasExceededDailyLimit) {
+          settleAttempt(storage, claimed.operationId, problemId, contestId);
+          setOutput(`Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
+          setErrorDetails({
+            type: 'Daily Limit Exceeded',
+            message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
+            details: `Remaining submissions: ${limits.remainingDaily}`
+          });
+          return;
+        }
+
+        if (limits.hasExceededProblemLimit) {
+          settleAttempt(storage, claimed.operationId, problemId, contestId);
+          setOutput(`Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
+          setErrorDetails({
+            type: 'Problem Limit Exceeded',
+            message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
+            details: `Remaining submissions: ${limits.remainingProblem}`
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn("Could not check submission limits:", error);
+      }
+
+      if (submissionGeneration !== submissionGenerationRef.current) return;
+
+      setSubmitResult(null);
+      setShowAccepted(false);
+      setResults([]);
+      setOutput("Submitting...");
+      setExecutionTime(null);
+      setExecutionMemory(null);
+      setErrorDetails(null);
 
       const executionPayload = {
         code: sourceCode,
@@ -848,18 +890,56 @@ const Judge0CodeEditor = ({
       };
 
       const jobResponse = contestId
-        ? await api.contests.submit(contestId, problemId, executionPayload)
-        : await api.submissionJobs.create({ problemId, ...executionPayload });
+        ? await api.contests.submit(contestId, problemId, executionPayload, claimed.operationId)
+        : await api.submissionJobs.create({ problemId, ...executionPayload }, claimed.operationId);
       if (submissionGeneration !== submissionGenerationRef.current) return;
-      const { jobId } = jobResponse.data;
+      const jobId = jobResponse.data?.jobId;
+      if (!jobId) {
+        setOutput("The submission outcome is uncertain. Retry checks the same attempt and does not start a new one.");
+        return;
+      }
+      attachAcceptedJob(storage, claimed.operationId, jobId, problemId, contestId);
       activeJobIdRef.current = jobId;
-
+      accepted = true;
+      setOutput("Submission accepted. Waiting for results.");
       await subscribeToJobEvents(jobId);
-
     } catch (error) {
       console.error("Submission failed:", error);
+      const status = error?.response?.status;
+      const acceptedJobId = error?.response?.data?.jobId;
+      const serverOperationId = error?.response?.data?.operationKey;
+      const operationId = serverOperationId || claimed.operationId;
+      if (serverOperationId && serverOperationId !== claimed.operationId) {
+        adoptServerAttempt(storage, {
+          operationId: serverOperationId,
+          problemId,
+          contestId,
+          jobId: acceptedJobId || null,
+        });
+      }
+      if (status === 409 && acceptedJobId) {
+        attachAcceptedJob(storage, operationId, acceptedJobId, problemId, contestId);
+        activeJobIdRef.current = acceptedJobId;
+        setOutput("This attempt was already accepted. Checking status.");
+        accepted = true;
+        await subscribeToJobEvents(acceptedJobId);
+        return;
+      }
+      if (status === 409 || isUncertainOutcome(error)) {
+        setOutput(status === 409
+          ? "This attempt is already being accepted. Retry checks the same attempt."
+          : "The submission outcome is uncertain. Retry checks the same attempt and does not start a new one.");
+        return;
+      }
+      settleAttempt(storage, claimed.operationId, problemId, contestId);
+      if (status === 429) {
+        setOutput(error.response?.data?.error || "Please wait before submitting again.");
+        return;
+      }
       setOutput("Error during submission: " + (error.response?.data?.error || error.message || "Unknown error"));
-      setIsLoading(false);
+    } finally {
+      attempt.finish();
+      if (!accepted) setIsLoading(false);
     }
   };
 
@@ -942,6 +1022,7 @@ const Judge0CodeEditor = ({
         if (statusMessage) setOutput(statusMessage);
 
         if (isTerminalJobState(job.status)) {
+          settleAttempt(window.localStorage, null, problemId, contestId);
           setOutput("");
           setIsLoading(false);
 
@@ -1063,8 +1144,10 @@ const Judge0CodeEditor = ({
   };
 
   const reconnectToJob = () => {
-    const jobId = activeJobIdRef.current;
-    if (!jobId) return;
+    const stored = readAttempt(window.localStorage, problemId, contestId);
+    const jobId = activeJobIdRef.current || stored?.jobId;
+    if (!jobId || stored?.settled) return;
+    activeJobIdRef.current = jobId;
     pollingControllerRef.current?.abort();
     pollingControllerRef.current = new AbortController();
     setSubmissionStatus(null);
@@ -1092,6 +1175,19 @@ const Judge0CodeEditor = ({
     setResults([]);
     setOutput("");
   }, [initialCode, Array.isArray(testCases) ? testCases.length : 0]);
+
+  useEffect(() => {
+    const stored = readAttempt(window.localStorage, problemId, contestId);
+    if (!stored || stored.settled || !stored.jobId) return undefined;
+    if (String(stored.problemId ?? "") !== String(problemId ?? "")) return undefined;
+    if (String(stored.contestId || "") !== String(contestId || "")) return undefined;
+    if (activeJobIdRef.current) return undefined;
+    activeJobIdRef.current = stored.jobId;
+    setIsLoading(true);
+    setOutput("Checking a submission that was already accepted.");
+    subscribeToJobEvents(stored.jobId);
+    return undefined;
+  }, [problemId, contestId]);
 
   // Only show language selector and download button in test case mode
   const utilBarRow = (
@@ -1455,7 +1551,9 @@ const Judge0CodeEditor = ({
                 }
               }}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-green-500 hover:bg-green-600 disabled:bg-green-800 disabled:cursor-not-allowed`}
+              type="button"
               disabled={isLoading || runLocked}
+              aria-busy={isLoading}
               title={runLocked ? "Contest run is available only while LIVE" : "Run tests"}
             >
               {isLoading ? "Running..." : `Run${testCases && testCases.length > 0 ? ` (${testCases.length} tests)` : ''}`}
@@ -1463,7 +1561,9 @@ const Judge0CodeEditor = ({
             <button
               onClick={() => handleSubmitSolution(testCases || [])}
               className={`flex-1 py-2 px-4 text-base font-semibold rounded bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 disabled:cursor-not-allowed`}
+              type="button"
               disabled={isLoading || submitLocked}
+              aria-busy={isLoading}
               title={submitLocked
                 ? (contestId ? "Contest submit is available only while LIVE" : "Contest submit is not available yet")
                 : "Submit"}
@@ -1473,7 +1573,7 @@ const Judge0CodeEditor = ({
           </div>
           {/* Output - Show when there's output OR when running with custom input */}
           {(output || (useCustomInput && !isLoading && !results.length && !submitResult)) && (
-            <div className="mt-6 p-4 rounded-lg border border-gray-200 dark:border-gray-600 app-surface">
+            <div className="mt-6 p-4 rounded-lg border border-gray-200 dark:border-gray-600 app-surface" role="status" aria-live="polite">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-xl font-semibold">
                   Output:

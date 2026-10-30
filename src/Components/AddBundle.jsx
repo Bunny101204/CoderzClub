@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch } from "../apiClient";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 import { useNavigate, useParams } from "react-router-dom";
 
 const AddBundle = () => {
   const { id } = useParams();
   const bundleId = id;
+  const formGate = useMutationGate();
 
   //form to submit new bundle
   const [formData, setFormData] = useState({
@@ -77,6 +79,7 @@ const AddBundle = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    await runExclusive(formGate, async () => {
     setError("");
     setSuccess("");
     setLoading(true);
@@ -183,6 +186,7 @@ const AddBundle = () => {
     } finally {
       setLoading(false);
     }
+    });
   };
 
   return (

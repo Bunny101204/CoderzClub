@@ -110,7 +110,7 @@ test("admin batch page manages students from the mocked API", async ({ page }) =
 
 test("coordinator sees only assigned batch actions", async ({ page }) => {
   await signIn(page, { username: "coord", role: "USER", id: "coord-1" });
-  await page.route("**/api/my/batches", async (route) => {
+  await page.route("**/api/my/batches**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

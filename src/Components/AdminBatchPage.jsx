@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../apiClient";
+import { useMutationGate } from "../actions/mutationGate.js";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { displayAssignedProblemId, batchStatusLabel } from "../admin/batchProgress";
 import { formatJoined, isoDayBound, studentHitStatus, studentSearchMessage } from "../admin/batchStudentSearch";
@@ -54,6 +55,20 @@ const AdminBatchPage = () => {
   const [membershipUser, setMembershipUser] = useState(null);
   const [memberSearchLimited, setMemberSearchLimited] = useState(false);
   const [busy, setBusy] = useState(false);
+  const batchGate = useMutationGate();
+  const heldAttempt = useRef(null);
+  const claimMutation = () => {
+    const attempt = batchGate.tryBegin();
+    if (!attempt) return false;
+    heldAttempt.current = attempt;
+    setBusy(true);
+    return true;
+  };
+  const releaseMutation = () => {
+    heldAttempt.current?.finish();
+    heldAttempt.current = null;
+    setBusy(false);
+  };
   const reportSeq = useRef(0);
   const userSearchSeq = useRef(0);
   const problemSearchSeq = useRef(0);
@@ -190,7 +205,7 @@ const AdminBatchPage = () => {
 
   const addMembers = async (userIds) => {
     if (!detail?.active || busy || !userIds.length) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     setNotice("");
     const response = await apiFetch(`/api/admin/batches/${id}/members`, {
@@ -198,7 +213,7 @@ const AdminBatchPage = () => {
       headers: authHeaders(true),
       body: JSON.stringify({ userIds })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not add students");
@@ -222,10 +237,10 @@ const AdminBatchPage = () => {
 
   const removeMember = async (userId, username) => {
     if (!window.confirm(`Remove ${username} from this batch? Submissions will not be deleted.`)) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}/members/${userId}`, { method: "DELETE", headers: authHeaders() });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not remove student");
@@ -239,14 +254,14 @@ const AdminBatchPage = () => {
   const removeSelectedMembers = async () => {
     if (!selectedMembers.length) return;
     if (!window.confirm(`Remove ${selectedMembers.length} selected students? Submissions will not be deleted.`)) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}/members/remove`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ userIds: selectedMembers })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not remove selected students");
@@ -259,14 +274,14 @@ const AdminBatchPage = () => {
 
   const assignProblem = async (problemId) => {
     if (!detail?.active || busy) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}/assignments`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ problemIds: [problemId] })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not assign problem");
@@ -291,7 +306,7 @@ const AdminBatchPage = () => {
   const importStudents = async () => {
     const usernames = importText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!usernames.length || busy) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     setImportResult(null);
     const response = await apiFetch(`/api/admin/batches/${id}/members/import`, {
@@ -299,7 +314,7 @@ const AdminBatchPage = () => {
       headers: authHeaders(true),
       body: JSON.stringify({ usernames })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Bulk import failed. No memberships were confirmed.");
@@ -314,14 +329,14 @@ const AdminBatchPage = () => {
 
   const grantCoordinator = async () => {
     if (!selectedCoordinatorId || busy) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}/coordinators`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ userId: selectedCoordinatorId, institution })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not add that coordinator.");
@@ -335,6 +350,8 @@ const AdminBatchPage = () => {
 
   const revokeCoordinator = async (userId, username) => {
     if (!window.confirm(`Remove ${username || "this coordinator"} from this batch? Their CoderzClub account stays.`)) return;
+    if (!claimMutation()) return;
+    try {
     const response = await apiFetch(`/api/admin/batches/${id}/coordinators/${userId}`, { method: "DELETE", headers: authHeaders() });
     if (!response.ok) {
       setError("Could not remove that coordinator.");
@@ -342,18 +359,21 @@ const AdminBatchPage = () => {
     }
     setNotice("Coordinator access removed for this batch.");
     await loadCoordinators();
+    } finally {
+      releaseMutation();
+    }
   };
 
   const assignSelectedProblems = async () => {
     if (!detail?.active || busy || !selectedProblems.length) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}/assignments`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ problemIds: selectedProblems })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not assign problems");
@@ -368,14 +388,14 @@ const AdminBatchPage = () => {
   const unassignSelected = async () => {
     if (!selectedAssignments.length) return;
     if (!window.confirm(`Unassign ${selectedAssignments.length} problems? Completed work stays on the problems.`)) return;
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}/assignments/remove`, {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ problemIds: selectedAssignments })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not unassign problems");
@@ -388,14 +408,14 @@ const AdminBatchPage = () => {
   };
 
   const saveDetails = async () => {
-    setBusy(true);
+    if (!claimMutation()) return;
     setError("");
     const response = await apiFetch(`/api/admin/batches/${id}`, {
       method: "PATCH",
       headers: authHeaders(true),
       body: JSON.stringify({ name: editName, description: editDescription })
     });
-    setBusy(false);
+    releaseMutation();
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       setError(data.error || "Could not update the batch");
@@ -408,6 +428,8 @@ const AdminBatchPage = () => {
 
   const archive = async () => {
     if (!window.confirm("Archive this batch? Users, problems, and submissions stay intact. New membership and assignment changes will stop.")) return;
+    if (!claimMutation()) return;
+    try {
     const response = await apiFetch(`/api/admin/batches/${id}/archive`, { method: "POST", headers: authHeaders() });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -416,10 +438,15 @@ const AdminBatchPage = () => {
     }
     setDetail(await response.json());
     setNotice("Batch archived. Historical reports remain available.");
+    } finally {
+      releaseMutation();
+    }
   };
 
   const reactivate = async () => {
     if (!window.confirm("Reactivate this batch? Existing members become eligible again. Membership history is not recreated.")) return;
+    if (!claimMutation()) return;
+    try {
     const response = await apiFetch(`/api/admin/batches/${id}/reactivate`, { method: "POST", headers: authHeaders() });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -428,6 +455,9 @@ const AdminBatchPage = () => {
     }
     setDetail(await response.json());
     setNotice("Batch reactivated.");
+    } finally {
+      releaseMutation();
+    }
   };
 
   const exportCsv = async () => {

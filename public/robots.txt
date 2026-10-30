@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /profile
+Disallow: /stats
+Disallow: /my/
+
+# robots.txt is not an access-control mechanism.

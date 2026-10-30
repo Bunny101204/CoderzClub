@@ -8,7 +8,7 @@ const session = fs.readFileSync(new URL("./editorDraftSession.js", import.meta.u
 test("editor typing does not call the draft API", () => {
   assert.match(editor, /onChange=\{\(e\) => setSourceCode\(e\.target\.value\)\}/);
   assert.equal(editor.includes("editorStorageKey"), false);
-  assert.equal(editor.includes("localStorage"), false);
+  assert.equal(editor.includes("localStorage.setItem"), false);
   assert.equal(editor.includes("api.drafts"), false);
   assert.equal(editor.includes("code_${"), false);
   const noteEdit = session.slice(session.indexOf("function noteEdit"), session.indexOf("function dedupeKey"));

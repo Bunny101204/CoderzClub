@@ -366,6 +366,7 @@ import { api } from "../apiClient";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { canConfirmAccountDeletion, clearLocalAuthState, DELETE_CONFIRMATION_PHRASE } from "../privacy/accountDeletion";
+import { useMutationGate } from "../actions/mutationGate.js";
 
 const Profile = ({ isOpen, onClose, asPage = false }) => {
   const { user, logout } = useAuth();
@@ -377,6 +378,8 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
   const [deletePhrase, setDeletePhrase] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const deleteGate = useMutationGate();
+  const exportGate = useMutationGate();
   const [profileTab, setProfileTab] = useState("overview");
 
   useEffect(() => {
@@ -413,6 +416,8 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
   const handleDeleteAccount = async () => {
     if (!canConfirmAccountDeletion(deletePhrase) || deleting) return;
     if (!window.confirm("This permanently disables your account and anonymizes your identity. Continue?")) return;
+    const attempt = deleteGate.tryBegin();
+    if (!attempt) return;
     setDeleting(true);
     setDeleteError("");
     try {
@@ -427,11 +432,15 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     } catch (error) {
       setDeleteError(error.response?.data?.error || error.message || "Could not delete account");
     } finally {
+      attempt.finish();
       setDeleting(false);
     }
   };
 
   const handleExportData = async () => {
+    const attempt = exportGate.tryBegin();
+    if (!attempt) return;
+    try {
     const response = await api.users.exportData();
     const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -440,6 +449,9 @@ const Profile = ({ isOpen, onClose, asPage = false }) => {
     link.download = "coderzclub-data-export.json";
     link.click();
     URL.revokeObjectURL(url);
+    } finally {
+      attempt.finish();
+    }
   };
 
   // Build maps and aggregates

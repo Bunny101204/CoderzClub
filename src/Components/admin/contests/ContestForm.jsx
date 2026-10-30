@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, apiErrorMessage } from "../../../apiClient";
+import { runExclusive, useMutationGate } from "../../../actions/mutationGate.js";
 import {
   buildContestPatchBody,
   buildContestWriteBody,
@@ -60,6 +61,8 @@ export default function ContestForm() {
   const [acting, setActing] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const saveGate = useMutationGate();
+  const actGate = useMutationGate();
   const timeZone = browserTimeZone();
   const status = contest?.status;
   const scheduleLocked = !creating && !canEditScheduleAndSet(status);
@@ -162,6 +165,7 @@ export default function ContestForm() {
 
   const save = async (event) => {
     event.preventDefault();
+    await runExclusive(saveGate, async () => {
     setError("");
     setNotice("");
     const body = payloadFromForm();
@@ -193,9 +197,11 @@ export default function ContestForm() {
     } finally {
       setSaving(false);
     }
+    });
   };
 
   const act = async (kind) => {
+    await runExclusive(actGate, async () => {
     if (!id || acting || saving) {
       return;
     }
@@ -228,6 +234,7 @@ export default function ContestForm() {
     } finally {
       setActing("");
     }
+    });
   };
 
   if (loading) {
@@ -300,7 +307,7 @@ export default function ContestForm() {
           <div className="flex flex-wrap gap-3 pt-2">
             {!readOnly && (
               <div>
-                <button type="submit" disabled={saving || !!acting} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">
+                <button type="submit" disabled={saving || !!acting} aria-busy={saving || !!acting} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">
                   {saving ? "Saving..." : creating ? "Save draft" : "Save"}
                 </button>
                 {creating && (

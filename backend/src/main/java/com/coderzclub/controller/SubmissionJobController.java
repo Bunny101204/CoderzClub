@@ -7,6 +7,9 @@ import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.UserRepository;
 //import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.service.SubmissionJobService;
+import com.coderzclub.service.IdempotencyClaim;
+import com.coderzclub.service.IdempotencyOperations;
+import com.coderzclub.service.MutationIdempotencyService;
 
 import com.coderzclub.service.SubmissionLimitService;
 import com.coderzclub.service.SubmissionValidator;
@@ -54,6 +57,9 @@ public class SubmissionJobController {
 
     @Autowired
     private SubmissionJobService jobService;
+
+    @Autowired(required = false)
+    private IdempotencyOperations idempotency;
 
     @Autowired
     private SubmissionLimitService submissionLimitService;
@@ -104,8 +110,13 @@ public class SubmissionJobController {
      * Create a new submission job with strict validation
      */
     @PostMapping
-    public ResponseEntity<?> createJob(@Valid @RequestBody CreateSubmissionJobRequest request) {
+    public ResponseEntity<?> createJob(
+        @Valid @RequestBody CreateSubmissionJobRequest request,
+        @RequestHeader(value = MutationIdempotencyService.HEADER, required = false) String idempotencyKey
+    ) {
         Timer.Sample total = startAdmissionStage();
+        IdempotencyClaim claim = IdempotencyClaim.absent();
+        boolean releaseClaim = false;
         try {
             // Step 1: Validate code size and content
             try {
@@ -139,6 +150,14 @@ public class SubmissionJobController {
             }
 
             User user = userOpt.get();
+            if (idempotency != null) {
+                claim = idempotency.begin(user.getId(), "submission-job", idempotencyKey, request.getProblemId());
+                ResponseEntity<?> existing = replayClaim(claim);
+                if (existing != null) {
+                    return existing;
+                }
+                releaseClaim = claim.owned();
+            }
 
             Timer.Sample queueAdmission = startAdmissionStage();
             SubmissionQueueAdmissionService.Admission admission;
@@ -243,32 +262,67 @@ public class SubmissionJobController {
             Timer.Sample jobCreate = startAdmissionStage();
             SubmissionJob job;
             try {
-                job = jobService.createJob(
-                    user.getId(),
-                    request.getProblemId(),
-                    request.getCode(),
-                    request.getLanguage(),
-                    request.getLanguageId(),
-
-                    problem.getTestcaseVersion(),
-                    totalTests,
-                    problem.getExecutionMode(),
-                    request.getCodingDurationSeconds()
-                );
+                if (idempotency != null && releaseClaim && !idempotency.stillHeld(claim)) {
+                    releaseClaim = false;
+                    claim = idempotency.begin(user.getId(), "submission-job", idempotencyKey, request.getProblemId());
+                    ResponseEntity<?> recovered = replayClaim(claim);
+                    if (recovered != null) {
+                        return recovered;
+                    }
+                    releaseClaim = claim.owned();
+                    if (!releaseClaim) {
+                        return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(
+                            "This attempt is already being accepted.", claim));
+                    }
+                }
+                if (releaseClaim && idempotencyKey != null && !idempotencyKey.isBlank()) {
+                    job = jobService.createJob(
+                        user.getId(),
+                        request.getProblemId(),
+                        request.getCode(),
+                        request.getLanguage(),
+                        request.getLanguageId(),
+                        problem.getTestcaseVersion(),
+                        totalTests,
+                        problem.getExecutionMode(),
+                        request.getCodingDurationSeconds(),
+                        null,
+                        null,
+                        null,
+                        "submission-job",
+                        idempotencyKey
+                    );
+                } else {
+                    job = jobService.createJob(
+                        user.getId(),
+                        request.getProblemId(),
+                        request.getCode(),
+                        request.getLanguage(),
+                        request.getLanguageId(),
+                        problem.getTestcaseVersion(),
+                        totalTests,
+                        problem.getExecutionMode(),
+                        request.getCodingDurationSeconds()
+                    );
+                }
             } finally {
                 stopAdmissionStage(jobCreate, "job_create");
             }
 
             // Note: the submission attempt is already acquired atomically above.
             // If job creation fails after acquisition, the attempt is counted and not compensated.
+            // The claim is completed only after the job row exists, so a retry of this
+            // operation key returns that job instead of publishing another queue event.
+            releaseClaim = false;
+            if (claim.owned() && idempotency != null) {
+                try {
+                    idempotency.complete(claim, job.getId());
+                } catch (RuntimeException completeError) {
+                    logger.warn("Could not record idempotency result for job {}", job.getId());
+                }
+            }
 
-            SubmissionJobResponse resp = new SubmissionJobResponse();
-            resp.setJobId(job.getId());
-            resp.setReference(job.getId());
-            resp.setStatus(job.getStatus().toString());
-            resp.setCreatedAt(job.getCreatedAt());
-            resp.setCorrelationId(ExecutionUserFacing.correlationId());
-            resp.setCodingDurationSeconds(job.getCodingDurationSeconds());
+            SubmissionJobResponse resp = responseFor(job);
 
             logger.info("Created submission job {} for user {} problemId={} totalTests={}",
                 job.getId(), username, request.getProblemId(), job.getTotalTests());
@@ -281,8 +335,51 @@ public class SubmissionJobController {
             logger.error("Failed to create submission job", e);
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to create submission job: " + e.getMessage()));
         } finally {
+            if (releaseClaim && idempotency != null) {
+                idempotency.abandon(claim);
+            }
             stopAdmissionStage(total, "total");
         }
+    }
+
+    private ResponseEntity<?> replayClaim(IdempotencyClaim claim) {
+        if (claim == null || (!claim.replay() && !claim.inProgress())) {
+            return null;
+        }
+        if (claim.replay()) {
+            Optional<SubmissionJob> existing = jobService.getJob(claim.resourceId());
+            if (existing.isPresent()) {
+                jobService.recoverQueuedPublish(existing.get());
+                return ResponseEntity.accepted().body(responseFor(existing.get()));
+            }
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(
+                "This attempt was already accepted.", claim));
+        }
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(
+            "This attempt is already being accepted.", claim));
+    }
+
+    private Map<String, Object> conflictBody(String error, IdempotencyClaim claim) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("error", error);
+        if (claim != null && claim.resourceId() != null) {
+            body.put("jobId", claim.resourceId());
+        }
+        if (claim != null && claim.operationKey() != null) {
+            body.put("operationKey", claim.operationKey());
+        }
+        return body;
+    }
+
+    private SubmissionJobResponse responseFor(SubmissionJob job) {
+        SubmissionJobResponse resp = new SubmissionJobResponse();
+        resp.setJobId(job.getId());
+        resp.setReference(job.getId());
+        resp.setStatus(job.getStatus() == null ? "QUEUED" : job.getStatus().toString());
+        resp.setCreatedAt(job.getCreatedAt());
+        resp.setCorrelationId(ExecutionUserFacing.correlationId());
+        resp.setCodingDurationSeconds(job.getCodingDurationSeconds());
+        return resp;
     }
 
     /**
@@ -300,6 +397,7 @@ public class SubmissionJobController {
             if (!canViewJob(authentication, job)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
+            jobService.recoverQueuedPublish(job);
 
             SubmissionJobResponse resp = new SubmissionJobResponse();
             resp.setJobId(job.getId());

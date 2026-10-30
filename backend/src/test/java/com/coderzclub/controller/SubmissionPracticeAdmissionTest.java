@@ -16,6 +16,7 @@ import com.coderzclub.service.SubmissionValidationService;
 import com.coderzclub.model.ExecutionMode;
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.service.ExecutionCompatibilityService;
+import com.coderzclub.service.IdempotencyClaim;
 import com.coderzclub.service.SubmissionValidator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -167,6 +169,148 @@ class SubmissionPracticeAdmissionTest {
                 .content("{\"problemId\":\"secret\",\"code\":\"print(1)\",\"languageId\":71}"))
             .andExpect(status().isNotFound());
         verify(submissionService, never()).applyAcceptedSubmission(any(), any(), any());
+    }
+
+    @Test
+    void replayReturnsTheOriginalJobWithoutAnotherRateLimitSlot() throws Exception {
+        MockMvc mvc = controllerWith(IdempotencyClaim.replay("job-original"));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1")));
+        SubmissionJob job = new SubmissionJob();
+        job.setId("job-original");
+        job.setStatus(SubmissionJob.JobStatus.QUEUED);
+        job.setCreatedAt(new java.util.Date());
+        when(jobService.getJob("job-original")).thenReturn(Optional.of(job));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+            "alice", "n/a", List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+
+        mvc.perform(post("/api/submission-jobs")
+                .header("Idempotency-Key", "attempt01")
+                .contentType("application/json")
+                .content("{\"problemId\":\"public-1\",\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.jobId").value("job-original"));
+
+        verify(submissionLimitService, never()).tryAcquireSubmissionSlot(any(), any());
+        verify(jobService, never()).createJob(any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+        verify(jobService, never()).createJob(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void inProgressConflictNamesTheOwnerOperation() throws Exception {
+        MockMvc mvc = controllerWith(IdempotencyClaim.inProgress(null, "attempt-owner"));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1")));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+            "alice", "n/a", List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+
+        mvc.perform(post("/api/submission-jobs")
+                .header("Idempotency-Key", "attempt-other")
+                .contentType("application/json")
+                .content("{\"problemId\":\"public-1\",\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.operationKey").value("attempt-owner"));
+
+        verify(submissionLimitService, never()).tryAcquireSubmissionSlot(any(), any());
+        verify(jobService, never()).createJob(any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void conflictUsesTheAuthenticatedUserAndRequestProblem() throws Exception {
+        AtomicReference<String> seenUser = new AtomicReference<>();
+        AtomicReference<String> seenScope = new AtomicReference<>();
+        AtomicReference<String> seenSubject = new AtomicReference<>();
+        SubmissionJobController jobs = new SubmissionJobController();
+        ReflectionTestUtils.setField(jobs, "jobService", jobService);
+        ReflectionTestUtils.setField(jobs, "userRepository", userRepository);
+        ReflectionTestUtils.setField(jobs, "problemRepository", problemRepository);
+        ReflectionTestUtils.setField(jobs, "submissionValidator", submissionValidator);
+        ReflectionTestUtils.setField(jobs, "queueAdmissionService", queueAdmissionService);
+        ReflectionTestUtils.setField(jobs, "submissionLimitService", submissionLimitService);
+        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ReflectionTestUtils.setField(jobs, "validationService", validationService);
+        ReflectionTestUtils.setField(jobs, "compatibilityService", compatibilityService);
+        ReflectionTestUtils.setField(jobs, "idempotency", new com.coderzclub.service.IdempotencyOperations() {
+            @Override
+            public com.coderzclub.service.IdempotencyClaim begin(String userId, String scope, String operationKey, String subjectId) {
+                seenUser.set(userId);
+                seenScope.set(scope);
+                seenSubject.set(subjectId);
+                return com.coderzclub.service.IdempotencyClaim.inProgress(null, "attempt-owner");
+            }
+            @Override
+            public void complete(com.coderzclub.service.IdempotencyClaim owned, String resourceId) {
+            }
+            @Override
+            public void abandon(com.coderzclub.service.IdempotencyClaim owned) {
+            }
+            @Override
+            public boolean stillHeld(com.coderzclub.service.IdempotencyClaim owned) {
+                return false;
+            }
+            @Override
+            public boolean renew(String userId, String scope, String operationKey) {
+                return false;
+            }
+            @Override
+            public boolean prepareCommit(String userId, String scope, String operationKey) {
+                return false;
+            }
+        });
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(jobs).setControllerAdvice(new ApiExceptionHandler()).build();
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1")));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+            "alice", "n/a", List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+
+        mvc.perform(post("/api/submission-jobs")
+                .header("Idempotency-Key", "attempt-other")
+                .contentType("application/json")
+                .content("{\"problemId\":\"public-1\",\"code\":\"print(1)\",\"languageId\":71,\"userId\":\"victim-user\"}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.operationKey").value("attempt-owner"));
+
+        org.junit.jupiter.api.Assertions.assertEquals("u1", seenUser.get());
+        org.junit.jupiter.api.Assertions.assertEquals("submission-job", seenScope.get());
+        org.junit.jupiter.api.Assertions.assertEquals("public-1", seenSubject.get());
+        verify(jobService, never()).createJob(any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+    }
+
+    private MockMvc controllerWith(com.coderzclub.service.IdempotencyClaim claim) {
+        SubmissionJobController jobs = new SubmissionJobController();
+        ReflectionTestUtils.setField(jobs, "jobService", jobService);
+        ReflectionTestUtils.setField(jobs, "userRepository", userRepository);
+        ReflectionTestUtils.setField(jobs, "problemRepository", problemRepository);
+        ReflectionTestUtils.setField(jobs, "submissionValidator", submissionValidator);
+        ReflectionTestUtils.setField(jobs, "queueAdmissionService", queueAdmissionService);
+        ReflectionTestUtils.setField(jobs, "submissionLimitService", submissionLimitService);
+        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ReflectionTestUtils.setField(jobs, "validationService", validationService);
+        ReflectionTestUtils.setField(jobs, "compatibilityService", compatibilityService);
+        ReflectionTestUtils.setField(jobs, "idempotency", new com.coderzclub.service.IdempotencyOperations() {
+            @Override
+            public com.coderzclub.service.IdempotencyClaim begin(String userId, String scope, String operationKey, String subjectId) {
+                return claim;
+            }
+            @Override
+            public void complete(com.coderzclub.service.IdempotencyClaim owned, String resourceId) {
+            }
+            @Override
+            public void abandon(com.coderzclub.service.IdempotencyClaim owned) {
+            }
+            @Override
+            public boolean stillHeld(com.coderzclub.service.IdempotencyClaim owned) {
+                return false;
+            }
+            @Override
+            public boolean renew(String userId, String scope, String operationKey) {
+                return true;
+            }
+            @Override
+            public boolean prepareCommit(String userId, String scope, String operationKey) {
+                return true;
+            }
+        });
+        return MockMvcBuilders.standaloneSetup(jobs)
+            .setControllerAdvice(new ApiExceptionHandler())
+            .build();
     }
 
     private static Problem contestOnly(String id) {

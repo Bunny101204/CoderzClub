@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { apiFetch } from "../apiClient";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import BundleAccessPanel from "./BundleAccessPanel";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 
 const ManageBundleProblems = () => {
   const { id } = useParams();
@@ -13,6 +14,7 @@ const ManageBundleProblems = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedProblem, setSelectedProblem] = useState("");
+  const bundleGate = useMutationGate();
   const [manageTab, setManageTab] = useState("content");
 
   useEffect(() => {
@@ -109,6 +111,7 @@ const ManageBundleProblems = () => {
   };
 
   const addProblemToBundle = async () => {
+    await runExclusive(bundleGate, async () => {
     if (!selectedProblem) {
       setError("Please select a problem to add");
       return;
@@ -149,9 +152,11 @@ const ManageBundleProblems = () => {
       console.error("Error adding problem:", error);
       setError("Error adding problem to bundle");
     }
+    });
   };
 
   const removeProblemFromBundle = async (problemId) => {
+    await runExclusive(bundleGate, async () => {
     if (!window.confirm("Are you sure you want to remove this problem from the bundle?")) {
       return;
     }
@@ -184,9 +189,11 @@ const ManageBundleProblems = () => {
       console.error("Error removing problem:", error);
       setError("Error removing problem from bundle");
     }
+    });
   };
 
   const reorderProblem = async (problemId, direction) => {
+    await runExclusive(bundleGate, async () => {
     const currentIndex = bundle.problemIds.indexOf(problemId);
     if (
       (direction === "up" && currentIndex === 0) ||
@@ -219,6 +226,7 @@ const ManageBundleProblems = () => {
     } catch (error) {
       console.error("Error reordering problems:", error);
     }
+    });
   };
 
   const getDifficultyColor = (difficulty) => {

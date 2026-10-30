@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../apiClient";
+import { useMutationGate } from "../actions/mutationGate.js";
 
 function authHeaders(json = false) {
   const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
@@ -19,6 +20,7 @@ const BundleAccessPanel = ({ bundleId }) => {
   const [batchHits, setBatchHits] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const accessGate = useMutationGate();
 
   const loadAccess = async () => {
     const response = await apiFetch(`/api/admin/bundles/${bundleId}/access`, { headers: authHeaders() });
@@ -35,6 +37,8 @@ const BundleAccessPanel = ({ bundleId }) => {
   }, [bundleId]);
 
   const saveVisibility = async (next) => {
+    const attempt = accessGate.tryBegin();
+    if (!attempt) return;
     setBusy(true);
     setError("");
     try {
@@ -49,11 +53,14 @@ const BundleAccessPanel = ({ bundleId }) => {
     } catch (err) {
       setError(err.message);
     } finally {
+      attempt.finish();
       setBusy(false);
     }
   };
 
   const grant = async (subjectType, subjectId) => {
+    const attempt = accessGate.tryBegin();
+    if (!attempt) return;
     setBusy(true);
     setError("");
     try {
@@ -74,11 +81,14 @@ const BundleAccessPanel = ({ bundleId }) => {
     } catch (err) {
       setError(err.message);
     } finally {
+      attempt.finish();
       setBusy(false);
     }
   };
 
   const revoke = async (grantId) => {
+    const attempt = accessGate.tryBegin();
+    if (!attempt) return;
     setBusy(true);
     setError("");
     try {
@@ -91,6 +101,7 @@ const BundleAccessPanel = ({ bundleId }) => {
     } catch (err) {
       setError(err.message);
     } finally {
+      attempt.finish();
       setBusy(false);
     }
   };

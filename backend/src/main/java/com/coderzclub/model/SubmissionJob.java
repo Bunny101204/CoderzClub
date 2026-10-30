@@ -231,6 +231,15 @@ public class SubmissionJob {
         this.contestProblemSnapshotId = contestProblemSnapshotId;
     }
 
+    /** Set only for an idempotent accept. Absent on older jobs, so the sparse index ignores them. */
+    private String idempotencyScope;
+    private String idempotencyKey;
+
+    public String getIdempotencyScope() { return idempotencyScope; }
+    public void setIdempotencyScope(String idempotencyScope) { this.idempotencyScope = idempotencyScope; }
+    public String getIdempotencyKey() { return idempotencyKey; }
+    public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+
     public String getLockedBy() { return lockedBy; }
     public void setLockedBy(String lockedBy) { this.lockedBy = lockedBy; }
 

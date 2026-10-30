@@ -2,6 +2,8 @@ package com.coderzclub.service;
 
 import com.coderzclub.model.SubmissionOutboxEvent;
 import com.coderzclub.repository.SubmissionOutboxRepository;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
@@ -28,10 +30,43 @@ public class SubmissionOutboxService {
         return repository.save(event);
     }
 
+    /**
+     * One queue event per job. A second call, or a unique-index race, does not insert another row.
+     */
+    public void ensureJobEvent(String jobId) {
+        if (jobId == null || jobId.isBlank()) {
+            return;
+        }
+        if (repository.existsByAggregateIdAndEventType(jobId, "SubmissionJobCreated")) {
+            return;
+        }
+        try {
+            createJobEvent(jobId);
+        } catch (RuntimeException ex) {
+            if (!isDuplicate(ex)) {
+                throw ex;
+            }
+        }
+    }
+
     public boolean hasPublishedOrPendingEvent(String jobId) {
         return repository.findFirstByAggregateIdAndStatusIn(jobId, List.of(
             SubmissionOutboxEvent.Status.PENDING,
             SubmissionOutboxEvent.Status.PUBLISHED
         )).isPresent();
+    }
+
+    private boolean isDuplicate(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof DuplicateKeyException || current instanceof DataIntegrityViolationException) {
+                return true;
+            }
+            if (current.getClass().getName().contains("DuplicateKey")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

@@ -8,7 +8,9 @@ import {
   nextPageForFilterChange
 } from "../admin/adminProblems";
 import { api, apiFetch } from "../apiClient";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 import ContestAdminList from "./admin/contests/ContestAdminList";
+import { batchTabLabel } from "../admin/adminBatchLabel.js";
 
 const AdminDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -26,13 +28,18 @@ const AdminDashboard = () => {
   const [bundleSearch, setBundleSearch] = useState("");
   const [totalProblemPages, setTotalProblemPages] = useState(0);
   const [totalProblemItems, setTotalProblemItems] = useState(0);
-  const [batches, setBatches] = useState([]);
+  const [batches, setBatches] = useState(null);
+  const [batchLoadError, setBatchLoadError] = useState("");
   const [batchSearch, setBatchSearch] = useState("");
   const [batchStatus, setBatchStatus] = useState("all");
   const [newBatchName, setNewBatchName] = useState("");
   const [newBatchDescription, setNewBatchDescription] = useState("");
   const [batchError, setBatchError] = useState("");
   const [creatingBatch, setCreatingBatch] = useState(false);
+  const createBatchGate = useMutationGate();
+  const deleteProblemGate = useMutationGate();
+  const bundleStatusGate = useMutationGate();
+  const deleteBundleGate = useMutationGate();
   const problemFetchSeq = useRef(0);
   
   // Ensure problemList and bundles are always arrays
@@ -162,21 +169,25 @@ const AdminDashboard = () => {
       });
       if (response.ok) {
         const data = await response.json();
+        setBatchLoadError("");
         setBatches(Array.isArray(data.batches) ? data.batches : []);
+      } else {
+        setBatchLoadError("Batches could not be loaded.");
       }
     } catch (error) {
       console.error("Error fetching batches:", error);
+      setBatchLoadError("Batches could not be loaded.");
     }
   };
 
   const createBatch = async (event) => {
     event.preventDefault();
+    await runExclusive(createBatchGate, async () => {
     setBatchError("");
     if (!newBatchName.trim()) {
       setBatchError("name is required");
       return;
     }
-    if (creatingBatch) return;
     setCreatingBatch(true);
     try {
       const token = localStorage.getItem("jwtToken") || localStorage.getItem("token");
@@ -199,6 +210,7 @@ const AdminDashboard = () => {
     } finally {
       setCreatingBatch(false);
     }
+    });
   };
 
   useEffect(() => {
@@ -209,19 +221,21 @@ const AdminDashboard = () => {
 
   // Delete problem handler
   const handleDeleteProblem = async (id) => {
+    await runExclusive(deleteProblemGate, async () => {
     if (!window.confirm("Are you sure you want to delete this problem?")) return;
     try {
       const res = await apiFetch(`/api/problems/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete problem");
-      // Refresh the list after deletion
       fetchProblems({ silent: true });
     } catch {
       alert("Error deleting problem.");
     }
+    });
   };
 
   // Toggle bundle status handler
   const handleToggleBundleStatus = async (id, currentStatus) => {
+    await runExclusive(bundleStatusGate, async () => {
     try {
       const token = localStorage.getItem('jwtToken');
       const headers = {
@@ -259,10 +273,12 @@ const AdminDashboard = () => {
     } catch {
       alert("Error updating bundle status.");
     }
+    });
   };
 
   // Delete bundle handler
   const handleDeleteBundle = async (id) => {
+    await runExclusive(deleteBundleGate, async () => {
     if (!window.confirm("Are you sure you want to delete this bundle?")) return;
     try {
       // Get JWT token for authentication
@@ -284,6 +300,7 @@ const AdminDashboard = () => {
     } catch {
       alert("Error deleting bundle.");
     }
+    });
   };
 
   return (
@@ -341,7 +358,7 @@ const AdminDashboard = () => {
                 : "app-muted hover:text-gray-900 dark:hover:text-white"
             }`}
           >
-            Batches ({batches.length})
+            {batchTabLabel(batches)}
           </button>
           <button
             onClick={() => setActiveTab("contests")}
@@ -654,7 +671,7 @@ const AdminDashboard = () => {
                 className="px-3 py-2 app-input rounded"
               />
               <div className="sm:col-span-2 flex items-center gap-3">
-                <button type="submit" disabled={creatingBatch} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">Create Batch</button>
+                <button type="submit" disabled={creatingBatch} aria-busy={creatingBatch} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-50">{creatingBatch ? "Creating batch..." : "Create Batch"}</button>
                 {batchError && <span className="text-red-600 dark:text-red-400 text-sm">{batchError}</span>}
               </div>
             </form>
@@ -672,7 +689,11 @@ const AdminDashboard = () => {
               </select>
             </div>
             <div className="app-surface rounded-lg shadow p-4 overflow-x-auto">
-              {batches.length === 0 ? (
+              {batchLoadError ? (
+                <div className="app-muted" role="alert">{batchLoadError}</div>
+              ) : batches == null ? (
+                <div className="app-muted" role="status">Loading batches…</div>
+              ) : batches.length === 0 ? (
                 <div className="app-muted">No batches found.</div>
               ) : (
                 <table className="w-full text-left">

@@ -16,11 +16,14 @@ import ErrorBoundary from "./Components/ErrorBoundary";
 import SiteFooter from "./Components/SiteFooter";
 import { useAuth, AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import AccessDenied from "./Components/AccessDenied";
+import NotFoundPage from "./Components/NotFoundPage";
+import LegacyProblemRedirect from "./routing/LegacyProblemRedirect";
+import DocumentMeta from "./seo/DocumentMeta";
 
 // Lazy load route-specific components
 const Judge0CodeEditor = lazy(() => import("./Components/Judge0CodeEditor"));
 const HomePage = lazy(() => import("./Components/HomePage"));
-const ProblemPage = lazy(() => import("./Components/ProblemPage"));
 const ProblemPageNew = lazy(() => import("./Components/ProblemPageNew"));
 const AdminDashboard = lazy(() => import("./Components/AdminDashboard"));
 const AdminBatchPage = lazy(() => import("./Components/AdminBatchPage"));
@@ -55,20 +58,9 @@ function LoadingFallback() {
 
 function AdminRoute({ user }) {
   const isAdmin = user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin");
-
   if (!isAdmin) {
-    return (
-      <div className="app-shell text-center flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">Access Denied</h2>
-          <p className="text-gray-400 mb-4">You need admin privileges to access this page.</p>
-          <p className="text-sm text-gray-500 mb-4">Your role: {user?.role || "Not set"}</p>
-          <Navigate to="/home" replace />
-        </div>
-      </div>
-    );
+    return <AccessDenied />;
   }
-
   return <AdminDashboard />;
 }
 
@@ -87,6 +79,7 @@ function AppContent() {
 
   return (
     <div className="app-shell">
+      <DocumentMeta />
       <Header />
       <Routes>
         <Route
@@ -134,7 +127,7 @@ function AppContent() {
         />
         <Route
           path="/problem-old/:id"
-          element={<Suspense fallback={<LoadingFallback />}><ProblemPage /></Suspense>}
+          element={<LegacyProblemRedirect />}
         />
         <Route
           path="/bundles"
@@ -200,7 +193,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -210,7 +203,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -220,7 +213,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AdminStudentsPage /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -260,7 +253,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AdminBatchPage /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -270,7 +263,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AddProblemNew /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -280,7 +273,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AddProblemNew /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -290,7 +283,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AddProblem /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -300,7 +293,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AddBundle /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -310,7 +303,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><AddBundle /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -320,7 +313,7 @@ function AppContent() {
             user && (user.role === "ADMIN" || user.role === "admin" || user.role === "Admin") ? (
               <Suspense fallback={<LoadingFallback />}><ManageBundleProblems /></Suspense>
             ) : (
-              <Navigate to="/home" replace />
+              <AccessDenied />
             )
           }
         />
@@ -333,7 +326,7 @@ function AppContent() {
           element={<Suspense fallback={<LoadingFallback />}><TermsPage /></Suspense>}
         />
         {/* Catch-all for unknown routes */}
-        <Route path="*" element={<Navigate to={isAuthenticated ? "/home" : "/"} replace />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
       <SiteFooter />
     </div>

@@ -228,6 +228,102 @@ class ContestSubmissionControllerTest {
             .andExpect(jsonPath("$.error").value("Language 71 is not enabled"));
     }
 
+    @Test
+    void replayDoesNotAdmitAnotherContestJob() throws Exception {
+        MockMvc replayMvc = MockMvcBuilders.standaloneSetup(new ContestSubmissionController(
+            admissionService,
+            userRepository,
+            claim("job-original", null)
+        )).setControllerAdvice(new ApiExceptionHandler()).build();
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1", "alice")));
+        replayMvc.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .header("Idempotency-Key", "attempt01")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.jobId").value("job-original"));
+        verify(admissionService, never()).admit(any(), any(), any(), any());
+    }
+
+    @Test
+    void inProgressConflictNamesTheOwnerOperation() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenUser = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenScope = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenSubject = new java.util.concurrent.atomic.AtomicReference<>();
+        MockMvc conflictMvc = MockMvcBuilders.standaloneSetup(new ContestSubmissionController(
+            admissionService,
+            userRepository,
+            new com.coderzclub.service.IdempotencyOperations() {
+                @Override
+                public com.coderzclub.service.IdempotencyClaim begin(String userId, String scope, String operationKey, String subjectId) {
+                    seenUser.set(userId);
+                    seenScope.set(scope);
+                    seenSubject.set(subjectId);
+                    return com.coderzclub.service.IdempotencyClaim.inProgress(null, "attempt-owner");
+                }
+                @Override
+                public void complete(com.coderzclub.service.IdempotencyClaim owned, String resourceId) {
+                }
+                @Override
+                public void abandon(com.coderzclub.service.IdempotencyClaim owned) {
+                }
+                @Override
+                public boolean stillHeld(com.coderzclub.service.IdempotencyClaim owned) {
+                    return true;
+                }
+                @Override
+                public boolean renew(String userId, String scope, String operationKey) {
+                    return true;
+                }
+                @Override
+                public boolean prepareCommit(String userId, String scope, String operationKey) {
+                    return true;
+                }
+            }
+        )).setControllerAdvice(new ApiExceptionHandler()).build();
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1", "alice")));
+        conflictMvc.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .header("Idempotency-Key", "attempt-other")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71,\"userId\":\"victim-user\"}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.operationKey").value("attempt-owner"));
+        org.junit.jupiter.api.Assertions.assertEquals("u1", seenUser.get());
+        org.junit.jupiter.api.Assertions.assertEquals("contest-submission", seenScope.get());
+        org.junit.jupiter.api.Assertions.assertEquals("c1:p1", seenSubject.get());
+        verify(admissionService, never()).admit(any(), any(), any(), any());
+    }
+
+    private static com.coderzclub.service.IdempotencyOperations claim(String replayJobId, String ownerKey) {
+        return new com.coderzclub.service.IdempotencyOperations() {
+            @Override
+            public com.coderzclub.service.IdempotencyClaim begin(String userId, String scope, String operationKey, String subjectId) {
+                if (replayJobId != null) {
+                    return com.coderzclub.service.IdempotencyClaim.replay(replayJobId);
+                }
+                return com.coderzclub.service.IdempotencyClaim.inProgress(null, ownerKey);
+            }
+            @Override
+            public void complete(com.coderzclub.service.IdempotencyClaim owned, String resourceId) {
+            }
+            @Override
+            public void abandon(com.coderzclub.service.IdempotencyClaim owned) {
+            }
+            @Override
+            public boolean stillHeld(com.coderzclub.service.IdempotencyClaim owned) {
+                return true;
+            }
+            @Override
+            public boolean renew(String userId, String scope, String operationKey) {
+                return true;
+            }
+            @Override
+            public boolean prepareCommit(String userId, String scope, String operationKey) {
+                return true;
+            }
+        };
+    }
+
     private static User user(String id, String username) {
         User user = new User();
         user.setId(id);

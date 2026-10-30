@@ -117,20 +117,38 @@ public class ContestSubmissionAdmissionService {
         requireSubmissionSlot(user.getId(), canonicalProblemId);
 
         int totalTests = publicTests.size() + hiddenTests.size();
-        SubmissionJob job = jobService.createJob(
-            user.getId(),
-            canonicalProblemId,
-            request.getCode(),
-            request.getLanguage(),
-            request.getLanguageId(),
-            snapshot.getTestcaseVersion(),
-            totalTests,
-            snapshot.getExecutionMode(),
-            request.getCodingDurationSeconds(),
-            contest.getId(),
-            now,
-            snapshot.getId()
-        );
+        String idempotencyKey = request.getIdempotencyKey();
+        SubmissionJob job = idempotencyKey == null || idempotencyKey.isBlank()
+            ? jobService.createJob(
+                user.getId(),
+                canonicalProblemId,
+                request.getCode(),
+                request.getLanguage(),
+                request.getLanguageId(),
+                snapshot.getTestcaseVersion(),
+                totalTests,
+                snapshot.getExecutionMode(),
+                request.getCodingDurationSeconds(),
+                contest.getId(),
+                now,
+                snapshot.getId()
+            )
+            : jobService.createJob(
+                user.getId(),
+                canonicalProblemId,
+                request.getCode(),
+                request.getLanguage(),
+                request.getLanguageId(),
+                snapshot.getTestcaseVersion(),
+                totalTests,
+                snapshot.getExecutionMode(),
+                request.getCodingDurationSeconds(),
+                contest.getId(),
+                now,
+                snapshot.getId(),
+                "contest-submission",
+                idempotencyKey
+            );
 
         logger.info("contest_submission_job_admitted jobId={} contestId={} snapshotId={} userId={} problemId={} contestSubmittedAt={}",
             job.getId(), contest.getId(), snapshot.getId(), user.getId(), canonicalProblemId, now);

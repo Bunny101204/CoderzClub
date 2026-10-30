@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { runExclusive, useMutationGate } from "../actions/mutationGate.js";
 
 function LoginPage() {
   const [username, setUsername] = useState("");
@@ -9,9 +10,11 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
+  const loginGate = useMutationGate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    await runExclusive(loginGate, async () => {
     setError("");
     setLoading(true);
     const result = await login(username, password);
@@ -25,6 +28,7 @@ function LoginPage() {
     } else {
       setError(result.error || "Invalid username or password");
     }
+    });
   };
 
   return (
@@ -53,6 +57,7 @@ function LoginPage() {
           type="submit"
           className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
           disabled={loading}
+          aria-busy={loading}
         >
           {loading ? "Logging in..." : "Login"}
         </button>

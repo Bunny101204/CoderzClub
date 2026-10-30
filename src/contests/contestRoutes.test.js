@@ -20,7 +20,7 @@ test("contest student and admin routes are registered", () => {
   const client = readFileSync(join(root, "../apiClient.js"), "utf8");
   assert.match(client, /adminContests:/);
   assert.match(client, /contests:/);
-  assert.match(client, /submit: \(contestId, problemId, payload\)/);
+  assert.match(client, /submit: \(contestId, problemId, payload, operationId\)/);
   assert.match(client, /getLeaderboard: \(contestId, params\)/);
   assert.match(client, /\/api\/contests\/\$\{contestId\}\/problems\/\$\{problemId\}\/submission-jobs/);
   assert.match(app, /isAuthenticated \? /);

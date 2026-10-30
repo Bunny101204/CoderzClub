@@ -32,6 +32,9 @@ public interface SubmissionJobRepository extends MongoRepository<SubmissionJob, 
     // Count jobs by user and status
     long countByUserIdAndStatus(String userId, SubmissionJob.JobStatus status);
 
+    Optional<SubmissionJob> findFirstByUserIdAndIdempotencyScopeAndIdempotencyKey(
+        String userId, String idempotencyScope, String idempotencyKey);
+
     // Find recent jobs for observability
     @Query(value = "{'createdAt': {$gte: ?0}}", sort = "{'createdAt': -1}")
     List<SubmissionJob> findRecentJobs(java.util.Date since);

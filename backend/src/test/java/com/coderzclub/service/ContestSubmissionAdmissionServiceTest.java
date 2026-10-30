@@ -228,6 +228,32 @@ class ContestSubmissionAdmissionServiceTest {
     }
 
     @Test
+    void idempotencyKeyIsPassedOnTheKeyedCreateAndDoesNotUseTheUnkeyedCreate() {
+        ContestSubmissionAdmissionService service = serviceAt(LIVE);
+        stubContest(liveContest());
+        ContestProblemSnapshot snapshot = ContestProblemSnapshot.fromProblem("c1", publicProblem("p1"), LIVE);
+        snapshot.setId("snap-p1");
+        when(mongo.findOne(any(Query.class), eq(ContestProblemSnapshot.class))).thenReturn(snapshot);
+        when(submissionLimitService.tryAcquireSubmissionSlot(any(), any())).thenReturn(SubmissionLimitDecision.allowed());
+        when(queueAdmissionService.check()).thenReturn(new SubmissionQueueAdmissionService.Admission(true, 0, 0, "none"));
+        when(jobService.createJob(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any(), any()))
+            .thenAnswer(invocation -> {
+                SubmissionJob job = new SubmissionJob();
+                job.setId("job-keyed");
+                job.setStatus(SubmissionJob.JobStatus.QUEUED);
+                return job;
+            });
+        stubActiveMember("b1", "u1");
+        ContestSubmissionJobRequest request = request();
+        request.setIdempotencyKey("attempt01");
+        SubmissionJob job = service.admit(user("u1"), "c1", "p1", request);
+        assertEquals("job-keyed", job.getId());
+        verify(jobService).createJob(eq("u1"), eq("p1"), any(), any(), any(), any(), anyInt(), any(), any(),
+            eq("c1"), eq(LIVE), eq("snap-p1"), eq("contest-submission"), eq("attempt01"));
+        verify(jobService, never()).createJob(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void hiddenTestsComeFromSnapshotNotMutableProblem() throws Exception {
         ContestSubmissionAdmissionService service = serviceAt(LIVE);
         Problem problem = publicProblem("p1");
