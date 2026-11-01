@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "batch-mgmt-release"))
 import swap_safety
@@ -11,17 +12,18 @@ import swap_safety
 import api_release as release
 
 SECRET = "mongodb://unit-test-secret-value"
+CURRENT_IMAGE_ID = "sha256:" + "b" * 64
 NEW_DIGEST = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 OLD_ID = "old-container-id"
 FULL_ID = OLD_ID + "0123456789abcdef"
-RELEASE_ID = "814037d"
+RELEASE_ID = "a37c5a5"
 
 
 def release_env(**overrides):
     env = {
         "RELEASE_ID": RELEASE_ID,
         "EXPECTED_HOSTNAME": release.EXPECTED_HOSTNAME,
-        "EXPECTED_CURRENT_IMAGE_ID": release.CURRENT_IMAGE_ID,
+        "EXPECTED_CURRENT_IMAGE_ID": CURRENT_IMAGE_ID,
         "EXPECTED_NEW_IMAGE_ID": NEW_DIGEST,
         "NEW_IMAGE": "coderzclub-backend:api-" + RELEASE_ID,
         "CONFIRM_DEPLOY": "api-" + RELEASE_ID,
@@ -36,10 +38,10 @@ def inspect_payload(secret=SECRET):
     return {
         "Id": OLD_ID + "0123456789abcdef",
         "Name": "/coderzclub-api",
-        "Image": release.CURRENT_IMAGE_ID,
+        "Image": CURRENT_IMAGE_ID,
         "State": {"Status": "running", "Running": True, "Health": {"Status": "healthy"}},
         "Config": {
-            "Image": "coderzclub-backend:batch-mgmt-20261017",
+            "Image": "coderzclub-backend:api-814037d",
             "User": "10001",
             "Hostname": (OLD_ID + "0123456789abcdef")[:12],
             "Entrypoint": ["java", "-jar", "/app/app.jar"],
@@ -176,7 +178,7 @@ class FakeDocker:
         self.calls = []
         self.removed = []
         self.containers = {
-            release.LIVE_NAME: {"id": FULL_ID, "running": True, "image": release.CURRENT_IMAGE_ID},
+            release.LIVE_NAME: {"id": FULL_ID, "running": True, "image": CURRENT_IMAGE_ID},
             "coderzclub-api-before-batch-mgmt": {
                 "id": "october-parked", "running": False, "image": "sha256:historical",
             },
@@ -461,7 +463,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertTrue(result["envRemoved"])
         self.assertFalse(result["restored"])
         self.assertEqual(docker.container_id(release.LIVE_NAME), "new-container")
-        self.assertEqual(docker.image_id(self.settings["parkedName"]), release.CURRENT_IMAGE_ID)
+        self.assertEqual(docker.image_id(self.settings["parkedName"]), CURRENT_IMAGE_ID)
         self.assertFalse(docker.running(self.settings["parkedName"]))
         self.assertIn("coderzclub-api-before-batch-mgmt", docker.containers)
         self.assertEqual(docker.calls.count("remove"), 0)
@@ -470,7 +472,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
     def test_rollback_removes_only_the_new_live_container(self):
         docker = FakeDocker()
         self.swap(docker, FakeHttp())
-        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"])
+        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"], CURRENT_IMAGE_ID)
         self.assertTrue(outcome["ok"])
         self.assertEqual(docker.removed, [release.LIVE_NAME])
         self.assertEqual(docker.container_id(release.LIVE_NAME), FULL_ID)
@@ -480,14 +482,14 @@ class ApiReleaseSafetyTest(unittest.TestCase):
     def test_rollback_stops_when_live_image_is_not_the_new_digest(self):
         docker = FakeDocker()
         docker.containers[self.settings["parkedName"]] = {
-            "id": "parked-old", "running": False, "image": release.CURRENT_IMAGE_ID,
+            "id": "parked-old", "running": False, "image": CURRENT_IMAGE_ID,
         }
-        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"])
+        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"], CURRENT_IMAGE_ID)
         self.assertFalse(outcome["ok"])
         self.assertEqual(docker.removed, [])
         self.assertEqual(docker.container_id(release.LIVE_NAME), FULL_ID)
         self.assertIn(self.settings["parkedName"], docker.containers)
-        historical = release.rollback(docker, NEW_DIGEST, "coderzclub-api-before-batch-mgmt")
+        historical = release.rollback(docker, NEW_DIGEST, "coderzclub-api-before-batch-mgmt", CURRENT_IMAGE_ID)
         self.assertFalse(historical["ok"])
         self.assertEqual(docker.removed, [])
         self.assertIn("coderzclub-api-before-batch-mgmt", docker.containers)
@@ -552,15 +554,15 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertEqual(docker.calls, [])
         self.assertTrue(any("com.coderzclub.deployed-by" in item for item in result["errors"]))
 
-    def test_release_814037d_configuration_and_invalid_values(self):
+    def test_release_a37c5a5_configuration_and_invalid_values(self):
         parsed = self.settings
-        self.assertEqual(parsed["releaseId"], "814037d")
-        self.assertEqual(parsed["image"], "coderzclub-backend:api-814037d")
-        self.assertEqual(parsed["confirm"], "api-814037d")
-        self.assertEqual(parsed["parkedName"], "coderzclub-api-before-814037d")
-        self.assertEqual(parsed["envFilename"], "cz-api-814037d.env")
-        self.assertEqual(parsed["directoryName"], "cz-api-814037d")
-        self.assertEqual(parsed["currentImageId"], release.CURRENT_IMAGE_ID)
+        self.assertEqual(parsed["releaseId"], "a37c5a5")
+        self.assertEqual(parsed["image"], "coderzclub-backend:api-a37c5a5")
+        self.assertEqual(parsed["confirm"], "api-a37c5a5")
+        self.assertEqual(parsed["parkedName"], "coderzclub-api-before-a37c5a5")
+        self.assertEqual(parsed["envFilename"], "cz-api-a37c5a5.env")
+        self.assertEqual(parsed["directoryName"], "cz-api-a37c5a5")
+        self.assertEqual(parsed["currentImageId"], CURRENT_IMAGE_ID)
         missing = release.parse_release({}, True)
         self.assertTrue(missing["errors"])
         invalid = release.parse_release(release_env(
@@ -575,7 +577,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
 
     def test_wrong_expected_image_digest_is_rejected(self):
         wrong = dict(self.settings)
-        wrong["currentImageId"] = "sha256:" + ("b" * 64)
+        wrong["currentImageId"] = "sha256:" + ("d" * 64)
         wrong["errors"] = []
         docker = FakeDocker()
         result = release.execute_swap(
@@ -586,14 +588,87 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertEqual(docker.calls, [])
         self.assertTrue(any("expected digest" in item for item in result["errors"]))
 
+    def test_swap_uses_immutable_image_and_checks_created_container(self):
+        docker = FakeDocker()
+        result = self.swap(docker, FakeHttp())
+        self.assertIn(NEW_DIGEST, result["argv"])
+        self.assertNotIn(self.settings["image"], result["argv"])
+        wrong = FakeDocker()
+        original_create = wrong.create
+        def create_bad(argv):
+            original_create(argv)
+            wrong.containers[release.LIVE_NAME]["image"] = "sha256:" + "c" * 64
+        wrong.create = create_bad
+        failed = self.swap(wrong, FakeHttp())
+        self.assertFalse(failed["ok"])
+        self.assertTrue(failed["restored"])
+
+    def test_rollback_rejects_wrong_parked_image_before_stopping_live(self):
+        docker = FakeDocker()
+        self.swap(docker, FakeHttp())
+        docker.containers[self.settings["parkedName"]]["image"] = "sha256:" + "c" * 64
+        calls = list(docker.calls)
+        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"], CURRENT_IMAGE_ID)
+        self.assertFalse(outcome["ok"])
+        self.assertEqual(docker.calls, calls)
+        self.assertTrue(docker.running(release.LIVE_NAME))
+
+    def test_probe_requires_dependency_health_not_only_readiness(self):
+        for status, body in [(503, '{"status":"DOWN"}'), (200, '{"status":"DOWN"}'), (200, 'bad')]:
+            with patch.object(release, "_http_get", side_effect=[
+                (200, '{"status":"UP"}'), (200, "Problems endpoint is working"), (status, body)
+            ]) as get:
+                self.assertFalse(release.service_ready(*release.ApiProbe("").health()))
+                self.assertEqual(get.call_count, 3)
+        with patch.object(release, "_http_get", side_effect=[
+            (200, '{"status":"UP"}'), (200, "Problems endpoint is working"), (200, '{"status":"UP"}')
+        ]):
+            self.assertTrue(release.service_ready(*release.ApiProbe("").health()))
+
+    def test_dry_run_lists_full_preflight_failures_and_redacts_srv_uri(self):
+        summary = release.dry_run_summary(self.record, self.names, self.settings, None)
+        self.assertIn("new image is not loaded at the expected digest", summary["preflightErrors"])
+        self.assertNotIn("mongodb+srv://", release.redact("mongodb+srv://user:secret@invalid", []))
+
+    def test_restore_refuses_changed_backup_before_removing_new_container(self):
+        docker = FakeDocker()
+        create = docker.create
+        def changed_backup(argv):
+            create(argv)
+            docker.containers[self.settings["parkedName"]]["id"] = "unexpected-container"
+            raise RuntimeError("create response lost")
+        docker.create = changed_backup
+        result = self.swap(docker, FakeHttp())
+        self.assertFalse(result["restored"])
+        self.assertEqual(docker.removed, [])
+        self.assertEqual(docker.container_id(release.LIVE_NAME), "new-container")
+
+    def test_docker_config_stop_timeout_and_unlimited_swap_are_preserved(self):
+        payload = inspect_payload()
+        payload["Config"]["StopTimeout"] = 90
+        payload["HostConfig"]["MemorySwap"] = -1
+        record = release.safe_record(payload)
+        self.assertEqual(record["stopTimeout"], 90)
+        argv = release.create_argv(record, NEW_DIGEST, "/tmp/audit.env")
+        self.assertIn("--stop-timeout=90", argv)
+        self.assertIn("--memory-swap=-1", argv)
+
+    def test_automatic_restore_reports_health_separately(self):
+        result = self.swap(FakeDocker(fail="create"), FakeHttp())
+        self.assertTrue(result["restored"])
+        self.assertTrue(result["restoredHealthy"])
+        result = self.swap(FakeDocker(fail="create"), FakeHttp(health=False))
+        self.assertTrue(result["restored"])
+        self.assertFalse(result["restoredHealthy"])
+
     def test_dry_run_reports_labels_without_docker_changes(self):
         docker = FakeDocker()
         summary = release.dry_run_summary(self.record, self.names, self.settings, None)
         self.assertEqual(docker.calls, [])
         self.assertEqual(summary["mutation"], "none")
         self.assertTrue(summary["parkedNameFree"])
-        self.assertEqual(summary["releaseId"], "814037d")
-        self.assertEqual(summary["expectedCurrentImageId"], release.CURRENT_IMAGE_ID)
+        self.assertEqual(summary["releaseId"], "a37c5a5")
+        self.assertEqual(summary["expectedCurrentImageId"], CURRENT_IMAGE_ID)
         for key in release.OCI_IMAGE_LABELS:
             self.assertIn(key, summary["labelKeys"])
             self.assertIn(key, summary["ociLabels"])

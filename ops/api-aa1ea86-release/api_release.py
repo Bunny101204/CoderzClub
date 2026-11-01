@@ -20,7 +20,6 @@ import urllib.error
 import urllib.request
 
 LIVE_NAME = "coderzclub-api"
-CURRENT_IMAGE_ID = "sha256:5fdb39d431e09d729a6b8216b67368d9e727163d84d40eec056d854aa553f6e0"
 EXPECTED_HOSTNAME = "coderzclub-api-1"
 IMAGE_ENTRYPOINT = ["java", "-jar", "/app/app.jar"]
 REQUIRED_CORS = "https://coderzclub.site,https://coderzclub.coderzclub1.workers.dev"
@@ -320,7 +319,8 @@ def safe_record(data):
         "devices": devices,
         "cgroupns": host.get("CgroupnsMode") or "",
         "healthcheck": _health(config.get("Healthcheck")),
-        "stopTimeout": host.get("StopTimeout") if host.get("StopTimeout") is not None else STOP_FALLBACK,
+        "stopTimeout": config.get("StopTimeout") if config.get("StopTimeout") is not None
+            else (host.get("StopTimeout") if host.get("StopTimeout") is not None else STOP_FALLBACK),
         "labelKeys": sorted(labels),
         "ociLabels": {key: labels[key] for key in sorted(OCI_IMAGE_LABELS) if key in labels},
         "unsupported": unsupported_settings(host),
@@ -439,7 +439,7 @@ def create_argv(record, image, env_file):
     if (record.get("memoryReservation") or 0) > 0:
         argv.append(f"--memory-reservation={record['memoryReservation']}")
     swap = record.get("memorySwap") or 0
-    if swap > 0:
+    if swap != 0:
         argv.append(f"--memory-swap={swap}")
     if (record.get("nanoCpus") or 0) > 0:
         argv.append(f"--cpus={record['nanoCpus'] / 1_000_000_000:.3f}".rstrip("0").rstrip("."))
@@ -673,7 +673,7 @@ def redact(text, secrets):
         if secret and len(secret) >= 8 and secret in redacted:
             redacted = redacted.replace(secret, "[redacted]")
     lowered = redacted.lower()
-    if "mongodb://" in lowered or "password=" in lowered or "bearer " in lowered:
+    if any(marker in lowered for marker in ("mongodb://", "mongodb+srv://", "password=", "bearer ")):
         return "command failed; secret-bearing output was redacted"
     return redacted
 
@@ -713,6 +713,9 @@ class SwapState:
 def restore(docker, state):
     try:
         if parked_name_errors(state.parked_name):
+            return False
+        if state.renamed and (not docker.exists(state.parked_name)
+                or docker.container_id(state.parked_name) != state.parked_id):
             return False
         if state.created and docker.exists(LIVE_NAME):
             current_id = docker.container_id(LIVE_NAME)
@@ -767,13 +770,15 @@ def execute_swap(
     release = release or {"errors": ["release configuration is missing"]}
     errors = preflight(record, existing_names, loaded_new_image_id, release)
     env_filename = release.get("envFilename") or ""
-    argv = create_argv(record, release.get("image") or "", os.path.join(directory, env_filename))
+    # Pin the verified image ID; a mutable tag can change after preflight.
+    argv = create_argv(record, release.get("newImageId") or "", os.path.join(directory, env_filename))
     errors.extend(preservation_gaps(record, argv))
     result = {
         "ok": False,
         "accepted": False,
         "healthy": False,
         "restored": False,
+        "restoredHealthy": False,
         "mutated": False,
         "enrollmentChecked": False,
         "envRemoved": True,
@@ -805,6 +810,8 @@ def execute_swap(
                 state.created = True
             raise
         state.created = True
+        if docker.image_id(LIVE_NAME) != release.get("newImageId"):
+            raise RuntimeError("created container image differs from the verified image")
         if docker.running(parked_name):
             raise RuntimeError("previous container started again before handoff")
         docker.start(LIVE_NAME)
@@ -834,6 +841,10 @@ def execute_swap(
         result["ok"] = False
         result["accepted"] = False
         result["errors"] = [redact(str(exc), secrets)]
+        if result["restored"]:
+            result["restoredHealthy"] = _wait_ready(http, clock, sleep, timeout)
+            if not result["restoredHealthy"]:
+                result["errors"].append("previous container restored but readiness failed")
         return result
     finally:
         if env_path:
@@ -870,7 +881,7 @@ def deployment_mode(environ, hostname):
     return "swap", ""
 
 
-def rollback(docker, new_image_id, parked_name):
+def rollback(docker, new_image_id, parked_name, expected_old_image_id):
     """Start the release's parked container. Never removes historical containers."""
     errors = parked_name_errors(parked_name)
     if errors:
@@ -879,6 +890,10 @@ def rollback(docker, new_image_id, parked_name):
         return {"ok": False, "errors": ["new image digest is missing"]}
     if not docker.exists(parked_name):
         return {"ok": False, "errors": [f"{parked_name} is not present"]}
+    if not DIGEST_RE.fullmatch(expected_old_image_id or "") or expected_old_image_id == new_image_id:
+        return {"ok": False, "errors": ["expected previous image digest is invalid"]}
+    if docker.image_id(parked_name) != expected_old_image_id:
+        return {"ok": False, "errors": ["parked container is not the expected previous image"]}
     removed_live = False
     if docker.exists(LIVE_NAME):
         if docker.image_id(LIVE_NAME) != new_image_id:
@@ -895,7 +910,7 @@ def rollback(docker, new_image_id, parked_name):
         docker.start(parked_name)
     docker.rename(parked_name, LIVE_NAME)
     return {
-        "ok": docker.running(LIVE_NAME) and docker.image_id(LIVE_NAME) != new_image_id,
+        "ok": docker.running(LIVE_NAME) and docker.image_id(LIVE_NAME) == expected_old_image_id,
         "removedLive": removed_live,
         "errors": [],
     }
@@ -923,6 +938,10 @@ class ApiProbe:
     def health(self):
         ready_status, ready_text = _http_get("http://10.20.0.4:8081/actuator/health/readiness")
         app_status, app_text = _http_get("http://10.20.0.4:8080/api/problems/test")
+        # Spring readiness alone does not include Mongo, Redis or Rabbit health.
+        dependencies_status, dependencies_text = _http_get("http://10.20.0.4:8081/actuator/health")
+        if dependencies_status != 200 or not ready_body(dependencies_text):
+            return None, "", app_status, app_text
         return ready_status, ready_text, app_status, app_text
 
     def batches(self):
@@ -1010,6 +1029,7 @@ def dry_run_summary(record, names, release, loaded_image_id):
     )
     summary["octoberCommandOmissions"] = previous_plan_omissions(record)
     summary["labelErrors"] = unexpected_labels((record or {}).get("labelKeys"))
+    summary["preflightErrors"] = preflight(record, names, loaded_image_id, release)
     summary["mutation"] = "none"
     return summary
 
@@ -1036,7 +1056,11 @@ def main(environ=None, hostname=None):
         if parsed["errors"]:
             print(parsed["errors"][0], file=sys.stderr)
             return 2
-        outcome = rollback(DockerCli(), parsed["newImageId"], parsed["parkedName"])
+        outcome = rollback(DockerCli(), parsed["newImageId"], parsed["parkedName"], parsed["currentImageId"])
+        if outcome.get("ok") and not _wait_ready(
+            ApiProbe(""), __import__("time").monotonic, __import__("time").sleep, 120
+        ):
+            outcome = {"ok": False, "errors": ["previous container restored but readiness failed"]}
         print("rolledBack=" + ("yes" if outcome.get("ok") else "no"))
         if outcome.get("errors"):
             print("errors=" + "; ".join(outcome["errors"]), file=sys.stderr)
@@ -1061,7 +1085,7 @@ def main(environ=None, hostname=None):
         summary = dry_run_summary(record, names, parsed, loaded)
         print(json.dumps(summary, indent=2, sort_keys=True))
         print("mutation=none")
-        return 0
+        return 2 if summary["preflightErrors"] or summary["preservationGaps"] else 0
     directory = os.path.join("/tmp", parsed["directoryName"])
     os.makedirs(directory, mode=0o700, exist_ok=False)
     os.chmod(directory, 0o700)
@@ -1078,7 +1102,7 @@ def main(environ=None, hostname=None):
             parsed,
             require_enrollment=True,
             expected_batch_name=environ.get("ENROLLED_BATCH_NAME") or "batch-1",
-            clock=__import__("time").time,
+            clock=__import__("time").monotonic,
             sleep=__import__("time").sleep,
         )
     finally:
@@ -1091,10 +1115,11 @@ def main(environ=None, hostname=None):
     print("accepted=" + ("yes" if result.get("accepted") else "no"))
     print("healthy=" + ("yes" if result.get("healthy") else "no"))
     print("restored=" + ("yes" if result.get("restored") else "no"))
+    print("restoredHealthy=" + ("yes" if result.get("restoredHealthy") else "no"))
     print("envRemoved=" + ("yes" if result.get("envRemoved") else "no"))
     if result.get("errors"):
         print("errors=" + "; ".join(result["errors"]), file=sys.stderr)
-    return 0 if result.get("accepted") else 4
+    return 0 if result.get("accepted") and result.get("envRemoved") else 4
 
 
 if __name__ == "__main__":
