@@ -14,6 +14,22 @@ SECRET = "mongodb://unit-test-secret-value"
 NEW_DIGEST = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 OLD_ID = "old-container-id"
 FULL_ID = OLD_ID + "0123456789abcdef"
+RELEASE_ID = "814037d"
+
+
+def release_env(**overrides):
+    env = {
+        "RELEASE_ID": RELEASE_ID,
+        "EXPECTED_HOSTNAME": release.EXPECTED_HOSTNAME,
+        "EXPECTED_CURRENT_IMAGE_ID": release.CURRENT_IMAGE_ID,
+        "EXPECTED_NEW_IMAGE_ID": NEW_DIGEST,
+        "NEW_IMAGE": "coderzclub-backend:api-" + RELEASE_ID,
+        "CONFIRM_DEPLOY": "api-" + RELEASE_ID,
+        "ROLLBACK_CONTAINER": "coderzclub-api-before-" + RELEASE_ID,
+        "ENV_FILENAME": "cz-api-" + RELEASE_ID + ".env",
+    }
+    env.update(overrides)
+    return env
 
 
 def inspect_payload(secret=SECRET):
@@ -38,7 +54,12 @@ def inspect_payload(secret=SECRET):
                 "SUBMISSION_QUEUE_NAME=coderzclub.submissions",
                 "CONTEST_RUN_QUEUE_NAME=coderzclub.contest-runs",
             ],
-            "Labels": {},
+            "Labels": {
+                "org.opencontainers.image.created": "2026-10-17T00:00:00Z",
+                "org.opencontainers.image.description": "CoderzClub API",
+                "org.opencontainers.image.title": "coderzclub-backend",
+                "org.opencontainers.image.version": "batch-mgmt-20261017",
+            },
             "Healthcheck": {
                 "Test": ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8081/actuator/health/readiness"],
                 "Interval": 30_000_000_000,
@@ -245,6 +266,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
     def setUp(self):
         self.record = release.safe_record(inspect_payload())
         self.names = [release.LIVE_NAME, "coderzclub-api-before-batch-mgmt", "coderzclub-api-before-cors"]
+        self.settings = release.parse_release(release_env(), True)
         self.directory = tempfile.TemporaryDirectory()
         self.chmod_modes = []
 
@@ -264,7 +286,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
             "MONGODB_URI=" + SECRET + "\n",
             self.directory.name,
             NEW_DIGEST,
-            NEW_DIGEST,
+            self.settings,
             require_enrollment=require,
             expected_batch_name="batch-1",
             clock=clock or (lambda: 0),
@@ -292,7 +314,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertEqual(self.record["unsupported"], [])
 
     def test_new_command_preserves_settings_the_october_command_drops(self):
-        argv = release.create_argv(self.record, release.NEW_IMAGE, "/tmp/cz-api-aa1ea86.env")
+        argv = release.create_argv(self.record, self.settings["image"], "/tmp/" + self.settings["envFilename"])
         self.assertEqual(release.preservation_gaps(self.record, argv), [])
         self.assertIn("--memory=536870912", argv)
         self.assertIn("--log-driver=json-file", argv)
@@ -304,9 +326,13 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertIn("--tmpfs=/tmp:rw,noexec,nosuid,size=64m", argv)
         self.assertIn("--device=/dev/net/tun:/dev/net/tun:rwm", argv)
         self.assertIn("--init", argv)
-        self.assertIn("--env-file=/tmp/cz-api-aa1ea86.env", argv)
-        self.assertNotIn(SECRET, "\n".join(argv))
-        self.assertEqual(argv[-1], release.NEW_IMAGE)
+        self.assertIn("--env-file=/tmp/" + self.settings["envFilename"], argv)
+        joined = "\n".join(argv)
+        self.assertNotIn(SECRET, joined)
+        self.assertNotIn("--label", joined)
+        self.assertNotIn("batch-mgmt-20261017", joined)
+        self.assertNotIn("2026-10-17T00:00:00Z", joined)
+        self.assertEqual(argv[-1], self.settings["image"])
         omissions = release.previous_plan_omissions(self.record)
         self.assertIn("logging", omissions)
         self.assertIn("resource limits", omissions)
@@ -332,11 +358,12 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertNotIn("--mount", old_text)
         self.assertNotIn("--health-cmd", old_text)
         self.assertNotIn("--cap-add", old_text)
-        self.assertNotIn(release.NEW_IMAGE, old_text)
+        self.assertNotIn(self.settings["image"], old_text)
 
     def test_existing_rollback_names_do_not_conflict_until_the_new_name_exists(self):
-        self.assertEqual(release.name_conflicts(self.names), [])
-        self.assertTrue(release.name_conflicts(self.names + [release.PARKED_NAME]))
+        parked = self.settings["parkedName"]
+        self.assertEqual(release.name_conflicts(self.names, parked), [])
+        self.assertTrue(release.name_conflicts(self.names + [parked], parked))
 
     def test_contract_rejects_missing_enrolled_field_and_forbidden_keys(self):
         self.assertTrue(release.enrollment_errors(200, {"batches": []}))
@@ -362,7 +389,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertIn("enrollment", result["errors"][0])
         missing = release.execute_swap(
             self.record, self.names, docker, FakeHttp(), "MONGODB_URI=" + SECRET,
-            self.directory.name, None, NEW_DIGEST, require_enrollment=True,
+            self.directory.name, None, self.settings, require_enrollment=True,
         )
         self.assertFalse(missing["mutated"])
         self.assertTrue(any("digest" in item for item in missing["errors"]))
@@ -374,10 +401,10 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertTrue(result["restored"])
         self.assertTrue(result["envRemoved"])
         self.assertIn(0o600, self.chmod_modes)
-        self.assertFalse(os.path.exists(os.path.join(self.directory.name, release.ENV_FILENAME)))
+        self.assertFalse(os.path.exists(os.path.join(self.directory.name, self.settings["envFilename"])))
         self.assertEqual(docker.container_id(release.LIVE_NAME), FULL_ID)
         self.assertTrue(docker.running(release.LIVE_NAME))
-        self.assertNotIn(release.PARKED_NAME, docker.containers)
+        self.assertNotIn(self.settings["parkedName"], docker.containers)
         self.assertIn("coderzclub-api-before-batch-mgmt", docker.containers)
         self.assertNotIn(SECRET, "\n".join(result["errors"]))
 
@@ -408,7 +435,7 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         result = self.swap(exploded, FakeHttp())
         self.assertTrue(result["restored"])
         self.assertTrue(result["envRemoved"])
-        self.assertFalse(os.path.exists(os.path.join(self.directory.name, release.ENV_FILENAME)))
+        self.assertFalse(os.path.exists(os.path.join(self.directory.name, self.settings["envFilename"])))
 
     def test_readiness_timeout_and_bad_enrollment_roll_back(self):
         clock = Clock()
@@ -434,16 +461,16 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         self.assertTrue(result["envRemoved"])
         self.assertFalse(result["restored"])
         self.assertEqual(docker.container_id(release.LIVE_NAME), "new-container")
-        self.assertEqual(docker.image_id(release.PARKED_NAME), release.CURRENT_IMAGE_ID)
-        self.assertFalse(docker.running(release.PARKED_NAME))
+        self.assertEqual(docker.image_id(self.settings["parkedName"]), release.CURRENT_IMAGE_ID)
+        self.assertFalse(docker.running(self.settings["parkedName"]))
         self.assertIn("coderzclub-api-before-batch-mgmt", docker.containers)
         self.assertEqual(docker.calls.count("remove"), 0)
-        self.assertFalse(os.path.exists(os.path.join(self.directory.name, release.ENV_FILENAME)))
+        self.assertFalse(os.path.exists(os.path.join(self.directory.name, self.settings["envFilename"])))
 
     def test_rollback_removes_only_the_new_live_container(self):
         docker = FakeDocker()
         self.swap(docker, FakeHttp())
-        outcome = release.rollback(docker, NEW_DIGEST)
+        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"])
         self.assertTrue(outcome["ok"])
         self.assertEqual(docker.removed, [release.LIVE_NAME])
         self.assertEqual(docker.container_id(release.LIVE_NAME), FULL_ID)
@@ -452,34 +479,34 @@ class ApiReleaseSafetyTest(unittest.TestCase):
 
     def test_rollback_stops_when_live_image_is_not_the_new_digest(self):
         docker = FakeDocker()
-        docker.containers[release.PARKED_NAME] = {
+        docker.containers[self.settings["parkedName"]] = {
             "id": "parked-old", "running": False, "image": release.CURRENT_IMAGE_ID,
         }
-        outcome = release.rollback(docker, NEW_DIGEST)
+        outcome = release.rollback(docker, NEW_DIGEST, self.settings["parkedName"])
         self.assertFalse(outcome["ok"])
         self.assertEqual(docker.removed, [])
         self.assertEqual(docker.container_id(release.LIVE_NAME), FULL_ID)
-        self.assertIn(release.PARKED_NAME, docker.containers)
+        self.assertIn(self.settings["parkedName"], docker.containers)
+        historical = release.rollback(docker, NEW_DIGEST, "coderzclub-api-before-batch-mgmt")
+        self.assertFalse(historical["ok"])
+        self.assertEqual(docker.removed, [])
+        self.assertIn("coderzclub-api-before-batch-mgmt", docker.containers)
 
     def test_workstation_and_mixed_flags_cannot_select_a_swap(self):
-        ready = {
-            "EXPECTED_HOSTNAME": release.EXPECTED_HOSTNAME,
-            "CONFIRM_DEPLOY": release.CONFIRM,
-            "ENROLLMENT_BEARER": "present-but-not-printed",
-            "EXPECTED_NEW_IMAGE_ID": "sha256:" + ("ab" * 32),
-        }
+        ready = release_env(
+            ENROLLMENT_BEARER="present-but-not-printed",
+        )
         self.assertEqual(release.deployment_mode(ready, "DESKTOP-WORKSTATION")[0], "refuse")
         mixed = dict(ready)
         mixed["DRY_RUN"] = "yes"
         self.assertEqual(release.deployment_mode(mixed, release.EXPECTED_HOSTNAME)[0], "refuse")
-        dry = {"DRY_RUN": "yes", "EXPECTED_HOSTNAME": release.EXPECTED_HOSTNAME}
+        dry = release_env()
+        dry.pop("CONFIRM_DEPLOY")
+        dry["DRY_RUN"] = "yes"
         self.assertEqual(release.deployment_mode(dry, release.EXPECTED_HOSTNAME)[0], "dry-run")
-        rollback_env = {
-            "ROLLBACK": "yes",
-            "EXPECTED_HOSTNAME": release.EXPECTED_HOSTNAME,
-            "CONFIRM_DEPLOY": release.CONFIRM,
-            "EXPECTED_NEW_IMAGE_ID": ready["EXPECTED_NEW_IMAGE_ID"],
-        }
+        self.assertEqual(release.deployment_mode({"DRY_RUN": "yes", "EXPECTED_HOSTNAME": release.EXPECTED_HOSTNAME}, release.EXPECTED_HOSTNAME)[0], "refuse")
+        rollback_env = release_env(ROLLBACK="yes")
+        rollback_env.pop("ENROLLMENT_BEARER", None)
         self.assertEqual(release.deployment_mode(rollback_env, release.EXPECTED_HOSTNAME)[0], "rollback")
         self.assertEqual(release.deployment_mode(rollback_env, "DESKTOP-WORKSTATION")[0], "refuse")
         self.assertEqual(release.main(mixed, release.EXPECTED_HOSTNAME), 2)
@@ -488,18 +515,91 @@ class ApiReleaseSafetyTest(unittest.TestCase):
         docker = FakeDocker()
         result = release.execute_swap(
             self.record,
-            self.names + [release.PARKED_NAME],
+            self.names + [self.settings["parkedName"]],
             docker,
             FakeHttp(),
             "MONGODB_URI=" + SECRET,
             self.directory.name,
             NEW_DIGEST,
-            NEW_DIGEST,
+            self.settings,
             require_enrollment=True,
         )
         self.assertFalse(result["mutated"])
         self.assertEqual(docker.calls, [])
-        self.assertTrue(any(release.PARKED_NAME in item for item in result["errors"]))
+        self.assertTrue(any(self.settings["parkedName"] in item for item in result["errors"]))
+
+    def test_standard_oci_labels_are_accepted_and_not_copied(self):
+        self.assertEqual(self.settings["errors"], [])
+        self.assertEqual(release.unexpected_labels(self.record["labelKeys"]), [])
+        self.assertEqual(release.preflight(self.record, self.names, NEW_DIGEST, self.settings), [])
+        self.assertEqual(
+            set(self.record["ociLabels"]),
+            set(release.OCI_IMAGE_LABELS),
+        )
+        argv = release.create_argv(self.record, self.settings["image"], "/tmp/" + self.settings["envFilename"])
+        self.assertNotIn(self.record["ociLabels"]["org.opencontainers.image.version"], "\n".join(argv))
+        self.assertNotIn(self.record["ociLabels"]["org.opencontainers.image.created"], "\n".join(argv))
+
+    def test_unexpected_labels_are_rejected_before_mutation(self):
+        labeled = dict(self.record)
+        labeled["labelKeys"] = list(self.record["labelKeys"]) + ["com.coderzclub.deployed-by"]
+        docker = FakeDocker()
+        result = release.execute_swap(
+            labeled, self.names, docker, FakeHttp(), "MONGODB_URI=" + SECRET,
+            self.directory.name, NEW_DIGEST, self.settings, require_enrollment=True,
+        )
+        self.assertFalse(result["mutated"])
+        self.assertEqual(docker.calls, [])
+        self.assertTrue(any("com.coderzclub.deployed-by" in item for item in result["errors"]))
+
+    def test_release_814037d_configuration_and_invalid_values(self):
+        parsed = self.settings
+        self.assertEqual(parsed["releaseId"], "814037d")
+        self.assertEqual(parsed["image"], "coderzclub-backend:api-814037d")
+        self.assertEqual(parsed["confirm"], "api-814037d")
+        self.assertEqual(parsed["parkedName"], "coderzclub-api-before-814037d")
+        self.assertEqual(parsed["envFilename"], "cz-api-814037d.env")
+        self.assertEqual(parsed["directoryName"], "cz-api-814037d")
+        self.assertEqual(parsed["currentImageId"], release.CURRENT_IMAGE_ID)
+        missing = release.parse_release({}, True)
+        self.assertTrue(missing["errors"])
+        invalid = release.parse_release(release_env(
+            RELEASE_ID="latest",
+            NEW_IMAGE="coderzclub-backend:latest",
+            CONFIRM_DEPLOY="api-aa1ea866bcd",
+            ROLLBACK_CONTAINER="coderzclub-api",
+        ), True)
+        self.assertTrue(invalid["errors"])
+        self.assertEqual(release.deployment_mode(release_env(CONFIRM_DEPLOY="api-aa1ea866bcd"), release.EXPECTED_HOSTNAME)[0], "refuse")
+        self.assertEqual(release.deployment_mode(release_env(NEW_IMAGE="coderzclub-backend:batch-mgmt-20261017"), release.EXPECTED_HOSTNAME)[0], "refuse")
+
+    def test_wrong_expected_image_digest_is_rejected(self):
+        wrong = dict(self.settings)
+        wrong["currentImageId"] = "sha256:" + ("b" * 64)
+        wrong["errors"] = []
+        docker = FakeDocker()
+        result = release.execute_swap(
+            self.record, self.names, docker, FakeHttp(), "MONGODB_URI=" + SECRET,
+            self.directory.name, NEW_DIGEST, wrong, require_enrollment=True,
+        )
+        self.assertFalse(result["mutated"])
+        self.assertEqual(docker.calls, [])
+        self.assertTrue(any("expected digest" in item for item in result["errors"]))
+
+    def test_dry_run_reports_labels_without_docker_changes(self):
+        docker = FakeDocker()
+        summary = release.dry_run_summary(self.record, self.names, self.settings, None)
+        self.assertEqual(docker.calls, [])
+        self.assertEqual(summary["mutation"], "none")
+        self.assertTrue(summary["parkedNameFree"])
+        self.assertEqual(summary["releaseId"], "814037d")
+        self.assertEqual(summary["expectedCurrentImageId"], release.CURRENT_IMAGE_ID)
+        for key in release.OCI_IMAGE_LABELS:
+            self.assertIn(key, summary["labelKeys"])
+            self.assertIn(key, summary["ociLabels"])
+        self.assertEqual(summary["labelErrors"], [])
+        self.assertNotIn(SECRET, json.dumps(summary))
+        self.assertNotIn("MONGODB_URI=" + SECRET, json.dumps(summary))
 
 
 if __name__ == "__main__":

@@ -1,15 +1,17 @@
-"""Safety checks for the aa1ea86 API container swap.
+"""Safety checks for a configured CoderzClub API container swap.
 
 These functions do not talk to Docker, GCP, or the network. A fake Docker
 object is enough to exercise failure recovery. Production execution has to
-supply CONFIRM_DEPLOY=api-aa1ea866bcd on coderzclub-api-1 and is not invoked
-by importing this module.
+supply RELEASE_ID, the expected current image digest, and a matching
+CONFIRM_DEPLOY=api-<RELEASE_ID> on coderzclub-api-1. Importing this module
+does not run a swap.
 """
 
 import hashlib
 import ipaddress
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -18,15 +20,20 @@ import urllib.error
 import urllib.request
 
 LIVE_NAME = "coderzclub-api"
-PARKED_NAME = "coderzclub-api-before-aa1ea86"
-NEW_IMAGE = "coderzclub-backend:api-aa1ea866bcd"
 CURRENT_IMAGE_ID = "sha256:5fdb39d431e09d729a6b8216b67368d9e727163d84d40eec056d854aa553f6e0"
-CONFIRM = "api-aa1ea866bcd"
 EXPECTED_HOSTNAME = "coderzclub-api-1"
 IMAGE_ENTRYPOINT = ["java", "-jar", "/app/app.jar"]
 REQUIRED_CORS = "https://coderzclub.site,https://coderzclub.coderzclub1.workers.dev"
 REQUIRED_FRONTEND = "https://coderzclub.site"
-ENV_FILENAME = "cz-api-aa1ea86.env"
+PARKED_PREFIX = "coderzclub-api-before-"
+RELEASE_ID_RE = re.compile(r"^[0-9a-f]{7,40}$")
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+OCI_IMAGE_LABELS = frozenset({
+    "org.opencontainers.image.created",
+    "org.opencontainers.image.description",
+    "org.opencontainers.image.title",
+    "org.opencontainers.image.version",
+})
 DEFAULT_SHM = 64 * 1024 * 1024
 STOP_FALLBACK = 30
 KEEP_NAMES = {
@@ -55,6 +62,76 @@ FORBIDDEN_RESPONSE_KEYS = {
     "token",
 }
 PAGE_KEYS = ("currentPage", "totalPages", "totalItems")
+
+
+def unexpected_labels(label_keys):
+    return sorted(set(label_keys or []) - OCI_IMAGE_LABELS)
+
+
+def release_names(release_id):
+    return {
+        "image": f"coderzclub-backend:api-{release_id}",
+        "confirm": f"api-{release_id}",
+        "parkedName": f"{PARKED_PREFIX}{release_id}",
+        "envFilename": f"cz-api-{release_id}.env",
+        "directoryName": f"cz-api-{release_id}",
+    }
+
+
+def parked_name_errors(name):
+    if not name or name == LIVE_NAME or name in KEEP_NAMES or not name.startswith(PARKED_PREFIX):
+        return ["rollback container name is not safe"]
+    suffix = name[len(PARKED_PREFIX):]
+    if not RELEASE_ID_RE.fullmatch(suffix):
+        return ["rollback container name is not safe"]
+    return []
+
+
+def parse_release(environ, require_new_digest):
+    """Validate an explicit release. Safe names come from RELEASE_ID."""
+    environ = environ or {}
+    release_id = (environ.get("RELEASE_ID") or "").strip().lower()
+    errors = []
+    if not RELEASE_ID_RE.fullmatch(release_id):
+        errors.append("RELEASE_ID must be a 7-40 character hex commit id")
+        names = {"image": "", "confirm": "", "parkedName": "", "envFilename": "", "directoryName": ""}
+    else:
+        names = release_names(release_id)
+        errors.extend(parked_name_errors(names["parkedName"]))
+    image = (environ.get("NEW_IMAGE") or "").strip()
+    if image and image != names["image"]:
+        errors.append("NEW_IMAGE must be coderzclub-backend:api-<RELEASE_ID>")
+    elif not image:
+        image = names["image"]
+    current = (environ.get("EXPECTED_CURRENT_IMAGE_ID") or "").strip()
+    if not DIGEST_RE.fullmatch(current):
+        errors.append("EXPECTED_CURRENT_IMAGE_ID must be a sha256 digest")
+        current = ""
+    new_digest = (environ.get("EXPECTED_NEW_IMAGE_ID") or "").strip()
+    if new_digest and not DIGEST_RE.fullmatch(new_digest):
+        errors.append("EXPECTED_NEW_IMAGE_ID must be a sha256 digest")
+        new_digest = ""
+    elif require_new_digest and not DIGEST_RE.fullmatch(new_digest):
+        errors.append("EXPECTED_NEW_IMAGE_ID must be a sha256 digest")
+    if current and new_digest and current == new_digest:
+        errors.append("new image digest must differ from the current image digest")
+    rollback_name = (environ.get("ROLLBACK_CONTAINER") or "").strip()
+    if rollback_name and rollback_name != names["parkedName"]:
+        errors.append("ROLLBACK_CONTAINER does not match RELEASE_ID")
+    env_filename = (environ.get("ENV_FILENAME") or "").strip()
+    if env_filename and env_filename != names["envFilename"]:
+        errors.append("ENV_FILENAME does not match RELEASE_ID")
+    return {
+        "releaseId": release_id,
+        "image": image,
+        "currentImageId": current,
+        "newImageId": new_digest,
+        "confirm": names["confirm"],
+        "parkedName": names["parkedName"],
+        "envFilename": names["envFilename"],
+        "directoryName": names["directoryName"],
+        "errors": errors,
+    }
 
 
 def private_address(host_ip):
@@ -157,6 +234,7 @@ def safe_record(data):
     digest = hashlib.sha256("\n".join(sorted(env_list)).encode("utf-8")).hexdigest()
     keys, safe = _env_parts(env_list)
     del env_list
+    labels = dict(config.get("Labels") or {})
     host = data.get("HostConfig") or {}
     bindings = []
     for container_port, items in sorted((host.get("PortBindings") or {}).items()):
@@ -243,7 +321,8 @@ def safe_record(data):
         "cgroupns": host.get("CgroupnsMode") or "",
         "healthcheck": _health(config.get("Healthcheck")),
         "stopTimeout": host.get("StopTimeout") if host.get("StopTimeout") is not None else STOP_FALLBACK,
-        "labelKeys": sorted((config.get("Labels") or {})),
+        "labelKeys": sorted(labels),
+        "ociLabels": {key: labels[key] for key in sorted(OCI_IMAGE_LABELS) if key in labels},
         "unsupported": unsupported_settings(host),
     }
 
@@ -252,11 +331,11 @@ def public_summary(record):
     return dict(record)
 
 
-def name_conflicts(existing_names):
+def name_conflicts(existing_names, parked_name):
     existing = set(existing_names or [])
-    errors = []
-    if PARKED_NAME in existing:
-        errors.append(f"{PARKED_NAME} already exists")
+    errors = list(parked_name_errors(parked_name))
+    if parked_name and parked_name in existing:
+        errors.append(f"{parked_name} already exists")
     if LIVE_NAME not in existing:
         errors.append(f"{LIVE_NAME} is not present")
     return errors
@@ -273,13 +352,16 @@ def _binding_present(record, container_port, host_ip, host_port):
     return False
 
 
-def preflight(record, existing_names, loaded_new_image_id, expected_new_image_id):
+def preflight(record, existing_names, loaded_new_image_id, release):
     record = record or {}
-    errors = list(name_conflicts(existing_names))
+    release = release or {}
+    errors = list(release.get("errors") or [])
+    errors.extend(name_conflicts(existing_names, release.get("parkedName") or ""))
     if record.get("name") != LIVE_NAME:
         errors.append("inspect is not the live API container")
-    if record.get("imageId") != CURRENT_IMAGE_ID:
-        errors.append("live image is not the October API digest; refusing to guess a rollback target")
+    expected_current = release.get("currentImageId") or ""
+    if not expected_current or record.get("imageId") != expected_current:
+        errors.append("live image is not the expected digest; refusing to guess a rollback target")
     if record.get("status") != "running":
         errors.append("live API container is not running")
     if record.get("restart") != "unless-stopped":
@@ -305,10 +387,12 @@ def preflight(record, existing_names, loaded_new_image_id, expected_new_image_id
         errors.append("CORS origins differ from the approved pair")
     if safe.get("APP_FRONTEND_URL") != REQUIRED_FRONTEND:
         errors.append("frontend URL is not https://coderzclub.site")
-    if not expected_new_image_id or loaded_new_image_id != expected_new_image_id:
+    expected_new = release.get("newImageId") or ""
+    if not expected_new or loaded_new_image_id != expected_new:
         errors.append("new image is not loaded at the expected digest")
-    if record.get("labelKeys"):
-        errors.append("container labels need review before they can be preserved")
+    unexpected = unexpected_labels(record.get("labelKeys"))
+    if unexpected:
+        errors.append("unexpected container labels: " + ", ".join(unexpected))
     return errors
 
 
@@ -419,6 +503,8 @@ def create_argv(record, image, env_file):
     if entrypoint and entrypoint != IMAGE_ENTRYPOINT:
         argv.extend(entrypoint[1:])
     argv.extend(record.get("cmd") or [])
+    if any(str(item).startswith("--label=") or str(item) == "--label" for item in argv):
+        raise RuntimeError("refusing to copy image labels onto the new container")
     return argv
 
 
@@ -592,8 +678,10 @@ def redact(text, secrets):
     return redacted
 
 
-def write_restricted_env(directory, contents, chmod=os.chmod):
-    path = os.path.join(directory, ENV_FILENAME)
+def write_restricted_env(directory, contents, filename, chmod=os.chmod):
+    if not filename or "/" in filename or "\\" in filename or filename.startswith("."):
+        raise ValueError("environment filename is invalid")
+    path = os.path.join(directory, filename)
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
         os.write(fd, contents.encode("utf-8"))
@@ -615,24 +703,27 @@ def remove_env(path, chmod=os.chmod, remove=os.remove, exists=os.path.exists):
 
 
 class SwapState:
-    def __init__(self, parked_id):
+    def __init__(self, parked_id, parked_name):
         self.parked_id = parked_id
+        self.parked_name = parked_name
         self.renamed = False
         self.created = False
 
 
 def restore(docker, state):
     try:
+        if parked_name_errors(state.parked_name):
+            return False
         if state.created and docker.exists(LIVE_NAME):
             current_id = docker.container_id(LIVE_NAME)
             if current_id and current_id != state.parked_id:
                 docker.stop(LIVE_NAME)
                 docker.remove(LIVE_NAME)
-        if state.renamed and docker.exists(PARKED_NAME):
-            if not docker.running(PARKED_NAME):
-                docker.start(PARKED_NAME)
+        if state.renamed and docker.exists(state.parked_name):
+            if not docker.running(state.parked_name):
+                docker.start(state.parked_name)
             if not docker.exists(LIVE_NAME):
-                docker.rename(PARKED_NAME, LIVE_NAME)
+                docker.rename(state.parked_name, LIVE_NAME)
         return (
             docker.exists(LIVE_NAME)
             and docker.running(LIVE_NAME)
@@ -665,7 +756,7 @@ def execute_swap(
     env_text,
     directory,
     loaded_new_image_id,
-    expected_new_image_id,
+    release,
     require_enrollment=False,
     expected_batch_name="",
     clock=None,
@@ -673,8 +764,10 @@ def execute_swap(
     chmod=os.chmod,
     timeout=120,
 ):
-    errors = preflight(record, existing_names, loaded_new_image_id, expected_new_image_id)
-    argv = create_argv(record, NEW_IMAGE, os.path.join(directory, ENV_FILENAME))
+    release = release or {"errors": ["release configuration is missing"]}
+    errors = preflight(record, existing_names, loaded_new_image_id, release)
+    env_filename = release.get("envFilename") or ""
+    argv = create_argv(record, release.get("image") or "", os.path.join(directory, env_filename))
     errors.extend(preservation_gaps(record, argv))
     result = {
         "ok": False,
@@ -693,16 +786,17 @@ def execute_swap(
         return result
     clock = clock or (lambda: 0)
     sleep = sleep or (lambda _seconds: None)
-    state = SwapState(record.get("id"))
+    state = SwapState(record.get("id"), release.get("parkedName") or "")
     env_path = None
     secrets = [env_text]
+    parked_name = release.get("parkedName") or ""
     try:
-        env_path = write_restricted_env(directory, env_text, chmod=chmod)
-        docker.rename(LIVE_NAME, PARKED_NAME)
+        env_path = write_restricted_env(directory, env_text, env_filename, chmod=chmod)
+        docker.rename(LIVE_NAME, parked_name)
         state.renamed = True
         result["mutated"] = True
-        docker.stop(PARKED_NAME)
-        if docker.running(PARKED_NAME):
+        docker.stop(parked_name)
+        if docker.running(parked_name):
             raise RuntimeError("previous container is still running")
         try:
             docker.create(argv)
@@ -711,7 +805,7 @@ def execute_swap(
                 state.created = True
             raise
         state.created = True
-        if docker.running(PARKED_NAME):
+        if docker.running(parked_name):
             raise RuntimeError("previous container started again before handoff")
         docker.start(LIVE_NAME)
         if not _wait_ready(http, clock, sleep, timeout):
@@ -755,31 +849,41 @@ def deployment_mode(environ, hostname):
     if hostname != EXPECTED_HOSTNAME or environ.get("EXPECTED_HOSTNAME") != EXPECTED_HOSTNAME:
         return "refuse", "hostname is not coderzclub-api-1"
     if environ.get("ROLLBACK") == "yes":
-        if confirm != CONFIRM:
+        parsed = parse_release(environ, True)
+        if parsed["errors"]:
+            return "refuse", parsed["errors"][0]
+        if confirm != parsed["confirm"]:
             return "refuse", "confirmation token does not match this release"
-        if not str(environ.get("EXPECTED_NEW_IMAGE_ID") or "").startswith("sha256:"):
-            return "refuse", "new image digest is missing"
         return "rollback", ""
     if dry:
+        parsed = parse_release(environ, False)
+        if parsed["errors"]:
+            return "refuse", parsed["errors"][0]
         return "dry-run", ""
-    if confirm != CONFIRM:
+    parsed = parse_release(environ, True)
+    if parsed["errors"]:
+        return "refuse", parsed["errors"][0]
+    if confirm != parsed["confirm"]:
         return "refuse", "confirmation token does not match this release"
     if not environ.get("ENROLLMENT_BEARER"):
         return "refuse", "bunny12 enrollment token is missing"
-    if not str(environ.get("EXPECTED_NEW_IMAGE_ID") or "").startswith("sha256:"):
-        return "refuse", "new image digest is missing"
     return "swap", ""
 
 
-def rollback(docker, new_image_id):
-    """Put coderzclub-api-before-aa1ea86 back. Never removes historical containers."""
-    if not docker.exists(PARKED_NAME):
-        return {"ok": False, "errors": [f"{PARKED_NAME} is not present"]}
+def rollback(docker, new_image_id, parked_name):
+    """Start the release's parked container. Never removes historical containers."""
+    errors = parked_name_errors(parked_name)
+    if errors:
+        return {"ok": False, "errors": errors}
+    if not DIGEST_RE.fullmatch(new_image_id or ""):
+        return {"ok": False, "errors": ["new image digest is missing"]}
+    if not docker.exists(parked_name):
+        return {"ok": False, "errors": [f"{parked_name} is not present"]}
     removed_live = False
     if docker.exists(LIVE_NAME):
         if docker.image_id(LIVE_NAME) != new_image_id:
             return {"ok": False, "errors": ["live container is not the new image; rollback stopped"]}
-        if docker.container_id(LIVE_NAME) == docker.container_id(PARKED_NAME):
+        if docker.container_id(LIVE_NAME) == docker.container_id(parked_name):
             return {"ok": False, "errors": ["refusing to remove the parked container"]}
         docker.stop(LIVE_NAME)
         docker.remove(LIVE_NAME)
@@ -787,9 +891,9 @@ def rollback(docker, new_image_id):
     for name in KEEP_NAMES:
         if name in getattr(docker, "removed", []):
             return {"ok": False, "errors": ["historical container was removed"]}
-    if not docker.running(PARKED_NAME):
-        docker.start(PARKED_NAME)
-    docker.rename(PARKED_NAME, LIVE_NAME)
+    if not docker.running(parked_name):
+        docker.start(parked_name)
+    docker.rename(parked_name, LIVE_NAME)
     return {
         "ok": docker.running(LIVE_NAME) and docker.image_id(LIVE_NAME) != new_image_id,
         "removedLive": removed_live,
@@ -890,6 +994,26 @@ def _loaded_image_id(reference):
     return completed.stdout.strip() or None
 
 
+def dry_run_summary(record, names, release, loaded_image_id):
+    """Sanitized inspect report. It does not call Docker."""
+    release = release or {}
+    summary = public_summary(record)
+    summary["containerNames"] = list(names or [])
+    summary["parkedNameFree"] = bool(release.get("parkedName")) and release.get("parkedName") not in set(names or [])
+    summary["newImageLoaded"] = loaded_image_id
+    summary["releaseId"] = release.get("releaseId") or ""
+    summary["image"] = release.get("image") or ""
+    summary["expectedCurrentImageId"] = release.get("currentImageId") or ""
+    summary["preservationGaps"] = preservation_gaps(
+        record,
+        create_argv(record, release.get("image") or "", "/tmp/" + (release.get("envFilename") or "unset")),
+    )
+    summary["octoberCommandOmissions"] = previous_plan_omissions(record)
+    summary["labelErrors"] = unexpected_labels((record or {}).get("labelKeys"))
+    summary["mutation"] = "none"
+    return summary
+
+
 def _container_names():
     completed = subprocess.run(
         ["docker", "ps", "-a", "--format", "{{.Names}}"],
@@ -908,11 +1032,19 @@ def main(environ=None, hostname=None):
         print(message, file=sys.stderr)
         return 2
     if mode == "rollback":
-        outcome = rollback(DockerCli(), environ.get("EXPECTED_NEW_IMAGE_ID") or "")
+        parsed = parse_release(environ, True)
+        if parsed["errors"]:
+            print(parsed["errors"][0], file=sys.stderr)
+            return 2
+        outcome = rollback(DockerCli(), parsed["newImageId"], parsed["parkedName"])
         print("rolledBack=" + ("yes" if outcome.get("ok") else "no"))
         if outcome.get("errors"):
             print("errors=" + "; ".join(outcome["errors"]), file=sys.stderr)
         return 0 if outcome.get("ok") else 4
+    parsed = parse_release(environ, mode != "dry-run")
+    if parsed["errors"]:
+        print(parsed["errors"][0], file=sys.stderr)
+        return 2
     completed = subprocess.run(
         ["docker", "inspect", LIVE_NAME], check=False, text=True, capture_output=True,
     )
@@ -924,21 +1056,13 @@ def main(environ=None, hostname=None):
     record = safe_record(data)
     del data
     names = _container_names()
-    loaded = _loaded_image_id(NEW_IMAGE)
-    expected_new = environ.get("EXPECTED_NEW_IMAGE_ID") or ""
+    loaded = _loaded_image_id(parsed["image"]) if parsed["image"] else None
     if mode == "dry-run":
-        summary = public_summary(record)
-        summary["containerNames"] = names
-        summary["parkedNameFree"] = PARKED_NAME not in names
-        summary["newImageLoaded"] = loaded
-        summary["preservationGaps"] = preservation_gaps(
-            record, create_argv(record, NEW_IMAGE, "/tmp/" + ENV_FILENAME)
-        )
-        summary["octoberCommandOmissions"] = previous_plan_omissions(record)
+        summary = dry_run_summary(record, names, parsed, loaded)
         print(json.dumps(summary, indent=2, sort_keys=True))
         print("mutation=none")
         return 0
-    directory = os.path.join("/tmp", "cz-api-aa1ea86")
+    directory = os.path.join("/tmp", parsed["directoryName"])
     os.makedirs(directory, mode=0o700, exist_ok=False)
     os.chmod(directory, 0o700)
     docker = DockerCli(stop_seconds=record.get("stopTimeout") or STOP_FALLBACK)
@@ -951,14 +1075,14 @@ def main(environ=None, hostname=None):
             env_text,
             directory,
             loaded,
-            expected_new,
+            parsed,
             require_enrollment=True,
             expected_batch_name=environ.get("ENROLLED_BATCH_NAME") or "batch-1",
             clock=__import__("time").time,
             sleep=__import__("time").sleep,
         )
     finally:
-        remove_env(os.path.join(directory, ENV_FILENAME))
+        remove_env(os.path.join(directory, parsed["envFilename"]))
         try:
             os.rmdir(directory)
         except OSError:
