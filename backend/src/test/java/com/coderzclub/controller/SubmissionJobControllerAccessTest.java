@@ -38,6 +38,15 @@ class SubmissionJobControllerAccessTest {
 
     private MockMvc mockMvc;
 
+    @Test
+    void databaseFailureDoesNotLeakThroughStatusPolling() throws Exception {
+        when(jobService.getJob("job-1")).thenThrow(new IllegalStateException("MongoDB code 263 cluster.internal"));
+        mockMvc.perform(get("/api/submission-jobs/job-1").principal(auth("alice", "ROLE_USER")))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value(
+                "Submission status is temporarily unavailable. Please refresh shortly."));
+    }
+
     @BeforeEach
     void setUp() {
         SubmissionJobController controller = new SubmissionJobController();

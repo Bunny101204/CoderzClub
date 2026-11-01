@@ -30,6 +30,12 @@ export function parseDraftRecord(raw) {
     return null;
   }
   const baseRevision = Number(parsed.baseRevision);
+  // An empty record with no edit/cloud metadata is only a placeholder.
+  // Preserve intentional blanks (dirty, timestamped, or revised).
+  if (!parsed.code.trim() && !parsed.dirty && !(baseRevision > 0)
+      && !parsed.localUpdatedAt && !parsed.cloudUpdatedAt && !parsed.conflict) {
+    return null;
+  }
   return {
     version: DRAFT_RECORD_VERSION,
     code: parsed.code,

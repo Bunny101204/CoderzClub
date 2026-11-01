@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
@@ -32,6 +34,10 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.reset;
 
 /**
  * Runs only when CODERZCLUB_REPLICA_SET=1 and a local single-node replica set
@@ -46,17 +52,20 @@ class ReplicaSetIdempotencyIT {
             "mongodb://127.0.0.1:27018/coderzclub_rs?replicaSet=rs0&retryWrites=true&directConnection=false");
     }
 
-    @Autowired
+    @SpyBean
     private MutationIdempotencyService idempotency;
     @Autowired
     private SubmissionJobService jobService;
     @Autowired
     private MongoTemplate mongoTemplate;
+    @SpyBean
+    private SubmissionOutboxService outbox;
 
     private final String userId = "rs-" + UUID.randomUUID();
 
     @AfterEach
     void cleanup() {
+        reset(outbox, idempotency);
         List<String> eventIds = new ArrayList<>();
         for (SubmissionJob job : mongoTemplate.find(Query.query(Criteria.where("userId").is(userId)), SubmissionJob.class)) {
             eventIds.add(job.getId());
@@ -66,6 +75,90 @@ class ReplicaSetIdempotencyIT {
         }
         mongoTemplate.remove(Query.query(Criteria.where("userId").is(userId)), SubmissionJob.class);
         mongoTemplate.remove(Query.query(Criteria.where("userId").is(userId)), MutationIdempotencyRecord.class);
+    }
+
+    @Test
+    void helloAsFirstTransactionCommandReproducesCode263() {
+        var manager = new org.springframework.data.mongodb.MongoTransactionManager(mongoTemplate.getMongoDatabaseFactory());
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(manager);
+        RuntimeException failure = assertThrows(RuntimeException.class,
+            () -> transaction.execute(status -> mongoTemplate.executeCommand(new org.bson.Document("hello", 1))));
+        Throwable cause = failure;
+        while (cause != null && !(cause instanceof com.mongodb.MongoException)) cause = cause.getCause();
+        assertTrue(cause instanceof com.mongodb.MongoException, failure.toString());
+        assertEquals(263, ((com.mongodb.MongoException) cause).getCode());
+    }
+
+    @Test
+    void committedFirstKeyAllowsALegitimateSequentialSubmissionWithAnotherKey() {
+        assertTrue(idempotency.begin(userId, "submission-job", "sequential01", "sequential").owned());
+        SubmissionJob first = jobService.createJob(userId, "sequential", "print(1)", "Python", 71, "v1", 0,
+            ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", "sequential01");
+        // Simulate a lost completion response: begin resolves the durable job itself.
+        assertTrue(idempotency.begin(userId, "submission-job", "sequential02", "sequential").owned());
+        SubmissionJob second = jobService.createJob(userId, "sequential", "print(2)", "Python", 71, "v1", 0,
+            ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", "sequential02");
+        org.junit.jupiter.api.Assertions.assertNotEquals(first.getId(), second.getId());
+        assertEquals(2, mongoTemplate.count(Query.query(Criteria.where("userId").is(userId)), SubmissionJob.class));
+        assertEquals(first.getId(), idempotency.begin(userId, "submission-job", "sequential01", "sequential").resourceId());
+        assertEquals(1, events(first.getId()));
+        assertEquals(1, events(second.getId()));
+    }
+
+    @Test
+    void coldUnkeyedAdmissionDoesNotStartTransactionWithHello() {
+        ReflectionTestUtils.setField(jobService, "replicaSet", null);
+        SubmissionJob job = jobService.createJob(userId, "cold", "print(1)", "Python", 71,
+            "v1", 0, ExecutionMode.STANDARD_PER_CASE);
+        assertEquals(1, events(job.getId()));
+    }
+
+    @Test
+    void outboxFailureRollsBackJobAndClaimRenewalThenSameKeyCanRetry() {
+        String key = "rollback001";
+        IdempotencyClaim claim = idempotency.begin(userId, "submission-job", key, "rollback");
+        var before = mongoTemplate.findById(claim.recordId(), MutationIdempotencyRecord.class).getCreatedAt();
+        java.util.concurrent.atomic.AtomicReference<String> rolledBackJob = new java.util.concurrent.atomic.AtomicReference<>();
+        doAnswer(call -> {
+            rolledBackJob.set(call.getArgument(0));
+            call.callRealMethod();
+            throw new IllegalStateException("outbox failed after its write");
+        }).when(outbox).createJobEvent(anyString());
+        assertThrows(IllegalStateException.class, () -> jobService.createJob(
+            userId, "rollback", "print(1)", "Python", 71, "v1", 0,
+            ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", key));
+        assertEquals(0, mongoTemplate.count(Query.query(Criteria.where("userId").is(userId)), SubmissionJob.class));
+        assertEquals(0, events(rolledBackJob.get()));
+        assertEquals(before, mongoTemplate.findById(claim.recordId(), MutationIdempotencyRecord.class).getCreatedAt());
+        reset(outbox);
+        SubmissionJob retried = jobService.createJob(userId, "rollback", "print(1)", "Python", 71, "v1", 0,
+            ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", key);
+        assertEquals(1, events(retried.getId()));
+        assertEquals(retried.getId(), idempotency.begin(userId, "submission-job", key, "rollback").resourceId());
+    }
+
+    @Test
+    void transientFailureAfterOutboxWriteRetriesTheEntireTransaction() {
+        String key = "transient001";
+        assertTrue(idempotency.begin(userId, "submission-job", key, "transient").owned());
+        List<String> attemptedJobs = new ArrayList<>();
+        doAnswer(call -> {
+            attemptedJobs.add(call.getArgument(0));
+            Object event = call.callRealMethod();
+            if (attemptedJobs.size() == 1) {
+                var conflict = new com.mongodb.MongoException(112, "injected transient conflict after persistence");
+                conflict.addLabel(com.mongodb.MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                throw conflict;
+            }
+            return event;
+        }).when(outbox).createJobEvent(anyString());
+        SubmissionJob job = jobService.createJob(userId, "transient", "print(1)", "Python", 71, "v1", 0,
+            ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", key);
+        assertEquals(2, attemptedJobs.size());
+        assertEquals(0, events(attemptedJobs.get(0)));
+        assertEquals(job.getId(), attemptedJobs.get(1));
+        assertEquals(1, events(job.getId()));
+        assertEquals(1, mongoTemplate.count(Query.query(Criteria.where("userId").is(userId)), SubmissionJob.class));
     }
 
     @Test
@@ -79,15 +172,11 @@ class ReplicaSetIdempotencyIT {
             for (int i = 0; i < 8; i++) {
                 futures.add(pool.submit(() -> {
                     start.await(5, TimeUnit.SECONDS);
-                    try {
-                        return jobService.createJob(
+                    return jobService.createJob(
                             userId, "problem-rs", "print(1)", "Python", 71, "v1", 0,
                             ExecutionMode.STANDARD_PER_CASE, null, null, null, null,
                             "submission-job", key
                         ).getId();
-                    } catch (RuntimeException ex) {
-                        return "error";
-                    }
                 }));
             }
             start.countDown();
@@ -95,13 +184,12 @@ class ReplicaSetIdempotencyIT {
             for (Future<String> future : futures) {
                 ids.add(future.get(30, TimeUnit.SECONDS));
             }
-            ids.remove("error");
             List<SubmissionJob> jobs = mongoTemplate.find(
                 Query.query(Criteria.where("userId").is(userId).and("idempotencyKey").is(key)),
                 SubmissionJob.class
             );
             assertEquals(1, jobs.size());
-            assertTrue(ids.isEmpty() || ids.equals(Set.of(jobs.get(0).getId())));
+            assertEquals(Set.of(jobs.get(0).getId()), ids);
             assertEquals(1, events(jobs.get(0).getId()));
 
             SubmissionJob retried = jobService.createJob(
@@ -122,7 +210,7 @@ class ReplicaSetIdempotencyIT {
     }
 
     @Test
-    void staleClaimRecoveryCannotInsertASecondJobForTheCommittingKey() throws Exception {
+    void staleClaimTakeoverFencesTheOriginalTransaction() throws Exception {
         IdempotencyClaim claim = idempotency.begin(userId, "submission-job", "attemptcommit", "problem-commit");
         assertTrue(claim.owned());
         mongoTemplate.updateFirst(
@@ -131,46 +219,45 @@ class ReplicaSetIdempotencyIT {
                 .set("createdAt", java.util.Date.from(java.time.Instant.now().minusSeconds(46))),
             MutationIdempotencyRecord.class
         );
+        // Pause after the original transaction's first read, before claim renewal.
+        // A start-only barrier permits the original to commit before begin() reads it;
+        // that is two legitimate sequential keys, not a stale-owner race.
+        CountDownLatch originalRead = new CountDownLatch(1);
+        CountDownLatch takeover = new CountDownLatch(1);
+        doAnswer(call -> {
+            originalRead.countDown();
+            assertTrue(takeover.await(10, TimeUnit.SECONDS));
+            return call.callRealMethod();
+        }).when(idempotency).prepareCommit(eq(userId), eq("submission-job"), eq("attemptcommit"));
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
-            CountDownLatch start = new CountDownLatch(1);
             Future<String> original = pool.submit(() -> {
-                start.await(5, TimeUnit.SECONDS);
-                try {
-                    return jobService.createJob(
-                        userId, "problem-commit", "print(1)", "Python", 71, "v1", 0,
-                        ExecutionMode.STANDARD_PER_CASE, null, null, null, null,
-                        "submission-job", "attemptcommit"
-                    ).getId();
-                } catch (RuntimeException ex) {
-                    return "error";
-                }
+                var error = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> jobService.createJob(userId, "problem-commit", "print(1)", "Python", 71, "v1", 0,
+                        ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", "attemptcommit"));
+                assertEquals(409, error.getStatusCode().value());
+                return "fenced";
             });
             Future<String> other = pool.submit(() -> {
-                start.await(5, TimeUnit.SECONDS);
-                IdempotencyClaim second = idempotency.begin(userId, "submission-job", "attemptother1", "problem-commit");
-                if (!second.owned()) {
-                    return "blocked";
-                }
+                assertTrue(originalRead.await(10, TimeUnit.SECONDS));
                 try {
-                    return jobService.createJob(
-                        userId, "problem-commit", "print(2)", "Python", 71, "v1", 0,
-                        ExecutionMode.STANDARD_PER_CASE, null, null, null, null,
-                        "submission-job", "attemptother1"
-                    ).getId();
-                } catch (RuntimeException ex) {
-                    return "error";
+                    IdempotencyClaim second = idempotency.begin(userId, "submission-job", "attemptother1", "problem-commit");
+                    assertTrue(second.owned());
+                } finally {
+                    takeover.countDown();
                 }
+                return jobService.createJob(userId, "problem-commit", "print(2)", "Python", 71, "v1", 0,
+                    ExecutionMode.STANDARD_PER_CASE, null, null, null, null, "submission-job", "attemptother1").getId();
             });
-            start.countDown();
-            original.get(30, TimeUnit.SECONDS);
-            other.get(30, TimeUnit.SECONDS);
-            long jobs = mongoTemplate.count(
-                Query.query(Criteria.where("userId").is(userId).and("problemId").is("problem-commit")),
-                SubmissionJob.class
-            );
-            assertEquals(1, jobs);
+            assertEquals("fenced", original.get(30, TimeUnit.SECONDS));
+            String winner = other.get(30, TimeUnit.SECONDS);
+            List<SubmissionJob> jobs = mongoTemplate.find(
+                Query.query(Criteria.where("userId").is(userId).and("problemId").is("problem-commit")), SubmissionJob.class);
+            assertEquals(1, jobs.size());
+            assertEquals(winner, jobs.get(0).getId());
+            assertEquals(1, events(winner));
         } finally {
+            takeover.countDown();
             pool.shutdownNow();
         }
     }

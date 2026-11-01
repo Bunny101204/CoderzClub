@@ -350,7 +350,8 @@ public class MutationIdempotencyService implements IdempotencyOperations {
             new Update().set("createdAt", Date.from(Instant.now(clock))),
             MutationIdempotencyRecord.class
         );
-        return updated.getModifiedCount() > 0;
+        // Renewing within the same millisecond can match without changing createdAt.
+        return updated.getMatchedCount() > 0;
     }
 
     @Override

@@ -18,6 +18,7 @@ import { useTheme } from "../context/ThemeContext";
 import { CopyIcon } from "../icons/AppIcons.jsx";
 import { codingDurationSecondsFromElapsedMs } from "../execution/codingDuration.js";
 import { formatSupportReference, studentVerdictCopy } from "../execution/studentVerdict.js";
+import { submissionErrorMessage } from "../execution/submissionError.js";
 import { api, apiUrl } from "../apiClient";
 import { createMutationGate, isUncertainOutcome } from "../actions/mutationGate.js";
 import {
@@ -26,6 +27,7 @@ import {
   claimAttempt,
   readAttempt,
   settleAttempt,
+  settleAcceptedJob,
 } from "../actions/submissionAttempt.js";
 import { CONTEST_RUN_MAX_POLLS, getContestRunPollDelay, isTerminalContestRun } from "../contests/contestRunPolling";
 import { useAuth } from "../context/AuthContext";
@@ -831,45 +833,49 @@ const Judge0CodeEditor = ({
       eventSourceRef.current = null;
       pollingControllerRef.current = null;
       activeJobIdRef.current = null;
-      try {
-        const limitsResponse = await api.submissions.getLimits(problemId);
-        const limits = limitsResponse.data;
+      // A replay must reach server idempotency before quota checks.
+      // Limits still apply on the server when no job was previously accepted.
+      if (!claimed.reuse) {
+        try {
+          const limitsResponse = await api.submissions.getLimits(problemId);
+          const limits = limitsResponse.data;
 
-        if (!limits.canSubmitNow) {
-          const cooldown = limits.cooldownSeconds || 0;
-          settleAttempt(storage, claimed.operationId, problemId, contestId);
-          setOutput(`Please wait ${cooldown} seconds before submitting again.`);
-          setErrorDetails({
-            type: 'Rate Limit',
-            message: `You must wait ${cooldown} seconds between submissions.`,
-            details: 'This helps prevent abuse and ensures fair usage.'
-          });
-          return;
-        }
+          if (!limits.canSubmitNow) {
+            const cooldown = limits.cooldownSeconds || 0;
+            settleAttempt(storage, claimed.operationId, problemId, contestId);
+            setOutput(`Please wait ${cooldown} seconds before submitting again.`);
+            setErrorDetails({
+              type: 'Rate Limit',
+              message: `You must wait ${cooldown} seconds between submissions.`,
+              details: 'This helps prevent abuse and ensures fair usage.'
+            });
+            return;
+          }
 
-        if (limits.hasExceededDailyLimit) {
-          settleAttempt(storage, claimed.operationId, problemId, contestId);
-          setOutput(`Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
-          setErrorDetails({
-            type: 'Daily Limit Exceeded',
-            message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
-            details: `Remaining submissions: ${limits.remainingDaily}`
-          });
-          return;
-        }
+          if (limits.hasExceededDailyLimit) {
+            settleAttempt(storage, claimed.operationId, problemId, contestId);
+            setOutput(`Daily submission limit exceeded. You have ${limits.remainingDaily} submissions remaining today.`);
+            setErrorDetails({
+              type: 'Daily Limit Exceeded',
+              message: `You have exceeded your daily submission limit of ${limits.dailyLimit}.`,
+              details: `Remaining submissions: ${limits.remainingDaily}`
+            });
+            return;
+          }
 
-        if (limits.hasExceededProblemLimit) {
-          settleAttempt(storage, claimed.operationId, problemId, contestId);
-          setOutput(`Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
-          setErrorDetails({
-            type: 'Problem Limit Exceeded',
-            message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
-            details: `Remaining submissions: ${limits.remainingProblem}`
-          });
-          return;
+          if (limits.hasExceededProblemLimit) {
+            settleAttempt(storage, claimed.operationId, problemId, contestId);
+            setOutput(`Problem submission limit exceeded. You have ${limits.remainingProblem} submissions remaining for this problem today.`);
+            setErrorDetails({
+              type: 'Problem Limit Exceeded',
+              message: `You have exceeded your submission limit for this problem (${limits.problemLimit} per day).`,
+              details: `Remaining submissions: ${limits.remainingProblem}`
+            });
+            return;
+          }
+        } catch (error) {
+          console.warn("Could not check submission limits:", error);
         }
-      } catch (error) {
-        console.warn("Could not check submission limits:", error);
       }
 
       if (submissionGeneration !== submissionGenerationRef.current) return;
@@ -925,18 +931,14 @@ const Judge0CodeEditor = ({
         await subscribeToJobEvents(acceptedJobId);
         return;
       }
-      if (status === 409 || isUncertainOutcome(error)) {
+      if (status === 409 || status >= 500 || isUncertainOutcome(error)) {
         setOutput(status === 409
           ? "This attempt is already being accepted. Retry checks the same attempt."
           : "The submission outcome is uncertain. Retry checks the same attempt and does not start a new one.");
         return;
       }
       settleAttempt(storage, claimed.operationId, problemId, contestId);
-      if (status === 429) {
-        setOutput(error.response?.data?.error || "Please wait before submitting again.");
-        return;
-      }
-      setOutput("Error during submission: " + (error.response?.data?.error || error.message || "Unknown error"));
+      setOutput(submissionErrorMessage(error));
     } finally {
       attempt.finish();
       if (!accepted) setIsLoading(false);
@@ -1022,7 +1024,7 @@ const Judge0CodeEditor = ({
         if (statusMessage) setOutput(statusMessage);
 
         if (isTerminalJobState(job.status)) {
-          settleAttempt(window.localStorage, null, problemId, contestId);
+          settleAcceptedJob(window.localStorage, jobId, problemId, contestId);
           setOutput("");
           setIsLoading(false);
 
@@ -1126,7 +1128,7 @@ const Judge0CodeEditor = ({
         if (signal.aborted || error.code === 'ERR_CANCELED' || error.name === 'CanceledError') return;
         console.error("Error polling job status:", error);
         setIsLoading(false);
-        setOutput("Error checking submission status: " + (error.response?.data?.error || error.message));
+        setOutput("Submission status is temporarily unavailable. Please refresh shortly.");
         return;
       }
     }

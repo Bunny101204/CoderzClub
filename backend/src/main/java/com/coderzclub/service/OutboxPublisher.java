@@ -78,6 +78,11 @@ public class OutboxPublisher {
             if (confirm == null || !confirm.isAck()) {
                 throw new IllegalStateException(confirm == null ? "No publisher confirm" : confirm.getReason());
             }
+            // An exchange can ACK a message that no queue accepted. Spring supplies
+            // the returned message before completing the correlated confirm future.
+            if (correlation.getReturned() != null) {
+                throw new IllegalStateException("Submission queue did not route the message");
+            }
             mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(event.getId())),
                 new Update().set("status", SubmissionOutboxEvent.Status.PUBLISHED)
                     .set("publishedAt", new Date()).set("lockedUntil", null).set("lastError", null),

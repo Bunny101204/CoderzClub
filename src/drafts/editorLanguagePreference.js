@@ -1,3 +1,5 @@
+import { LANGUAGE_TEMPLATES } from "../Components/LanguageTemplates.js";
+
 function editorLanguageKey(problemId, contestId) {
   return `coderzclub:editor-language:v1:${contestId || "practice"}:${problemId || "scratch"}`;
 }
@@ -7,7 +9,7 @@ export function readSavedEditorLanguage(problemId, contestId) {
   if (!key || typeof localStorage === "undefined") return 62;
   try {
     const parsed = Number(localStorage.getItem(key));
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : 62;
+    return Object.prototype.hasOwnProperty.call(LANGUAGE_TEMPLATES, parsed) ? parsed : 62;
   } catch {
     return 62;
   }

@@ -1,7 +1,6 @@
 import { createOperationId } from "./mutationGate.js";
 
 export const ATTEMPT_STORAGE_KEY = "cz-submission-attempt";
-const UNRESOLVED_MS = 2 * 60 * 1000;
 const ACCEPTED_JOB_MS = 24 * 60 * 60 * 1000;
 
 export function memoryStorage(initial) {
@@ -54,7 +53,9 @@ function stillOpen(current, now) {
   if (!current || current.settled) return false;
   const age = now - Number(current.at || 0);
   if (current.jobId) return age < ACCEPTED_JOB_MS;
-  return age < UNRESOLVED_MS;
+  // A lost admission response may hide a committed job. Elapsed time cannot
+  // establish rejection; retain its key until the server resolves the attempt.
+  return true;
 }
 
 /**
@@ -122,6 +123,13 @@ export function settleAttempt(storage, operationId, problemId, contestId = null)
   if (!current) return;
   if (operationId && current.operationId !== operationId) return;
   write(storage, problemId, contestId, { ...current, settled: true });
+}
+
+export function settleAcceptedJob(storage, jobId, problemId, contestId = null) {
+  const current = read(storage, problemId, contestId);
+  // A late completion from another tab must not settle a newer attempt.
+  if (current?.jobId !== jobId) return;
+  settleAttempt(storage, current.operationId, problemId, contestId);
 }
 
 export function readAttempt(storage, problemId, contestId = null) {

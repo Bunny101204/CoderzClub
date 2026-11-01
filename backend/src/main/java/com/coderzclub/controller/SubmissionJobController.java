@@ -331,12 +331,21 @@ public class SubmissionJobController {
 
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Submission request is invalid. Check your code, language, and attempt key."));
         } catch (Exception e) {
             logger.error("Failed to create submission job", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to create submission job: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "error", "Submission service is temporarily unavailable. Please retry the same attempt.",
+                "reason", "SUBMISSION_UNAVAILABLE"));
         } finally {
             if (releaseClaim && idempotency != null) {
-                idempotency.abandon(claim);
+                try {
+                    idempotency.abandon(claim);
+                } catch (RuntimeException cleanupError) {
+                    logger.warn("submission_claim_cleanup_failed", cleanupError);
+                }
             }
             stopAdmissionStage(total, "total");
         }
@@ -440,7 +449,8 @@ public class SubmissionJobController {
 
         } catch (Exception e) {
             logger.error("Failed to get job status", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get job status: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("error", "Submission status is temporarily unavailable. Please refresh shortly."));
         }
     }
 
@@ -515,7 +525,8 @@ public class SubmissionJobController {
 
         } catch (Exception e) {
             logger.error("Failed to get user jobs", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get jobs: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("error", "Submission history is temporarily unavailable. Please try again shortly."));
         }
     }
 
@@ -538,7 +549,8 @@ public class SubmissionJobController {
 
         } catch (Exception e) {
             logger.error("Failed to get queue stats", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get queue stats: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("error", "Queue status is temporarily unavailable. Please try again shortly."));
         }
     }
 

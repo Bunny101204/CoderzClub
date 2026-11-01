@@ -48,6 +48,49 @@ class ContestSubmissionControllerTest {
 
     private MockMvc mockMvc;
 
+    @Test
+    void claimDatabaseFailureAndCleanupFailureCannotLeakOrMaskTheResponse() throws Exception {
+        var idempotency = org.mockito.Mockito.mock(com.coderzclub.service.IdempotencyOperations.class);
+        MockMvc withClaims = MockMvcBuilders.standaloneSetup(
+            new ContestSubmissionController(admissionService, userRepository, idempotency)).build();
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1", "alice")));
+        var failure = new org.springframework.dao.DataAccessResourceFailureException("MongoDB code 263 cluster.internal");
+        when(idempotency.begin(any(), any(), any(), any())).thenThrow(failure);
+        withClaims.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .header("Idempotency-Key", "attempt001").contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value(
+                "Submission service is temporarily unavailable. Please retry the same attempt."));
+
+        org.mockito.Mockito.reset(idempotency);
+        var claim = com.coderzclub.service.IdempotencyClaim.owned("claim-1");
+        when(idempotency.begin(any(), any(), any(), any())).thenReturn(claim);
+        when(idempotency.stillHeld(claim)).thenReturn(true);
+        when(admissionService.admit(any(), any(), any(), any())).thenThrow(failure);
+        org.mockito.Mockito.doThrow(failure).when(idempotency).abandon(claim);
+        withClaims.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .header("Idempotency-Key", "attempt001").contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value(
+                "Submission service is temporarily unavailable. Please retry the same attempt."));
+    }
+
+    @Test
+    void databaseAdmissionFailureReturnsSafeUnavailableResponse() throws Exception {
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u1", "alice")));
+        when(admissionService.admit(any(), any(), any(), any()))
+            .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("MongoDB code 263 cluster.internal"));
+        mockMvc.perform(post("/api/contests/c1/problems/p1/submission-jobs")
+                .contentType("application/json")
+                .content("{\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.reason").value("SUBMISSION_UNAVAILABLE"))
+            .andExpect(jsonPath("$.error").value(
+                "Submission service is temporarily unavailable. Please retry the same attempt."));
+    }
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(new ContestSubmissionController(admissionService, userRepository))

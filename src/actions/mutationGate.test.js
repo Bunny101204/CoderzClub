@@ -14,6 +14,7 @@ import {
   memoryStorage,
   readAttempt,
   settleAttempt,
+  settleAcceptedJob,
 } from "./submissionAttempt.js";
 
 test("a single begin is allowed", () => {
@@ -105,6 +106,31 @@ test("retry after an uncertain attempt reuses the operation id", () => {
   claimAttempt({ storage, problemId: "p1", now: 1_000, createId: () => "op-1" });
   const retry = claimAttempt({ storage, problemId: "p1", now: 2_000, createId: () => "op-2" });
   assert.equal(retry.operationId, "op-1");
+});
+
+test("an unresolved attempt retains its key beyond the old two-minute expiry", () => {
+  const storage = memoryStorage();
+  claimAttempt({ storage, problemId: "p1", now: 1_000, createId: () => "op-1" });
+  for (const now of [121_000, 15 * 60_000, 8 * 24 * 60 * 60_000]) {
+    const retry = claimAttempt({ storage, problemId: "p1", now, createId: () => "unsafe-new-key" });
+    assert.equal(retry.operationId, "op-1");
+    assert.equal(retry.reuse, true);
+  }
+});
+
+test("late completion cannot settle a newer attempt in shared storage", () => {
+  const storage = memoryStorage();
+  claimAttempt({ storage, problemId: "p1", now: 1_000, createId: () => "op-1" });
+  attachAcceptedJob(storage, "op-1", "job-1", "p1");
+  settleAcceptedJob(storage, "job-1", "p1");
+  claimAttempt({ storage, problemId: "p1", now: 2_000, createId: () => "op-2" });
+  settleAcceptedJob(storage, "job-1", "p1");
+  assert.equal(readAttempt(storage, "p1").settled, false);
+  attachAcceptedJob(storage, "op-2", "job-2", "p1");
+  settleAcceptedJob(storage, "job-1", "p1");
+  assert.equal(readAttempt(storage, "p1").settled, false);
+  settleAcceptedJob(storage, "job-2", "p1");
+  assert.equal(readAttempt(storage, "p1").settled, true);
 });
 
 test("a new gate after refresh still sees the accepted job", () => {

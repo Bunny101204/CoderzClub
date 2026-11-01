@@ -1,6 +1,7 @@
 package com.coderzclub.dto;
 
 import com.coderzclub.model.SubmissionJob;
+import com.coderzclub.service.ExecutionUserFacing;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
@@ -37,14 +38,19 @@ public class SubmissionJobEvent {
             event.result = job.getFinalResult();
             event.runtime = job.getTotalRuntime();
             event.memory = job.getTotalMemory();
-            event.error = safeError(job.getErrorMessage() != null ? job.getErrorMessage() : job.getLastError());
+            // Worker diagnostics may contain database/connection details. SSE carries
+            // only a summary; the status endpoint supplies safe compiler diagnostics.
+            if (status == SubmissionJob.JobStatus.FAILED) {
+                event.error = ExecutionUserFacing.infrastructureMessage();
+            } else if (status == SubmissionJob.JobStatus.TIMEOUT) {
+                event.error = "Submission timed out. Please retry.";
+            } else if (status == SubmissionJob.JobStatus.CANCELLED) {
+                event.error = "Submission was cancelled.";
+            } else if (job.getFinalResult() != null && !"ACCEPTED".equals(job.getFinalResult())) {
+                event.error = ExecutionUserFacing.studentDetail(job.getFinalResult(), null, false);
+            }
         }
         return event;
-    }
-
-    private static String safeError(String value) {
-        if (value == null || value.isBlank()) return null;
-        return value.length() <= 1000 ? value : value.substring(0, 1000);
     }
 
     public String getEventId() { return eventId; }

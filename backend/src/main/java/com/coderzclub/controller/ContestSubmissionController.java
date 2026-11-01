@@ -73,36 +73,36 @@ public class ContestSubmissionController {
         @Valid @RequestBody ContestSubmissionJobRequest request,
         @RequestHeader(value = MutationIdempotencyService.HEADER, required = false) String idempotencyKey
     ) {
-        User user = AuthenticatedUser.current(userRepository)
-            .filter(actor -> !actor.isDeleted())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated"));
         IdempotencyClaim claim = IdempotencyClaim.absent();
         boolean releaseClaim = false;
-        if (idempotency != null) {
-            claim = idempotency.begin(user.getId(), "contest-submission", idempotencyKey, contestId + ":" + problemId);
-            if (claim.replay()) {
-                return acceptedJob(claim.resourceId(), null);
-            }
-            if (claim.inProgress()) {
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(claim));
-            }
-            releaseClaim = claim.owned();
-        }
-        if (idempotency != null && releaseClaim && !idempotency.stillHeld(claim)) {
-            releaseClaim = false;
-            claim = idempotency.begin(user.getId(), "contest-submission", idempotencyKey, contestId + ":" + problemId);
-            if (claim.replay()) {
-                return acceptedJob(claim.resourceId(), null);
-            }
-            if (!claim.owned()) {
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(claim));
-            }
-            releaseClaim = true;
-        }
-        if (releaseClaim) {
-            request.setIdempotencyKey(idempotencyKey);
-        }
         try {
+            User user = AuthenticatedUser.current(userRepository)
+                .filter(actor -> !actor.isDeleted())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated"));
+            if (idempotency != null) {
+                claim = idempotency.begin(user.getId(), "contest-submission", idempotencyKey, contestId + ":" + problemId);
+                if (claim.replay()) {
+                    return acceptedJob(claim.resourceId(), null);
+                }
+                if (claim.inProgress()) {
+                    return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(claim));
+                }
+                releaseClaim = claim.owned();
+            }
+            if (idempotency != null && releaseClaim && !idempotency.stillHeld(claim)) {
+                releaseClaim = false;
+                claim = idempotency.begin(user.getId(), "contest-submission", idempotencyKey, contestId + ":" + problemId);
+                if (claim.replay()) {
+                    return acceptedJob(claim.resourceId(), null);
+                }
+                if (!claim.owned()) {
+                    return ResponseEntity.status(HttpStatus.CONFLICT).body(conflictBody(claim));
+                }
+                releaseClaim = true;
+            }
+            if (releaseClaim) {
+                request.setIdempotencyKey(idempotencyKey);
+            }
             SubmissionJob job = admissionService.admit(user, contestId, problemId, request);
             if (releaseClaim) {
                 releaseClaim = false;
@@ -125,13 +125,20 @@ public class ContestSubmissionController {
         } catch (com.coderzclub.service.SubmissionAdmissionHttpException e) {
             throw e;
         } catch (IllegalArgumentException e) {
-            throw e;
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Submission request is invalid. Check your code, language, and attempt key."));
         } catch (Exception e) {
             logger.error("Failed to create contest submission job", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to create submission job"));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "error", "Submission service is temporarily unavailable. Please retry the same attempt.",
+                "reason", "SUBMISSION_UNAVAILABLE"));
         } finally {
             if (releaseClaim && idempotency != null) {
-                idempotency.abandon(claim);
+                try {
+                    idempotency.abandon(claim);
+                } catch (RuntimeException cleanupError) {
+                    logger.warn("Could not release contest submission claim", cleanupError);
+                }
             }
         }
     }

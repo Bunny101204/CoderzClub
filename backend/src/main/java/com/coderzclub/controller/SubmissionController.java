@@ -29,6 +29,7 @@ import java.util.HashMap;
 @RestController
 @RequestMapping("/api/submissions")
 public class SubmissionController {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(SubmissionController.class);
     
     @Autowired
     private SubmissionRepository submissionRepository;
@@ -149,8 +150,10 @@ public class SubmissionController {
             
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error saving submission: " + e.getMessage());
+            return unavailable(e);
         }
     }
     
@@ -170,8 +173,10 @@ public class SubmissionController {
             }
             Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
             return ResponseEntity.ok(pagePayload(submissionRepository.findByUserId(userId, pageable)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
+            return unavailable(e);
         }
     }
     
@@ -190,8 +195,10 @@ public class SubmissionController {
             Page<Submission> submissions = submissionRepository.findByUserIdAndProblemIdIn(
                 current.get().getId(), problemAliases(problemId), pageable);
             return ResponseEntity.ok(pagePayload(submissions));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
+            return unavailable(e);
         }
     }
 
@@ -236,8 +243,10 @@ public class SubmissionController {
             }
             
             return ResponseEntity.ok(pagePayload(submissions));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error fetching submissions: " + e.getMessage());
+            return unavailable(e);
         }
     }
     
@@ -266,11 +275,20 @@ public class SubmissionController {
             limits.put("hasExceededDailyLimit", submissionLimitService.hasExceededDailyLimit(user.getId()));
             
             return ResponseEntity.ok(limits);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error fetching limits: " + e.getMessage());
+            return unavailable(e);
         }
     }
     
+    private ResponseEntity<?> unavailable(Exception error) {
+        logger.error("Submission request failed", error);
+        return ResponseEntity.status(503).body(Map.of(
+            "error", "Submission service is temporarily unavailable. Please try again shortly.",
+            "reason", "SUBMISSION_UNAVAILABLE"));
+    }
+
     private Optional<User> currentUser() {
         return AuthenticatedUser.current(userRepository);
     }

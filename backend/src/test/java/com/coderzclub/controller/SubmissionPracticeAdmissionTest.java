@@ -72,6 +72,34 @@ class SubmissionPracticeAdmissionTest {
     private MockMvc jobsMvc;
     private MockMvc legacyMvc;
 
+    @Test
+    void invalidAdmissionArgumentRemainsBadRequestWithoutExceptionDetails() throws Exception {
+        when(userRepository.findByUsername("alice")).thenThrow(new IllegalArgumentException("internal detail"));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+            "alice", "n/a", List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        jobsMvc.perform(post("/api/submission-jobs")
+                .contentType("application/json")
+                .content("{\"problemId\":\"p1\",\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value(
+                "Submission request is invalid. Check your code, language, and attempt key."));
+    }
+
+    @Test
+    void admissionDatabaseFailureIsUnavailableWithoutDatabaseDetails() throws Exception {
+        when(userRepository.findByUsername("alice")).thenThrow(new org.springframework.dao.DataAccessResourceFailureException(
+            "MongoDB OperationNotSupportedInTransaction code 263 cluster.internal:27017"));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+            "alice", "n/a", List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        jobsMvc.perform(post("/api/submission-jobs")
+                .contentType("application/json")
+                .content("{\"problemId\":\"p1\",\"code\":\"print(1)\",\"languageId\":71}"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.reason").value("SUBMISSION_UNAVAILABLE"))
+            .andExpect(jsonPath("$.error").value(
+                "Submission service is temporarily unavailable. Please retry the same attempt."));
+    }
+
     @BeforeEach
     void setUp() {
         SubmissionJobController jobs = new SubmissionJobController();

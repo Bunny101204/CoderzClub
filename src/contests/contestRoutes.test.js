@@ -25,6 +25,8 @@ test("contest student and admin routes are registered", () => {
   assert.match(client, /\/api\/contests\/\$\{contestId\}\/problems\/\$\{problemId\}\/submission-jobs/);
   assert.match(app, /isAuthenticated \? /);
   assert.match(app, /user\.role === "ADMIN"/);
-  assert.match(client, /isSafeBusinessMessage/);
-  assert.match(client, /data\?\.error/);
+  assert.match(client, /export \{ apiErrorMessage \} from "\.\/apiErrors\.js"/);
+  const errors = readFileSync(join(root, "../apiErrors.js"), "utf8");
+  assert.match(errors, /isSafeBusinessMessage/);
+  assert.match(errors, /data\?\.error/);
 });

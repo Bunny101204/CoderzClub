@@ -8,6 +8,27 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SubmissionJobEventServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = SubmissionJob.JobStatus.class,
+        names = {"FAILED", "COMPLETED", "TIMEOUT", "CANCELLED"})
+    void terminalEventsNeverSerializeStoredDatabaseDiagnostics(SubmissionJob.JobStatus status) throws Exception {
+        SubmissionJob job = new SubmissionJob();
+        job.setStatus(status);
+        job.setFinalResult("INTERNAL_ERROR");
+        String raw = "MongoDB OperationNotSupportedInTransaction code 263 mongodb://internal:27017 stack trace";
+        job.setLastError(raw);
+        job.setErrorMessage(raw);
+        SubmissionJobEvent event = SubmissionJobEvent.from(job);
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(event);
+        assertFalse(json.contains("MongoDB"));
+        assertFalse(json.contains("internal:27017"));
+        assertFalse(json.contains("stack trace"));
+        assertNotNull(event.getError());
+        if (status == SubmissionJob.JobStatus.FAILED || status == SubmissionJob.JobStatus.COMPLETED) {
+            assertEquals(ExecutionUserFacing.infrastructureMessage(), event.getError());
+        }
+    }
+
     @Test
     void eventPayloadContainsNoTestcaseData() throws Exception {
         SubmissionJob job = new SubmissionJob();

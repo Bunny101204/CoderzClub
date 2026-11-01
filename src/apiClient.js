@@ -324,38 +324,6 @@ export const api = {
   },
 };
 
-function isSafeBusinessMessage(value) {
-  if (typeof value !== "string") {
-    return false;
-  }
-  const text = value.trim();
-  if (!text) {
-    return false;
-  }
-  if (text.includes("\n") || text.includes("\t") || text.length > 300) {
-    return false;
-  }
-  if (/\bjava\.|Exception\b|\bat com\./.test(text)) {
-    return false;
-  }
-  return true;
-}
-
-export function apiErrorMessage(error, fallback = "Request failed") {
-  const data = error?.response?.data;
-  if (isSafeBusinessMessage(data)) {
-    return data.trim();
-  }
-  if (isSafeBusinessMessage(data?.error)) {
-    return data.error.trim();
-  }
-  if (isSafeBusinessMessage(data?.message)) {
-    return data.message.trim();
-  }
-  if (!error?.response && isSafeBusinessMessage(error?.message) && !/^request failed with status code/i.test(error.message)) {
-    return error.message.trim();
-  }
-  return fallback;
-}
+export { apiErrorMessage } from "./apiErrors.js";
 
 export default apiClient;

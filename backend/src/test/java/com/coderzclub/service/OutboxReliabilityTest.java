@@ -30,6 +30,31 @@ import static org.mockito.Mockito.*;
 class OutboxReliabilityTest {
 
     @Test
+    void acknowledgedButReturnedMessageRemainsRetryable() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        RabbitTemplate rabbit = mock(RabbitTemplate.class);
+        when(mongo.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(SubmissionOutboxEvent.class)))
+            .thenReturn(event("unroutable-event", "job-1")).thenReturn(null);
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(4);
+            correlation.setReturned(new org.springframework.amqp.core.ReturnedMessage(
+                new org.springframework.amqp.core.Message(new byte[0]), 312, "NO_ROUTE", "exchange", "missing-route"));
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(rabbit).convertAndSend(any(), any(), any(), any(MessagePostProcessor.class), any(CorrelationData.class));
+
+        new OutboxPublisher(mongo, mock(SubmissionOutboxRepository.class), rabbit,
+            new SubmissionQueueProperties(), new SimpleMeterRegistry()).publishDueEvents();
+
+        ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(mongo).updateFirst(any(Query.class), update.capture(), eq(SubmissionOutboxEvent.class));
+        var fields = update.getValue().getUpdateObject().get("$set", org.bson.Document.class);
+        assertEquals(SubmissionOutboxEvent.Status.FAILED, fields.get("status"));
+        org.junit.jupiter.api.Assertions.assertNotNull(fields.get("nextAttemptAt"));
+        org.junit.jupiter.api.Assertions.assertFalse(fields.containsKey("publishedAt"));
+    }
+
+    @Test
     void publisherFailureMarksEventFailedForRetry() {
         MongoTemplate mongo = mock(MongoTemplate.class);
         SubmissionOutboxRepository repository = mock(SubmissionOutboxRepository.class);

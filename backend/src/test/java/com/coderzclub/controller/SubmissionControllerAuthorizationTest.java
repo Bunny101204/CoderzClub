@@ -167,6 +167,36 @@ class SubmissionControllerAuthorizationTest {
         assertEquals(Sort.Direction.DESC, order.getDirection());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "/api/submissions/my-submissions", "/api/submissions/user/u-alice",
+        "/api/submissions/problem/p1", "/api/submissions/limits"
+    })
+    void databaseFailuresInHistoryAndLimitsAreSafe(String path) throws Exception {
+        when(userRepository.findByUsername("alice")).thenThrow(
+            new org.springframework.dao.DataAccessResourceFailureException("MongoDB code 263 mongodb://internal:27017"));
+        mockMvc.perform(get(path)).andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value("Submission service is temporarily unavailable. Please try again shortly."))
+            .andExpect(jsonPath("$.reason").value("SUBMISSION_UNAVAILABLE"));
+    }
+
+    @Test
+    void legacySubmissionDatabaseFailureIsSafe() throws Exception {
+        when(userRepository.findByUsername("alice")).thenThrow(
+            new org.springframework.dao.DataAccessResourceFailureException("MongoDB code 263 mongodb://internal:27017"));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/submissions")
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value("Submission service is temporarily unavailable. Please try again shortly."));
+    }
+
+    @Test
+    void negativeHistoryPageIsASafeClientError() throws Exception {
+        mockMvc.perform(get("/api/submissions/my-submissions").param("page", "-1"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("Submission request is invalid. Check your request and try again."));
+    }
+
     private static void authenticate(String username) {
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(

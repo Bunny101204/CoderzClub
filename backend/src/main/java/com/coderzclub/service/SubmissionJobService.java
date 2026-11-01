@@ -14,7 +14,8 @@ import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -56,7 +57,6 @@ public class SubmissionJobService {
     /**
      * Create a new submission job
      */
-    @Transactional
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests,
                                    ExecutionMode executionMode) {
@@ -64,7 +64,6 @@ public class SubmissionJobService {
             executionMode, null);
     }
 
-    @Transactional
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests,
                                    ExecutionMode executionMode, Integer codingDurationSeconds) {
@@ -72,7 +71,6 @@ public class SubmissionJobService {
             executionMode, codingDurationSeconds, null, null, null);
     }
 
-    @Transactional
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests,
                                    ExecutionMode executionMode, Integer codingDurationSeconds,
@@ -84,7 +82,6 @@ public class SubmissionJobService {
     /**
      * Durable job admission. Contest fields are set only by the contest submit path.
      */
-    @Transactional
     public SubmissionJob createJob(String userId, String problemId, String code, String language,
                                    Integer languageId, String testcaseVersion, int totalTests,
                                    ExecutionMode executionMode, Integer codingDurationSeconds,
@@ -105,7 +102,7 @@ public class SubmissionJobService {
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
                 SubmissionJob job = replicaSet()
-                    ? new TransactionTemplate(transactionManager).execute(status -> writeJob(
+                    ? admissionTransaction().execute(status -> writeJob(
                         userId, problemId, code, language, languageId, testcaseVersion, totalTests,
                         executionMode, codingDurationSeconds, contestId, contestSubmittedAt,
                         contestProblemSnapshotId, idempotencyScope, idempotencyKey))
@@ -190,6 +187,11 @@ public class SubmissionJobService {
         try {
             outboxService.createJobEvent(job.getId());
         } catch (RuntimeException outboxError) {
+            // A failed Mongo write aborts the transaction. Never hide it and try to commit
+            // a job without its outbox event; the whole admission must roll back/retry.
+            if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                throw outboxError;
+            }
             if (isDuplicate(outboxError)) {
                 logger.warn("submission_job_outbox_already_present id={}", job.getId());
             } else {
@@ -232,6 +234,10 @@ public class SubmissionJobService {
     private boolean isTransientTransaction(Throwable error) {
         Throwable current = error;
         while (current != null) {
+            if (current instanceof com.mongodb.MongoException mongo
+                && mongo.hasErrorLabel(com.mongodb.MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) {
+                return true;
+            }
             String message = String.valueOf(current.getMessage());
             if (message.contains("WriteConflict") || message.contains("TransientTransactionError")
                 || message.contains("code 112")) {
@@ -346,9 +352,21 @@ public class SubmissionJobService {
             return false;
         }
         if (replicaSet == null) {
-            Document hello = mongoTemplate.executeCommand("{ hello: 1 }");
+            // hello cannot be the first command in a transaction. Suspend any caller
+            // transaction as well as keeping our own admission transaction below it.
+            TransactionTemplate probe = new TransactionTemplate(transactionManager);
+            probe.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+            Document hello = probe.execute(status -> mongoTemplate.executeCommand("{ hello: 1 }"));
             replicaSet = hello.get("setName") != null;
         }
         return replicaSet;
+    }
+
+    private TransactionTemplate admissionTransaction() {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        // Every retry needs a fresh transaction, and events must be emitted only after
+        // this durable admission commits, even when invoked by a transactional caller.
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return transaction;
     }
 }

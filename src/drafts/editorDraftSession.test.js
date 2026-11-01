@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createDraftSession } from "./editorDraftSession.js";
 import { flushActiveDraftBoundary, setActiveDraftSession } from "./draftBoundary.js";
-import { buildDraftKey, legacyPracticeKey } from "./codeDraft.js";
+import { buildDraftKey, legacyPracticeKey, createDraftRecord } from "./codeDraft.js";
+import { getTemplate } from "../Components/LanguageTemplates.js";
 
 function memoryStorage() {
   const data = {};
@@ -79,6 +80,35 @@ function harness(overrides = {}) {
 function practice(languageId = 62) {
   return { userId: "user-a", problemId: "p1", languageId, starterCode: "starter" };
 }
+
+test("pristine empty placeholder initializes Java without saving over a draft", async () => {
+  const h = harness();
+  const key = buildDraftKey(practice());
+  h.storage.setItem(key, JSON.stringify(createDraftRecord({ code: "" })));
+  await h.session.open({ ...practice(), starterCode: getTemplate(62) });
+  assert.equal(h.applied.at(-1), getTemplate(62));
+  assert.equal(h.calls.put.length, 0);
+});
+
+test("intentional empty and nonempty local drafts win over Java starter", async () => {
+  for (const record of [
+    createDraftRecord({ code: "", dirty: true }),
+    createDraftRecord({ code: "", localUpdatedAt: "saved" }),
+    createDraftRecord({ code: "", baseRevision: 1 }),
+    createDraftRecord({ code: "class Main { /* saved */ }" }),
+  ]) {
+    const h = harness();
+    h.storage.setItem(buildDraftKey(practice()), JSON.stringify(record));
+    await h.session.open({ ...practice(), starterCode: getTemplate(62) });
+    assert.equal(h.applied.at(-1), record.code);
+  }
+});
+
+test("intentional empty cloud draft wins over Java starter", async () => {
+  const h = harness({ get: () => ({ code: "", revision: 3, updatedAt: "saved" }) });
+  await h.session.open({ ...practice(), starterCode: getTemplate(62) });
+  assert.equal(h.applied.at(-1), "");
+});
 
 test("typing writes local storage and does not call the cloud", async () => {
   const { session, storage, schedule, calls } = harness();
