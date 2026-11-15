@@ -85,9 +85,8 @@ public class ContestLeaderboardService {
         if (contest == null || !contest.isPublished()) {
             throw ContestAdmissionException.notFound();
         }
-        boolean admin = "ADMIN".equalsIgnoreCase(user.getRole());
         ContestAccessService.UserBatchScope scope = contestAccess.scopeForUser(user.getId());
-        if (!admin && !contestAccess.isEligible(user, contest, scope)) {
+        if (!contestAccess.canMonitorContest(user, contest) && !contestAccess.isEligible(user, contest, scope)) {
             throw ContestAdmissionException.notFound();
         }
         ContestStatus status = contestAccess.status(contest, clock.instant());

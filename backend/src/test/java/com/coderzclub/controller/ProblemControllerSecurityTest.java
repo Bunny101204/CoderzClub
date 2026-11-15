@@ -202,7 +202,7 @@ class ProblemControllerSecurityTest {
         Query cursorQuery = queryCaptor.getValue();
         org.junit.jupiter.api.Assertions.assertEquals(0L, cursorQuery.getSkip());
         org.junit.jupiter.api.Assertions.assertEquals(3, cursorQuery.getLimit());
-        org.junit.jupiter.api.Assertions.assertTrue(cursorQuery.getQueryObject().containsKey("$or"));
+        org.junit.jupiter.api.Assertions.assertTrue(String.valueOf(cursorQuery.getQueryObject()).contains("$or"));
     }
 
     @Test

@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -61,6 +62,9 @@ class ContestSecurityFilterChainTest {
 
     @MockBean
     private ContestService contestService;
+
+    @MockBean
+    private com.coderzclub.service.OrganizationAccessService organizationAccessService;
 
     @MockBean
     private com.coderzclub.service.ContestLeaderboardService contestLeaderboardService;
@@ -102,18 +106,20 @@ class ContestSecurityFilterChainTest {
     }
 
     @Test
-    void roleUserCannotAccessAdminContestMutations() throws Exception {
+    void roleUserCannotAccessAdminContestMutationsWithoutOrganizationContext() throws Exception {
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform administrator access is required"))
+            .when(organizationAccessService).ensurePlatformAdmin(any());
         mockMvc.perform(post("/api/admin/contests")
                 .with(user("alice").roles("USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"Weekly\"}"))
             .andExpect(status().isForbidden());
-        verify(contestService, never()).create(any(), any());
+        verify(contestService, never()).create(any(), any(), any());
     }
 
     @Test
     void roleAdminCanReachAdminContestController() throws Exception {
-        when(contestService.adminList(0, 20)).thenReturn(Map.of(
+        when(contestService.adminList(0, 20, null)).thenReturn(Map.of(
             "contests", List.of(),
             "currentPage", 0,
             "totalPages", 0,
@@ -122,7 +128,7 @@ class ContestSecurityFilterChainTest {
         mockMvc.perform(get("/api/admin/contests").with(user("admin").roles("ADMIN")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.totalItems").value(0));
-        verify(contestService).adminList(0, 20);
+        verify(contestService).adminList(0, 20, null);
     }
 
     @Test

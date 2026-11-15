@@ -365,6 +365,23 @@ class BundleAccessServiceTest {
     }
 
     @Test
+    void orgPrivateProblemsAreHiddenFromPublicBundleListings() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        ProblemBundle bundle = activeBundle("b1", "PUBLIC");
+        bundle.setProblemIds(List.of("platform", "org-private"));
+        when(mongo.findById("b1", ProblemBundle.class)).thenReturn(bundle);
+        Problem platform = new Problem();
+        platform.setId("platform");
+        Problem orgPrivate = new Problem();
+        orgPrivate.setId("org-private");
+        orgPrivate.setOrganizationId("org-a");
+        when(mongo.find(any(Query.class), eq(Problem.class))).thenReturn(List.of(platform, orgPrivate));
+
+        List<Problem> problems = new BundleAccessService(mongo).problemsForAccessibleBundle(user("u1"), "b1");
+        assertEquals(List.of("platform"), problems.stream().map(Problem::getId).toList());
+    }
+
+    @Test
     void inactivePublicBundleHiddenFromNonAdmin() {
         ProblemBundle bundle = activeBundle("b1", "PUBLIC");
         bundle.setActive(false);

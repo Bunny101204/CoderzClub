@@ -2,14 +2,17 @@ package com.coderzclub.controller;
 
 import com.coderzclub.config.JwtUtil;
 import com.coderzclub.model.User;
+import com.coderzclub.service.AuthEmailRateLimiter;
 import com.coderzclub.service.EmailService;
 import com.coderzclub.service.UserService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -34,6 +37,11 @@ class AuthControllerPasswordResetTest {
     @Mock private JwtUtil jwtUtil;
     @InjectMocks private AuthController authController;
 
+    @BeforeEach
+    void wireRateLimiter() {
+        ReflectionTestUtils.setField(authController, "authEmailRateLimiter", new AuthEmailRateLimiter(50, 60_000));
+    }
+
     @Test
     void knownEmailIssuesTokenAndReturnsGenericMessage() throws Exception {
         User user = eligible("a@b.c", "reset-token");
@@ -44,7 +52,7 @@ class AuthControllerPasswordResetTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value(GENERIC_MESSAGE));
         verify(userService).createPasswordResetToken("a@b.c");
-        verify(emailService).sendPasswordResetEmail("a@b.c", "reset-token");
+        verify(emailService).sendPasswordResetEmail(eq("a@b.c"), eq("reset-token"), any(), any());
     }
 
     @Test
@@ -55,7 +63,7 @@ class AuthControllerPasswordResetTest {
                 .content("{\"email\":\"missing@example.com\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value(GENERIC_MESSAGE));
-        verify(emailService, never()).sendPasswordResetEmail(any(), any());
+        verify(emailService, never()).sendPasswordResetEmail(any(), any(), any(), any());
     }
 
     @Test
@@ -66,7 +74,7 @@ class AuthControllerPasswordResetTest {
                 .content("{\"email\":\"gone@example.com\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value(GENERIC_MESSAGE));
-        verify(emailService, never()).sendPasswordResetEmail(eq("gone@example.com"), any());
+        verify(emailService, never()).sendPasswordResetEmail(eq("gone@example.com"), any(), any(), any());
     }
 
     private MockMvc mockMvc() {

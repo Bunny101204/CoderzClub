@@ -43,7 +43,7 @@ public class ProblemPublicDetailService {
             return null;
         }
         String canonicalId = located.getId();
-        if (!ProblemAvailability.isPublic(located)) {
+        if (!problemAccessService.isAnonymouslyCacheable(located)) {
             cache.evictDetail(canonicalId);
             return restrictedView(user, canonicalId);
         }
@@ -72,7 +72,7 @@ public class ProblemPublicDetailService {
 
     private boolean stillPublic(String canonicalId) {
         Problem confirm = findProbeById(canonicalId);
-        return confirm != null && ProblemAvailability.isPublic(confirm);
+        return confirm != null && problemAccessService.isAnonymouslyCacheable(confirm);
     }
 
     private Object loadPublic(User user, String canonicalId, boolean recordMiss) {
@@ -83,7 +83,7 @@ public class ProblemPublicDetailService {
                 if (confirm == null) {
                     return null;
                 }
-                if (!ProblemAvailability.isPublic(confirm)) {
+                if (!problemAccessService.isAnonymouslyCacheable(confirm)) {
                     cache.evictDetail(canonicalId);
                     return restrictedView(user, canonicalId);
                 }
@@ -99,7 +99,7 @@ public class ProblemPublicDetailService {
                 if (full == null) {
                     return null;
                 }
-                if (!ProblemAvailability.isPublic(full)) {
+                if (!problemAccessService.isAnonymouslyCacheable(full)) {
                     cache.evictDetail(canonicalId);
                     return visibleEntity(user, full);
                 }
@@ -121,8 +121,9 @@ public class ProblemPublicDetailService {
         if (problem == null || !problemAccessService.canView(user, problem)) {
             return null;
         }
-        problem.setHiddenTestCases(null);
-        return problem;
+        // Never return the Mongo entity: even null hiddenTestCases would serialize
+        // the field name. PublicProblemDetail is the student-safe projection.
+        return PublicProblemDetail.fromPublicProblem(problem);
     }
 
     private Problem findProbe(String rawId) {
@@ -138,13 +139,13 @@ public class ProblemPublicDetailService {
             return null;
         }
         Query query = Query.query(Criteria.where("numericId").is(numericId));
-        query.fields().include("availability").include("numericId");
+        query.fields().include("availability").include("numericId").include("organizationId");
         return mongoTemplate.findOne(query, Problem.class);
     }
 
     private Problem findProbeById(String id) {
         Query query = Query.query(Criteria.where("_id").is(id));
-        query.fields().include("availability").include("numericId");
+        query.fields().include("availability").include("numericId").include("organizationId");
         return mongoTemplate.findOne(query, Problem.class);
     }
 

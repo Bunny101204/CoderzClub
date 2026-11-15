@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import { api, apiErrorMessage } from '../apiClient';
 import { runExclusive, useMutationGate } from '../actions/mutationGate.js';
 
 const AuthPage = () => {
+  const { branding } = useOrganization();
   const [isLogin, setIsLogin] = useState(true);
+  const [resetToken, setResetToken] = useState('');
+  const [forgotMode, setForgotMode] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -25,6 +29,15 @@ const AuthPage = () => {
     const verified = searchParams.get('verified');
     const reason = searchParams.get('reason');
     const verificationToken = searchParams.get('verifyEmailToken');
+    const incomingResetToken = searchParams.get('resetPasswordToken');
+
+    if (incomingResetToken) {
+      setResetToken(incomingResetToken);
+      setForgotMode(false);
+      setIsLogin(true);
+      setInfo('Choose a new password for your account.');
+      return;
+    }
 
     if (verificationToken) {
       if (confirmingToken.current === verificationToken) {
@@ -70,26 +83,49 @@ const AuthPage = () => {
     setInfo('');
     setLoading(true);
 
-    // Validation
-    if (!formData.username || !formData.password) {
-      setError('Please fill in all required fields');
-      setLoading(false);
-      return;
-    }
-
-    if (!isLogin && formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      setLoading(false);
-      return;
-    }
-
-    if (!isLogin && !formData.email) {
-      setError('Email is required for registration');
-      setLoading(false);
-      return;
-    }
-
     try {
+      if (resetToken) {
+        if (!formData.password || formData.password !== formData.confirmPassword) {
+          setError(formData.password ? 'Passwords do not match' : 'Please enter a new password');
+          return;
+        }
+        await api.auth.confirmPasswordReset(resetToken, formData.password);
+        setResetToken('');
+        setSearchParams((current) => {
+          const next = new URLSearchParams(current);
+          next.delete('resetPasswordToken');
+          return next;
+        }, { replace: true });
+        setInfo('Password reset successfully. Please sign in.');
+        setFormData({ username: '', email: '', password: '', confirmPassword: '' });
+        return;
+      }
+
+      if (forgotMode) {
+        if (!formData.email) {
+          setError('Email is required');
+          return;
+        }
+        const response = await api.auth.requestPasswordReset(formData.email);
+        setInfo(response.data?.message || 'If an eligible account exists for that email, reset instructions have been sent.');
+        return;
+      }
+
+      if (!formData.username || !formData.password) {
+        setError('Please fill in all required fields');
+        return;
+      }
+
+      if (!isLogin && formData.password !== formData.confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+
+      if (!isLogin && !formData.email) {
+        setError('Email is required for registration');
+        return;
+      }
+
       let result;
       if (isLogin) {
         result = await login(formData.username, formData.password);
@@ -110,8 +146,7 @@ const AuthPage = () => {
         setError(result.error || 'Unknown error');
       }
     } catch (error) {
-      setError('An error occurred. Please try again.');
-      console.error('Login/Register error:', error); // DEBUG
+      setError(apiErrorMessage(error, 'An error occurred. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -120,6 +155,8 @@ const AuthPage = () => {
 
   const toggleMode = () => {
     setIsLogin(!isLogin);
+    setForgotMode(false);
+    setResetToken('');
     setError('');
     setInfo('');
     setFormData({
@@ -130,34 +167,54 @@ const AuthPage = () => {
     });
   };
 
+  const brandName = branding?.displayName || 'CoderzClub';
+  const brandTagline = branding?.landingTagline || 'Practice. Compete. Level up.';
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-100 to-slate-100 dark:from-gray-900 dark:via-blue-900 dark:to-gray-900">
+    <div
+      className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-100 to-slate-100 dark:from-gray-900 dark:via-blue-900 dark:to-gray-900"
+      style={{
+        backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--org-brand-primary, #2563eb) 18%, transparent), transparent 55%)`,
+      }}
+    >
       <div className="app-surface p-8 rounded-2xl shadow-2xl w-full max-w-md">
         <div className="text-center mb-8">
+          {branding?.logoUrl ? (
+            <img src={branding.logoUrl} alt="" className="mx-auto mb-3 h-12 w-auto object-contain" />
+          ) : null}
+          <p className="text-sm font-semibold mb-1" style={{ color: 'var(--org-brand-primary, #2563eb)' }} data-testid="auth-brand-name">
+            {brandName}
+          </p>
           <h1 className="text-3xl font-bold mb-2">
-            {isLogin ? 'Welcome Back' : 'Join CoderzClub'}
+            {resetToken ? 'Reset Password' : forgotMode ? 'Forgot Password' : isLogin ? 'Welcome Back' : `Join ${brandName}`}
           </h1>
           <p className="app-muted">
-            {isLogin ? 'Sign in to your account' : 'Create your account'}
+            {resetToken
+              ? 'Enter and confirm your new password'
+              : forgotMode
+                ? 'We will email reset instructions when an eligible account exists'
+                : isLogin ? brandTagline : 'Create your account'}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Username
-            </label>
-            <input
-              type="text"
-              name="username"
-              value={formData.username}
-              onChange={handleInputChange}
-              className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="Enter your username"
-            />
-          </div>
+          {!resetToken && !forgotMode && (
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Username
+              </label>
+              <input
+                type="text"
+                name="username"
+                value={formData.username}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
+                placeholder="Enter your username"
+              />
+            </div>
+          )}
 
-          {!isLogin && (
+          {((!isLogin && !resetToken) || forgotMode) && (
             <div>
               <label className="block text-sm font-medium mb-2">
                 Email
@@ -173,21 +230,23 @@ const AuthPage = () => {
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Password
-            </label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleInputChange}
-              className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="Enter your password"
-            />
-          </div>
+          {!forgotMode && (
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                {resetToken ? 'New Password' : 'Password'}
+              </label>
+              <input
+                type="password"
+                name="password"
+                value={formData.password}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 rounded-lg app-input focus:outline-none focus:border-blue-500 transition-colors"
+                placeholder={resetToken ? 'Enter a new password' : 'Enter your password'}
+              />
+            </div>
+          )}
 
-          {!isLogin && (
+          {(!isLogin || resetToken) && !forgotMode && (
             <div>
               <label className="block text-sm font-medium mb-2">
                 Confirm Password
@@ -257,22 +316,53 @@ const AuthPage = () => {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                {isLogin ? 'Signing In...' : 'Creating Account...'}
+                {resetToken ? 'Saving...' : forgotMode ? 'Sending...' : isLogin ? 'Signing In...' : 'Creating Account...'}
               </span>
             ) : (
-              isLogin ? 'Sign In' : 'Create Account'
+              resetToken ? 'Save new password' : forgotMode ? 'Send reset link' : isLogin ? 'Sign In' : 'Create Account'
             )}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center space-y-2">
+          {isLogin && !resetToken && !forgotMode && (
+            <p className="app-muted">
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotMode(true);
+                  setError('');
+                  setInfo('');
+                }}
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-500 font-medium transition-colors"
+              >
+                Forgot password?
+              </button>
+            </p>
+          )}
           <p className="app-muted">
-            {isLogin ? "Don't have an account? " : "Already have an account? "}
+            {forgotMode || resetToken
+              ? 'Remembered your password? '
+              : isLogin ? "Don't have an account? " : "Already have an account? "}
             <button
-              onClick={toggleMode}
+              onClick={() => {
+                if (forgotMode || resetToken) {
+                  setForgotMode(false);
+                  setResetToken('');
+                  setError('');
+                  setInfo('');
+                  setSearchParams((current) => {
+                    const next = new URLSearchParams(current);
+                    next.delete('resetPasswordToken');
+                    return next;
+                  }, { replace: true });
+                  return;
+                }
+                toggleMode();
+              }}
               className="text-blue-600 dark:text-blue-400 hover:text-blue-500 font-medium transition-colors"
             >
-              {isLogin ? 'Sign up' : 'Sign in'}
+              {forgotMode || resetToken ? 'Sign in' : isLogin ? 'Sign up' : 'Sign in'}
             </button>
           </p>
         </div>

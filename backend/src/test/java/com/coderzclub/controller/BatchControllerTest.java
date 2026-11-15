@@ -31,6 +31,7 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,12 +56,17 @@ class BatchControllerTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(mongoTemplate.find(any(Query.class), eq(BatchCoordinator.class))).thenReturn(List.of());
+        lenient().when(mongoTemplate.find(any(Query.class), eq(com.coderzclub.model.OrganizationMember.class))).thenReturn(List.of());
         mockMvc = MockMvcBuilders.standaloneSetup(new BatchController(
                 batchService,
                 batchReportService,
                 batchCoordinatorService,
                 userRepository,
-                new BatchAccessService(mongoTemplate, userRepository)))
+                new BatchAccessService(
+                    mongoTemplate,
+                    userRepository,
+                    org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class))))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
     }
@@ -73,7 +79,7 @@ class BatchControllerTest {
     @Test
     void createValidatesNameThroughService() throws Exception {
         stubAdminUser("admin-mongo-id");
-        org.mockito.Mockito.when(batchService.create(eq("  "), any(), eq("admin-mongo-id")))
+        org.mockito.Mockito.when(batchService.create(eq("  "), any(), eq("admin-mongo-id"), any()))
             .thenThrow(new IllegalArgumentException("name is required"));
         mockMvc.perform(post("/api/admin/batches")
                 .principal(adminAuth())
@@ -87,15 +93,15 @@ class BatchControllerTest {
         stubAdminUser("admin-mongo-id");
         Batch saved = new Batch();
         saved.setId("b1");
-        org.mockito.Mockito.when(batchService.create("DSA", "desc", "admin-mongo-id")).thenReturn(saved);
+        org.mockito.Mockito.when(batchService.create("DSA", "desc", "admin-mongo-id", null)).thenReturn(saved);
         org.mockito.Mockito.when(batchService.detail("b1")).thenReturn(Map.of("id", "b1", "createdBy", "admin-mongo-id"));
         mockMvc.perform(post("/api/admin/batches")
                 .principal(adminAuth())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"DSA\",\"description\":\"desc\"}"))
             .andExpect(status().isOk());
-        verify(batchService).create("DSA", "desc", "admin-mongo-id");
-        verify(batchService, never()).create(any(), any(), eq("admin"));
+        verify(batchService).create("DSA", "desc", "admin-mongo-id", null);
+        verify(batchService, never()).create(any(), any(), eq("admin"), any());
     }
 
     @Test
@@ -106,11 +112,14 @@ class BatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"DSA\"}"))
             .andExpect(status().isUnauthorized());
-        verify(batchService, never()).create(any(), any(), any());
+        verify(batchService, never()).create(any(), any(), any(), any());
     }
 
     @Test
     void reportEndpointUsesReportService() throws Exception {
+        Batch batch = new Batch();
+        batch.setId("b1");
+        when(mongoTemplate.findById("b1", Batch.class)).thenReturn(batch);
         org.mockito.Mockito.when(batchReportService.report("b1", 0, 20, null)).thenReturn(Map.of("students", List.of()));
         mockMvc.perform(get("/api/admin/batches/b1/report").principal(adminAuth()))
             .andExpect(status().isOk());
@@ -121,6 +130,9 @@ class BatchControllerTest {
     @Test
     void coordinatorCannotReadAnotherBatch() throws Exception {
         stubUser("coord", "coord-id");
+        Batch other = new Batch();
+        other.setId("batch-b");
+        when(mongoTemplate.findById("batch-b", Batch.class)).thenReturn(other);
         when(mongoTemplate.exists(any(Query.class), eq(BatchCoordinator.class))).thenReturn(false);
         mockMvc.perform(get("/api/admin/batches/batch-b").principal(userAuth("coord")))
             .andExpect(status().isForbidden());
@@ -130,6 +142,9 @@ class BatchControllerTest {
     @Test
     void coordinatorCanReadAssignedBatch() throws Exception {
         stubUser("coord", "coord-id");
+        Batch assigned = new Batch();
+        assigned.setId("batch-a");
+        when(mongoTemplate.findById("batch-a", Batch.class)).thenReturn(assigned);
         when(mongoTemplate.exists(any(Query.class), eq(BatchCoordinator.class))).thenReturn(true);
         when(batchService.detail("batch-a")).thenReturn(Map.of("id", "batch-a"));
         mockMvc.perform(get("/api/admin/batches/batch-a").principal(userAuth("coord")))
@@ -140,6 +155,9 @@ class BatchControllerTest {
     @Test
     void revokedCoordinatorCannotAddMembers() throws Exception {
         stubUser("coord", "coord-id");
+        Batch assigned = new Batch();
+        assigned.setId("batch-a");
+        when(mongoTemplate.findById("batch-a", Batch.class)).thenReturn(assigned);
         when(mongoTemplate.exists(any(Query.class), eq(BatchCoordinator.class))).thenReturn(false);
         mockMvc.perform(post("/api/admin/batches/batch-a/members")
                 .principal(userAuth("coord"))
@@ -151,6 +169,9 @@ class BatchControllerTest {
 
     @Test
     void coordinatorCannotGrantCoordinatorAccess() throws Exception {
+        Batch batch = new Batch();
+        batch.setId("batch-a");
+        when(mongoTemplate.findById("batch-a", Batch.class)).thenReturn(batch);
         mockMvc.perform(post("/api/admin/batches/batch-a/coordinators")
                 .principal(userAuth("coord"))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -162,25 +183,21 @@ class BatchControllerTest {
     @Test
     void coordinatorCannotProbeMembershipOfAnotherBatch() throws Exception {
         stubUser("coord", "coord-id");
-        when(mongoTemplate.exists(any(Query.class), eq(BatchCoordinator.class))).thenAnswer(invocation -> {
-            String query = invocation.getArgument(0, Query.class).getQueryObject().toJson();
-            return !query.contains("batch-b");
-        });
+        // Without searchable org membership, coordinators cannot open the global user directory.
         mockMvc.perform(get("/api/admin/batches/users")
                 .param("search", "ada")
                 .param("batchId", "batch-b")
                 .principal(userAuth("coord")))
             .andExpect(status().isForbidden());
-        verify(batchService, never()).searchUsers(any(), anyInt(), anyInt(), any());
+        verify(batchService, never()).searchUsers(any(), anyInt(), anyInt(), any(), any());
     }
 
     @Test
     void studentCannotSearchRegisteredUsers() throws Exception {
         stubUser("student", "student-id");
-        when(mongoTemplate.exists(any(Query.class), eq(BatchCoordinator.class))).thenReturn(false);
         mockMvc.perform(get("/api/admin/batches/users").param("search", "al").principal(userAuth("student")))
             .andExpect(status().isForbidden());
-        verify(batchService, never()).searchUsers(any(), anyInt(), anyInt(), any());
+        verify(batchService, never()).searchUsers(any(), anyInt(), anyInt(), any(), any());
     }
 
     private void stubAdminUser(String id) {

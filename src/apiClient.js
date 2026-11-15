@@ -1,6 +1,10 @@
 import axios from 'axios';
 import { htmlApiPayloadError, prefixApiPath, resolveApiBaseUrl } from './apiBase.js';
 import { shouldRetryTransientFailure } from './apiRetry.js';
+import {
+  ORGANIZATION_HEADER,
+  readStoredOrganizationId,
+} from './organization/activeOrganization.js';
 
 // Development uses the Vite `/api` proxy. Production uses the HTTPS API origin
 // inlined from VITE_API_BASE_URL at build time.
@@ -89,6 +93,20 @@ const authClient = axios.create({
   },
 });
 
+function applyOrganizationHeader(config) {
+  if (!config.headers) {
+    config.headers = {};
+  }
+  if (config.headers[ORGANIZATION_HEADER] || config.headers['x-organization-id']) {
+    return config;
+  }
+  const organizationId = readStoredOrganizationId();
+  if (organizationId) {
+    config.headers[ORGANIZATION_HEADER] = organizationId;
+  }
+  return config;
+}
+
 // Request interceptor - add auth headers
 apiClient.interceptors.request.use(
   (config) => {
@@ -96,7 +114,7 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    return config;
+    return applyOrganizationHeader(config);
   },
   (error) => {
     logger.error('Request interceptor error:', error);
@@ -152,7 +170,9 @@ apiClient.interceptors.response.use(
                           originalRequest.url?.includes('/api/register') ||
                           originalRequest.url?.includes('/api/validate-token') ||
                           originalRequest.url?.includes('/api/confirm-email') ||
-                          originalRequest.url?.includes('/api/resend-verification');
+                          originalRequest.url?.includes('/api/resend-verification') ||
+                          originalRequest.url?.includes('/api/password-reset-request') ||
+                          originalRequest.url?.includes('/api/password-reset-confirm');
 
     // Retry only safe, idempotent reads. Writes such as contest creation,
     // submissions, contest runs, admin mutations, and draft saves are not repeated.
@@ -204,6 +224,11 @@ export const api = {
     validateToken: () => authClient.post('/api/validate-token'),
     resendVerification: (data) => authClient.post('/api/resend-verification', data),
     confirmEmail: (token) => authClient.get('/api/confirm-email', { params: { token } }),
+    requestPasswordReset: (email) => authClient.post('/api/password-reset-request', { email }),
+    confirmPasswordReset: (token, newPassword) => authClient.post('/api/password-reset-confirm', {
+      token,
+      newPassword,
+    }),
   },
 
   // Problems
@@ -272,6 +297,16 @@ export const api = {
   adminBatches: {
     list: (params) => apiClient.get('/api/admin/batches', { params }),
     get: (id) => apiClient.get(`/api/admin/batches/${id}`),
+    create: (body) => apiClient.post('/api/admin/batches', body),
+    addMembers: (id, body) => apiClient.post(`/api/admin/batches/${id}/members`, body),
+    importMembers: (id, body) => apiClient.post(`/api/admin/batches/${id}/members/import`, body),
+    removeMembers: (id, body) => apiClient.post(`/api/admin/batches/${id}/members/remove`, body),
+    removeMember: (id, userId) => apiClient.delete(`/api/admin/batches/${id}/members/${userId}`),
+    listCoordinators: (id) => apiClient.get(`/api/admin/batches/${id}/coordinators`),
+    grantCoordinator: (id, body) => apiClient.post(`/api/admin/batches/${id}/coordinators`, body),
+    revokeCoordinator: (id, userId) => apiClient.delete(`/api/admin/batches/${id}/coordinators/${userId}`),
+    report: (id) => apiClient.get(`/api/admin/batches/${id}/report`),
+    reportCsv: (id) => apiClient.get(`/api/admin/batches/${id}/report.csv`, { responseType: 'blob' }),
   },
 
   adminContests: {
@@ -321,6 +356,32 @@ export const api = {
       `/api/contests/${encodeURIComponent(contestId)}/problems/${encodeURIComponent(problemId)}/drafts/${encodeURIComponent(languageId)}`,
       body
     ),
+  },
+
+  organizations: {
+    listMine: () => apiClient.get('/api/organizations'),
+    get: (organizationId) => apiClient.get(`/api/organizations/${organizationId}`),
+    update: (organizationId, body) => apiClient.patch(`/api/organizations/${organizationId}`, body),
+    previewBranding: (organizationId) => apiClient.get(`/api/organizations/${organizationId}/branding/preview`),
+    resetBranding: (organizationId) => apiClient.post(`/api/organizations/${organizationId}/branding/reset`),
+    listDomains: (organizationId) => apiClient.get(`/api/organizations/${organizationId}/domains`),
+    registerDomain: (organizationId, body) => apiClient.post(`/api/organizations/${organizationId}/domains`, body),
+    verifyDomainLocal: (organizationId, domainId, body) => apiClient.post(
+      `/api/organizations/${organizationId}/domains/${domainId}/verify-local`,
+      body
+    ),
+    listMembers: (organizationId) => apiClient.get(`/api/organizations/${organizationId}/members`),
+    addMember: (organizationId, body) => apiClient.post(`/api/organizations/${organizationId}/members`, body),
+    updateMemberRoles: (organizationId, userId, body) => apiClient.put(
+      `/api/organizations/${organizationId}/members/${userId}/roles`,
+      body
+    ),
+    removeMember: (organizationId, userId) => apiClient.delete(
+      `/api/organizations/${organizationId}/members/${userId}`
+    ),
+    activeContext: (organizationId) => apiClient.get('/api/organizations/active-context', {
+      headers: { [ORGANIZATION_HEADER]: organizationId },
+    }),
   },
 };
 

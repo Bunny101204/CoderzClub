@@ -534,6 +534,7 @@ public class SubmissionJobController {
      * Get queue statistics (for observability)
      */
     @GetMapping("/queue/stats")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> getQueueStats() {
         try {
             SubmissionJobService.QueueStats stats = jobService.getQueueStats();

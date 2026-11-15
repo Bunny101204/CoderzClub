@@ -67,6 +67,13 @@ public class Problem {
     private ProblemAvailability availability;
 
     /**
+     * Optional tenant owner. Null means a legacy/platform catalog problem under
+     * existing public / CONTEST_ONLY rules. Never auto-assign legacy rows.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String organizationId;
+
+    /**
      * Gets the list of parameters for the function.
      */
     public List<Parameter> getParameters() { return parameters; }
@@ -176,4 +183,7 @@ public class Problem {
 
     public ProblemAvailability getAvailability() { return availability; }
     public void setAvailability(ProblemAvailability availability) { this.availability = availability; }
+
+    public String getOrganizationId() { return organizationId; }
+    public void setOrganizationId(String organizationId) { this.organizationId = organizationId; }
 } 

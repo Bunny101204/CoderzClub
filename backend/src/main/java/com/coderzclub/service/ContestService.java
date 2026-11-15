@@ -14,13 +14,16 @@ import com.coderzclub.model.ContestProblemSnapshot;
 import com.coderzclub.model.ContestScoringMode;
 import com.coderzclub.model.ContestStatus;
 import com.coderzclub.model.Problem;
+import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.User;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Clock;
@@ -62,10 +65,20 @@ public class ContestService {
     private final ContestProblemSnapshotService snapshotService;
 
     public ContestService(MongoTemplate mongoTemplate, ContestProperties contestProperties, Clock clock) {
+        this(mongoTemplate, contestProperties, clock, null);
+    }
+
+    @Autowired
+    public ContestService(
+        MongoTemplate mongoTemplate,
+        ContestProperties contestProperties,
+        Clock clock,
+        OrganizationAccessService organizationAccess
+    ) {
         this.mongoTemplate = mongoTemplate;
         this.contestProperties = contestProperties;
         this.clock = clock;
-        this.contestAccess = new ContestAccessService(mongoTemplate, contestProperties, clock);
+        this.contestAccess = new ContestAccessService(mongoTemplate, contestProperties, clock, organizationAccess);
         this.snapshotService = new ContestProblemSnapshotService(mongoTemplate, clock);
     }
 
@@ -74,12 +87,17 @@ public class ContestService {
     }
 
     public ContestAdminResponse create(ContestWriteRequest body, String createdBy) {
+        return create(body, createdBy, null);
+    }
+
+    public ContestAdminResponse create(ContestWriteRequest body, String createdBy, String organizationId) {
         if (body == null) {
             throw new IllegalArgumentException("Contest body is required");
         }
         Contest contest = new Contest();
         contest.setPublished(false);
         contest.setCreatedBy(createdBy);
+        contest.setOrganizationId(normalizeOrganizationId(organizationId));
         Instant now = clock.instant();
         contest.setCreatedAt(now);
         contest.setUpdatedAt(now);
@@ -89,7 +107,11 @@ public class ContestService {
     }
 
     public ContestAdminResponse update(String id, ContestWriteRequest body) {
-        Contest contest = requireAdminContest(id);
+        return update(id, body, null);
+    }
+
+    public ContestAdminResponse update(String id, ContestWriteRequest body, String organizationId) {
+        Contest contest = requireAdminContest(id, organizationId);
         ContestStatus current = status(contest);
         if (current == ContestStatus.ENDED) {
             throw new IllegalArgumentException("Ended contests cannot be modified");
@@ -109,7 +131,11 @@ public class ContestService {
     }
 
     public ContestAdminResponse publish(String id) {
-        Contest contest = requireAdminContest(id);
+        return publish(id, null);
+    }
+
+    public ContestAdminResponse publish(String id, String organizationId) {
+        Contest contest = requireAdminContest(id, organizationId);
         ContestStatus current = status(contest);
         if (current == ContestStatus.ENDED) {
             throw new IllegalArgumentException("Ended contests cannot be published");
@@ -125,7 +151,11 @@ public class ContestService {
     }
 
     public ContestAdminResponse unpublish(String id) {
-        Contest contest = requireAdminContest(id);
+        return unpublish(id, null);
+    }
+
+    public ContestAdminResponse unpublish(String id, String organizationId) {
+        Contest contest = requireAdminContest(id, organizationId);
         ContestStatus current = status(contest);
         if (current != ContestStatus.UPCOMING) {
             throw new IllegalArgumentException("Only upcoming contests can be unpublished");
@@ -137,7 +167,11 @@ public class ContestService {
     }
 
     public void delete(String id) {
-        Contest contest = requireAdminContest(id);
+        delete(id, null);
+    }
+
+    public void delete(String id, String organizationId) {
+        Contest contest = requireAdminContest(id, organizationId);
         ContestStatus current = status(contest);
         if (current == ContestStatus.LIVE) {
             throw new IllegalArgumentException("Live contests cannot be deleted");
@@ -150,13 +184,24 @@ public class ContestService {
     }
 
     public ContestAdminResponse adminGet(String id) {
-        return toAdminResponse(requireAdminContest(id), true);
+        return adminGet(id, null);
+    }
+
+    public ContestAdminResponse adminGet(String id, String organizationId) {
+        return toAdminResponse(requireAdminContest(id, organizationId), true);
     }
 
     public Map<String, Object> adminList(int page, int size) {
+        return adminList(page, size, null);
+    }
+
+    public Map<String, Object> adminList(int page, int size, String organizationId) {
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
         Query query = new Query();
+        if (organizationId != null && !organizationId.isBlank()) {
+            query.addCriteria(Criteria.where("organizationId").is(organizationId.trim()));
+        }
         long total = mongoTemplate.count(query, Contest.class);
         query.with(Sort.by(Sort.Direction.DESC, "createdAt"))
             .skip((long) safePage * safeSize)
@@ -173,7 +218,7 @@ public class ContestService {
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
         ContestAccessService.UserBatchScope scope = contestAccess.scopeForUser(user.getId());
-        Criteria eligibility = contestAccess.publishedEligibilityCriteria(scope, clock.instant());
+        Criteria eligibility = contestAccess.publishedEligibilityCriteria(scope, clock.instant(), user);
         if (eligibility == null) {
             return pageResponse("contests", List.of(), safePage, safeSize, 0);
         }
@@ -305,6 +350,7 @@ public class ContestService {
                     byId.put(batch.getId(), batch);
                 }
             }
+            String contestOrganizationId = normalizeOrganizationId(contest.getOrganizationId());
             for (String batchId : contest.getBatchIds()) {
                 Batch batch = byId.get(batchId);
                 if (batch == null) {
@@ -313,25 +359,55 @@ public class ContestService {
                 if (publishing && !batch.isActive()) {
                     throw new IllegalArgumentException("Batch is not active: " + batchId);
                 }
+                String batchOrganizationId = normalizeOrganizationId(batch.getOrganizationId());
+                if (!Objects.equals(contestOrganizationId, batchOrganizationId)) {
+                    throw new IllegalArgumentException("Batch does not belong to this organization: " + batchId);
+                }
             }
         }
         if (contest.getAudienceType() == ContestAudienceType.ALL_USERS
             && contest.getBatchIds() != null && !contest.getBatchIds().isEmpty()) {
             throw new IllegalArgumentException("ALL_USERS contests cannot include batch IDs");
         }
-        if (publishing) {
-            List<String> problemIds = contest.getProblemIds() == null ? List.of() : contest.getProblemIds();
-            if (problemIds.isEmpty()) {
-                throw new IllegalArgumentException("at least one problem is required to publish");
-            }
+        List<String> problemIds = contest.getProblemIds() == null ? List.of() : contest.getProblemIds();
+        if (publishing && problemIds.isEmpty()) {
+            throw new IllegalArgumentException("at least one problem is required to publish");
+        }
+        if (!problemIds.isEmpty()) {
             Query problemQuery = Query.query(Criteria.where("_id").in(problemIds));
             List<Problem> problems = mongoTemplate.find(problemQuery, Problem.class);
-            if (problems.size() != problemIds.size()) {
+            Map<String, Problem> byId = new HashMap<>();
+            for (Problem problem : problems) {
+                if (problem.getId() != null) {
+                    byId.put(problem.getId(), problem);
+                }
+            }
+            if (publishing && byId.size() != problemIds.size()) {
                 throw new IllegalArgumentException("Problem not found");
             }
-            if (contest.getAudienceType() == ContestAudienceType.ALL_USERS && !contestProperties.isGlobalEnabled()) {
-                throw new IllegalArgumentException("Global contests are disabled");
+            String contestOrganizationId = normalizeOrganizationId(contest.getOrganizationId());
+            for (String problemId : problemIds) {
+                Problem problem = byId.get(problemId);
+                if (problem == null) {
+                    continue;
+                }
+                String problemOrganizationId = normalizeOrganizationId(problem.getOrganizationId());
+                if (problemOrganizationId != null
+                    && !Objects.equals(contestOrganizationId, problemOrganizationId)) {
+                    throw new IllegalArgumentException("Problem not found");
+                }
+                // Org contests may reuse platform PUBLIC practice problems only.
+                if (contestOrganizationId != null
+                    && problemOrganizationId == null
+                    && ProblemAvailability.isContestOnly(problem)) {
+                    throw new IllegalArgumentException("Problem not found");
+                }
             }
+        }
+        if (publishing
+            && contest.getAudienceType() == ContestAudienceType.ALL_USERS
+            && !contestProperties.isGlobalEnabled()) {
+            throw new IllegalArgumentException("Global contests are disabled");
         }
     }
 
@@ -448,6 +524,10 @@ public class ContestService {
     }
 
     private Contest requireAdminContest(String id) {
+        return requireAdminContest(id, null);
+    }
+
+    private Contest requireAdminContest(String id, String organizationId) {
         if (id == null || id.isBlank()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Contest not found");
         }
@@ -455,7 +535,21 @@ public class ContestService {
         if (contest == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Contest not found");
         }
+        if (StringUtils.hasText(organizationId)) {
+            String expected = normalizeOrganizationId(organizationId);
+            String actual = normalizeOrganizationId(contest.getOrganizationId());
+            if (!Objects.equals(expected, actual)) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Contest not found");
+            }
+        }
         return contest;
+    }
+
+    private static String normalizeOrganizationId(String organizationId) {
+        if (!StringUtils.hasText(organizationId)) {
+            return null;
+        }
+        return organizationId.trim();
     }
 
     /**
@@ -557,6 +651,7 @@ public class ContestService {
         response.setAudienceType(contest.getAudienceType());
         response.setScoringMode(ContestScoringMode.POINTS_FIRST_ACCEPTED);
         response.setProblemCount(contest.getProblemIds() == null ? 0 : contest.getProblemIds().size());
+        response.setOrganizationId(contest.getOrganizationId());
     }
 
     private List<ContestProblemSummary> snapshotSummaries(Contest contest) {

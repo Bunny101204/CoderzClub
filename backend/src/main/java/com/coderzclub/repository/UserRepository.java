@@ -12,10 +12,13 @@ import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface UserRepository extends MongoRepository<User, String> {
-    @Query("{ 'username': { $regex: '^?0$', $options: 'i' } }")
+    /**
+     * Exact match so the unique {@code username} index can be used (IXSCAN).
+     * Case-insensitive regex previously forced a full index/collection scan under load.
+     */
     Optional<User> findByUsername(String username);
 
-    @Query("{ 'email': { $regex: '^?0$', $options: 'i' } }")
+    /** Exact match on stored email (callers should normalize emails to lowercase). */
     Optional<User> findByEmail(String email);
 
     Optional<User> findByEmailVerificationToken(String token);

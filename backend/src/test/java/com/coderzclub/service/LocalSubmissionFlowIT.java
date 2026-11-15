@@ -42,8 +42,10 @@ class LocalSubmissionFlowIT {
 
     @DynamicPropertySource
     static void localInfrastructure(DynamicPropertyRegistry properties) {
+        // Isolated special-IT replica on 27018 (rs0). Never retarget the developer
+        // standalone Mongo on 27017 — that would risk mutating local/dev data.
         properties.add("spring.data.mongodb.uri", () ->
-            "mongodb://127.0.0.1:27017/coderzclub_flow_" + RUN + "?replicaSet=rstest");
+            "mongodb://127.0.0.1:27018/coderzclub_flow_" + RUN + "?replicaSet=rs0&retryWrites=true");
         properties.add("spring.data.mongodb.auto-index-creation", () -> "true");
         properties.add("spring.data.redis.host", () -> "127.0.0.1");
         properties.add("spring.data.redis.port", () -> "6379");
@@ -182,7 +184,8 @@ class LocalSubmissionFlowIT {
     void realBrokerReturnRetriesAfterRoutingIsRestored() {
         // Separate database/exchange keep the scheduled application publisher
         // and worker from racing this deliberately unroutable fixture.
-        try (var client = com.mongodb.client.MongoClients.create("mongodb://127.0.0.1:27017/?replicaSet=rstest")) {
+        try (var client = com.mongodb.client.MongoClients.create(
+            "mongodb://127.0.0.1:27018/?replicaSet=rs0&retryWrites=true")) {
             MongoTemplate isolated = new MongoTemplate(client, "coderzclub_outbox_" + RUN);
             var properties = new SubmissionQueueProperties();
             properties.setExchange("validation.unroutable." + RUN);

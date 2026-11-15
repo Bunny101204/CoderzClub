@@ -1,6 +1,9 @@
 package com.coderzclub.controller;
 
 import com.coderzclub.service.ContestAccessService;
+import com.coderzclub.service.OrganizationAccessService;
+import com.coderzclub.service.OrganizationResourceCompatibility;
+import com.coderzclub.service.OrganizationVisibilityPolicy;
 import com.coderzclub.service.ProblemAccessService;
 import com.coderzclub.service.ProblemReadCache;
 import org.junit.jupiter.api.Test;
@@ -38,7 +41,10 @@ class ProblemCatalogControllerCacheTest {
         ProblemController controller = new ProblemController();
         ReflectionTestUtils.setField(controller, "problemReadCache", cache);
         ReflectionTestUtils.setField(controller, "problemAccessService",
-            new ProblemAccessService(mock(ContestAccessService.class)));
+            new ProblemAccessService(
+                mock(ContestAccessService.class),
+                mock(OrganizationAccessService.class),
+                new OrganizationVisibilityPolicy(new OrganizationResourceCompatibility())));
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ApiExceptionHandler())
             .build();

@@ -11,14 +11,28 @@ import {
   navigationItems,
   reduceMobileMenu,
 } from "../navigation/mainNav";
+import { useOrganization } from "../context/OrganizationContext";
+import OrganizationSwitcher from "./organization/OrganizationSwitcher";
 
 const Header = () => {
   const { user, isAuthenticated } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const {
+    organizations,
+    branding,
+    canAdministerActive,
+    activeOrganizationId,
+  } = useOrganization();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const items = navigationItems({ isAuthenticated, role: user?.role });
+  const items = navigationItems({
+    isAuthenticated,
+    role: user?.role,
+    hasOrganization: organizations.length > 0,
+    canAdministerOrganization: canAdministerActive,
+  });
+  const brandLabel = branding?.displayName || "CoderzClub";
 
   useEffect(() => {
     setMenuOpen((open) => reduceMobileMenu(open, { type: "route" }));
@@ -44,6 +58,9 @@ const Header = () => {
     if (path === "/admin") {
       return location.pathname === "/admin" || location.pathname.startsWith("/admin/");
     }
+    if (path === "/institution") {
+      return location.pathname === "/institution" || location.pathname.startsWith("/institution/");
+    }
     return location.pathname === path;
   };
   const navClass = (path) =>
@@ -59,10 +76,17 @@ const Header = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-2 min-w-0">
           <Link to={isAuthenticated ? "/home" : "/"} className="flex items-center space-x-2 min-w-0">
-            <div className="w-8 h-8 shrink-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">C</span>
-            </div>
-            <span className="font-bold text-xl text-gray-900 dark:text-white truncate">CoderzClub</span>
+            {branding?.logoUrl ? (
+              <img src={branding.logoUrl} alt="" className="w-8 h-8 shrink-0 rounded-lg object-cover" />
+            ) : (
+              <div
+                className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center"
+                style={{ backgroundColor: "var(--org-brand-primary, #2563eb)" }}
+              >
+                <span className="text-white font-bold text-sm">{brandLabel.slice(0, 1).toUpperCase()}</span>
+              </div>
+            )}
+            <span className="font-bold text-xl text-gray-900 dark:text-white truncate">{brandLabel}</span>
           </Link>
 
           {isAuthenticated && (
@@ -74,6 +98,9 @@ const Header = () => {
           )}
 
           <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+            {isAuthenticated && activeOrganizationId ? (
+              <OrganizationSwitcher className="hidden sm:inline-flex" />
+            ) : null}
             {isAuthenticated && (
               <button
                 type="button"
@@ -115,6 +142,11 @@ const Header = () => {
         </div>
         {isAuthenticated && menuOpen && (
           <nav id="mobile-nav" className={MOBILE_NAV_CLASS} aria-label="Mobile">
+            {activeOrganizationId ? (
+              <div className="px-1 py-2 sm:hidden">
+                <OrganizationSwitcher className="w-full" />
+              </div>
+            ) : null}
             {items.map((item) => (
               <Link
                 key={item.to}

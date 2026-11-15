@@ -550,7 +550,8 @@ public class Judge0ExecutionService {
         if (!hasOutput && (expected.isEmpty() || "N/A".equalsIgnoreCase(expected))) {
             return true;
         }
-        return actualOutput.equals(expected);
+        // return actualOutput.equals(expected);
+        return actualOutput != null && actualOutput.trim().equals(expected);
     }
 
     /**

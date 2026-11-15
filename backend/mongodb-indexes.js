@@ -184,6 +184,20 @@ ensureIndex(db.problem_bundles, { "isActive": 1, "createdAt": -1 }, { name: "isA
 // Batch reports query submissions with userId $in page-or-all members AND problemId $in assigned IDs/aliases.
 // Existing submissions.userId_problemId_createdAt_desc_idx already covers that compound lookup.
 
+// ===== ORGANIZATION / MULTI-TENANT INDEXES =====
+// Platform admin list by name; slug uniqueness for institution identity.
+ensureIndex(db.organizations, { "slug": 1 }, { unique: true, name: "slug_unique_idx" });
+ensureIndex(db.organizations, { "name": 1 }, { name: "name_idx" });
+ensureIndex(db.organizations, { "status": 1, "name": 1 }, { name: "status_name_idx" });
+// Membership uniqueness and "my organizations" lookup. status is residual.
+ensureIndex(db.organization_members, { "organizationId": 1, "userId": 1 }, { unique: true, name: "organizationId_userId_unique_idx" });
+ensureIndex(db.organization_members, { "userId": 1, "organizationId": 1 }, { name: "userId_organizationId_idx" });
+ensureIndex(db.organization_members, { "organizationId": 1, "status": 1, "addedAt": 1 }, { name: "organizationId_status_addedAt_idx" });
+// Optional tenant ownership on batches/contests (null = legacy platform scope).
+ensureIndex(db.batches, { "organizationId": 1, "createdAt": -1 }, { name: "organizationId_createdAt_desc_idx" });
+ensureIndex(db.contests, { "organizationId": 1, "createdAt": -1 }, { name: "organizationId_createdAt_desc_idx" });
+ensureIndex(db.problems, { "organizationId": 1, "numericId": 1 }, { name: "organizationId_numericId_idx" });
+
 // ===== CONTESTS COLLECTION INDEXES =====
 // Keep names/keys identical to Contest @CompoundIndexes.
 // Admin list GET /api/admin/contests: no predicate, sort createdAt desc, skip/limit.
@@ -274,6 +288,13 @@ assertIndex(db.batch_assignments, "batchId_problemId_unique_idx", function(idx) 
   return idx.unique === true;
 });
 assertIndex(db.batch_members, "userId_batchId_idx");
+assertIndex(db.organizations, "slug_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.organization_members, "organizationId_userId_unique_idx", function(idx) {
+  return idx.unique === true;
+});
+assertIndex(db.organization_members, "userId_organizationId_idx");
 assertIndex(db.bundle_access_grants, "bundle_subject_unique_idx", function(idx) {
   return idx.unique === true;
 });

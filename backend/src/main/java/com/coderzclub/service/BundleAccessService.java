@@ -7,6 +7,7 @@ import com.coderzclub.model.Problem;
 import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.ProblemBundle;
 import com.coderzclub.model.User;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -32,9 +33,16 @@ public class BundleAccessService {
     public static final String VISIBILITY_RESTRICTED = "RESTRICTED";
 
     private final MongoTemplate mongoTemplate;
+    private final ProblemAccessService problemAccessService;
 
     public BundleAccessService(MongoTemplate mongoTemplate) {
+        this(mongoTemplate, null);
+    }
+
+    @Autowired
+    public BundleAccessService(MongoTemplate mongoTemplate, ProblemAccessService problemAccessService) {
         this.mongoTemplate = mongoTemplate;
+        this.problemAccessService = problemAccessService;
     }
 
     public static String visibilityOf(ProblemBundle bundle) {
@@ -261,10 +269,9 @@ public class BundleAccessService {
         List<Problem> found = mongoTemplate.find(query, Problem.class);
         Map<String, Problem> byId = found.stream().collect(Collectors.toMap(Problem::getId, p -> p, (a, b) -> a));
         List<Problem> ordered = new ArrayList<>();
-        boolean admin = isAdmin(user);
         for (String id : ids) {
             Problem problem = byId.get(id);
-            if (problem != null && (admin || ProblemAvailability.isPublic(problem))) {
+            if (problem != null && visibleInBundle(user, problem)) {
                 ordered.add(problem);
             }
         }
@@ -293,20 +300,41 @@ public class BundleAccessService {
             return;
         }
         Query identity = Query.query(Criteria.where("_id").in(allIds));
-        identity.fields().include("availability");
+        identity.fields().include("availability").include("organizationId");
         List<Problem> found = mongoTemplate.find(identity, Problem.class);
-        Set<String> publicIds = found.stream()
-            .filter(ProblemAvailability::isPublic)
+        Set<String> visibleIds = found.stream()
+            .filter(problem -> visibleInBundle(user, problem))
             .map(Problem::getId)
             .collect(Collectors.toSet());
         for (ProblemBundle bundle : bundles) {
             if (bundle.getProblemIds() == null) {
                 continue;
             }
-            List<String> visible = bundle.getProblemIds().stream().filter(publicIds::contains).toList();
+            List<String> visible = bundle.getProblemIds().stream().filter(visibleIds::contains).toList();
             bundle.setProblemIds(visible);
             bundle.setTotalProblems(visible.size());
         }
+    }
+
+    /**
+     * Bundle listings never expose organization-private problems to non-members,
+     * even when a platform admin mistakenly lists those IDs in a PUBLIC bundle.
+     */
+    private boolean visibleInBundle(User user, Problem problem) {
+        if (problem == null) {
+            return false;
+        }
+        if (problemAccessService != null) {
+            return problemAccessService.canViewInBundle(user, problem);
+        }
+        if (isAdmin(user)) {
+            return true;
+        }
+        if (!ProblemAvailability.isPublic(problem)) {
+            return false;
+        }
+        String organizationId = problem.getOrganizationId();
+        return organizationId == null || organizationId.isBlank();
     }
 
     private ProblemBundle requireBundle(String bundleId) {

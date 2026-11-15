@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import com.coderzclub.service.MailDeliveryException;
 import org.springframework.mail.MailException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -46,8 +47,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
-    @ExceptionHandler(MailException.class)
-    public ResponseEntity<Map<String, String>> handleMailException(MailException ex) {
+    @ExceptionHandler({MailException.class, MailDeliveryException.class})
+    public ResponseEntity<Map<String, String>> handleMailException(Exception ex) {
         Map<String, String> response = new HashMap<>();
         response.put("error", "Email delivery failed");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);

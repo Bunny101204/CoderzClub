@@ -134,7 +134,11 @@ public class SubmissionService {
             if (isPracticeJob(submission)) {
                 if ("ACCEPTED".equals(submission.getResult())) {
                     applyAcceptedSubmission(user, problem, submission);
-                    userRepository.findById(user.getId()).ifPresent(leaderboardService::update);
+                    if (!countsTowardGlobalLeaderboard(problem)) {
+                        logger.info("Skipped global leaderboard update for org-private problem {}", problem.getId());
+                    } else {
+                        userRepository.findById(user.getId()).ifPresent(leaderboardService::update);
+                    }
                 }
                 userService.updateUserStreak(user.getId());
                 userService.recordFinalSubmission(submission);
@@ -292,11 +296,18 @@ public class SubmissionService {
         solvedProblem.setProblemId(problem.getId());
         solvedProblem.setSubmissionId(submission.getId());
         solvedProblem.setSolvedAt(new Date());
-        solvedProblem.setPointsAwarded(problem.getPoints());
+        // Organization-private solves must not inflate the anonymous global leaderboard.
+        solvedProblem.setPointsAwarded(countsTowardGlobalLeaderboard(problem) ? problem.getPoints() : 0);
         solvedProblem.setDifficulty(problem.getDifficulty());
         solvedProblem.setLanguage(submission.getLanguage());
         solvedProblem.setRewardStatus(UserSolvedProblem.RewardStatus.PENDING);
         return solvedProblem;
+    }
+
+    static boolean countsTowardGlobalLeaderboard(Problem problem) {
+        return problem == null
+            || problem.getOrganizationId() == null
+            || problem.getOrganizationId().isBlank();
     }
 
     private void reconcileWithoutTransaction(UserSolvedProblem candidate) {
@@ -322,6 +333,10 @@ public class SubmissionService {
             return;
         }
 
+        // Async retry must not re-inflate global points for organization-private solves
+        // even if a historical UserSolvedProblem row still stores a positive award.
+        clampOrgPrivateAward(solvedProblem);
+
         try {
             applyRewardAtomically(solvedProblem);
             markApplied(solvedProblem);
@@ -337,13 +352,31 @@ public class SubmissionService {
         }
     }
 
+    private void clampOrgPrivateAward(UserSolvedProblem solvedProblem) {
+        if (solvedProblem == null || solvedProblem.getPointsAwarded() <= 0) {
+            return;
+        }
+        Problem problem = problemRepository.findById(solvedProblem.getProblemId()).orElse(null);
+        if (!countsTowardGlobalLeaderboard(problem) && solvedProblem.getPointsAwarded() != 0) {
+            solvedProblem.setPointsAwarded(0);
+            try {
+                userSolvedProblemRepository.save(solvedProblem);
+            } catch (Exception persistFailure) {
+                logger.warn("Could not persist clamped org-private award for solved record {}",
+                    solvedProblem.getId(), persistFailure);
+            }
+        }
+    }
+
     private void applyRewardAtomically(UserSolvedProblem solvedProblem) {
         Query query = Query.query(Criteria.where("_id").is(solvedProblem.getUserId())
             .and("solvedProblemIds").ne(solvedProblem.getProblemId()));
         Update update = new Update()
-            .inc("totalPoints", solvedProblem.getPointsAwarded())
-            .inc("problemsSolved", 1)
             .addToSet("solvedProblemIds", solvedProblem.getProblemId());
+        if (solvedProblem.getPointsAwarded() > 0) {
+            update.inc("totalPoints", solvedProblem.getPointsAwarded())
+                .inc("problemsSolved", 1);
+        }
 
         com.mongodb.client.result.UpdateResult result = mongoTemplate.updateFirst(query, update, User.class);
         if (result.getModifiedCount() == 0

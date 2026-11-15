@@ -2,6 +2,7 @@ package com.coderzclub.service;
 
 import com.coderzclub.model.SubmissionJob;
 import com.coderzclub.model.User;
+import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -17,7 +18,11 @@ import static org.mockito.Mockito.when;
 
 class SubmissionJobAccessServiceTest {
     private final UserRepository users = mock(UserRepository.class);
-    private final SubmissionJobAccessService access = new SubmissionJobAccessService(users);
+    private final ProblemRepository problems = mock(ProblemRepository.class);
+    private final OrganizationAccessService organizationAccess = mock(OrganizationAccessService.class);
+    private final OrganizationVisibilityPolicy visibilityPolicy = mock(OrganizationVisibilityPolicy.class);
+    private final SubmissionJobAccessService access =
+        new SubmissionJobAccessService(users, problems, organizationAccess, visibilityPolicy);
 
     @Test
     void jobOwnerCanSubscribe() {

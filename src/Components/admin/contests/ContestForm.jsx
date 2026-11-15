@@ -54,6 +54,8 @@ export default function ContestForm() {
   const navigate = useNavigate();
   const location = useLocation();
   const creating = !id;
+  const institutionMode = location.pathname.startsWith("/institution/");
+  const batchIdFromQuery = new URLSearchParams(location.search).get("batchId");
   const [form, setForm] = useState(emptyForm);
   const [contest, setContest] = useState(null);
   const [loading, setLoading] = useState(!creating);
@@ -74,6 +76,33 @@ export default function ContestForm() {
       setNotice(location.state.notice);
     }
   }, [location.state]);
+
+  useEffect(() => {
+    if (!creating || !batchIdFromQuery) {
+      return undefined;
+    }
+    let cancelled = false;
+    api.adminBatches.get(batchIdFromQuery)
+      .then((response) => {
+        if (cancelled) return;
+        const batch = response.data;
+        setForm((current) => ({
+          ...current,
+          audienceType: "BATCHES",
+          batches: [{ id: batch.id || batchIdFromQuery, name: batch.name || batchIdFromQuery, active: batch.active }],
+        }));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setForm((current) => ({
+            ...current,
+            audienceType: "BATCHES",
+            batches: [{ id: batchIdFromQuery, name: batchIdFromQuery }],
+          }));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [creating, batchIdFromQuery]);
 
   useEffect(() => {
     if (creating) {
@@ -181,7 +210,10 @@ export default function ContestForm() {
     try {
       if (creating) {
         const created = await api.adminContests.create(buildContestWriteBody(body));
-        navigate(`/admin/contests/${created.data.id}`, {
+        const nextPath = institutionMode
+          ? `/institution/contests/${created.data.id}`
+          : `/admin/contests/${created.data.id}`;
+        navigate(nextPath, {
           replace: true,
           state: {
             notice: "Draft saved. This contest is unpublished. Use Publish when it is ready.",
@@ -222,7 +254,7 @@ export default function ContestForm() {
         setNotice("Unpublished to draft.");
       } else if (kind === "delete") {
         await api.adminContests.delete(id);
-        navigate("/admin");
+        navigate(institutionMode ? "/institution" : "/admin");
       }
     } catch (err) {
       const fallback = kind === "publish"
@@ -246,8 +278,15 @@ export default function ContestForm() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between gap-4 mb-6">
           <div>
-            <Link to="/admin" className="text-blue-600 dark:text-blue-400 hover:underline text-sm">Back to admin</Link>
-            <h1 className="text-3xl font-bold mt-2">{creating ? "Create contest" : "Contest"}</h1>
+            <Link
+              to={institutionMode ? "/institution" : "/admin"}
+              className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
+            >
+              {institutionMode ? "Back to institution" : "Back to admin"}
+            </Link>
+            <h1 className="text-3xl font-bold mt-2" data-testid="contest-form-title">
+              {creating ? (institutionMode ? "Schedule institution contest" : "Create contest") : "Contest"}
+            </h1>
           </div>
           {contest && <ContestStatusBadge status={contest.status} />}
         </div>

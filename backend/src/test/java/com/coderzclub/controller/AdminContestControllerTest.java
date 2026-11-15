@@ -5,6 +5,7 @@ import com.coderzclub.dto.ContestWriteRequest;
 import com.coderzclub.model.User;
 import com.coderzclub.repository.UserRepository;
 import com.coderzclub.service.ContestService;
+import com.coderzclub.service.OrganizationAccessService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,12 +43,15 @@ class AdminContestControllerTest {
     private ContestService contestService;
     @Mock
     private UserRepository userRepository;
+    @Mock
+    private OrganizationAccessService organizationAccess;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new AdminContestController(contestService, userRepository))
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                new AdminContestController(contestService, userRepository, organizationAccess))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
         SecurityContextHolder.getContext().setAuthentication(adminAuth());
@@ -63,20 +68,20 @@ class AdminContestControllerTest {
         ContestAdminResponse created = new ContestAdminResponse();
         created.setId("c1");
         created.setCreatedBy("admin-mongo-id");
-        when(contestService.create(any(ContestWriteRequest.class), eq("admin-mongo-id"))).thenReturn(created);
+        when(contestService.create(any(ContestWriteRequest.class), eq("admin-mongo-id"), isNull())).thenReturn(created);
         mockMvc.perform(post("/api/admin/contests")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"Weekly\",\"startAt\":\"2026-06-01T13:00:00Z\",\"endAt\":\"2026-06-01T15:00:00Z\",\"audienceType\":\"BATCHES\",\"batchIds\":[\"b1\"],\"problemIds\":[\"p1\"]}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value("c1"));
-        verify(contestService).create(any(ContestWriteRequest.class), eq("admin-mongo-id"));
-        verify(contestService, never()).create(any(), eq("admin"));
+        verify(contestService).create(any(ContestWriteRequest.class), eq("admin-mongo-id"), isNull());
+        verify(contestService, never()).create(any(), eq("admin"), any());
     }
 
     @Test
     void validationErrorsStayBadRequest() throws Exception {
         stubAdmin("admin-mongo-id");
-        when(contestService.create(any(ContestWriteRequest.class), eq("admin-mongo-id")))
+        when(contestService.create(any(ContestWriteRequest.class), eq("admin-mongo-id"), isNull()))
             .thenThrow(new IllegalArgumentException("endAt must be after startAt"));
         mockMvc.perform(post("/api/admin/contests")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -87,7 +92,7 @@ class AdminContestControllerTest {
 
     @Test
     void liveMutationConflictIsBadRequest() throws Exception {
-        when(contestService.update(eq("c1"), any(ContestWriteRequest.class)))
+        when(contestService.update(eq("c1"), any(ContestWriteRequest.class), isNull()))
             .thenThrow(new IllegalArgumentException("Live contests cannot change problems"));
         mockMvc.perform(patch("/api/admin/contests/c1")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -98,7 +103,7 @@ class AdminContestControllerTest {
 
     @Test
     void listDelegatesToService() throws Exception {
-        when(contestService.adminList(0, 20)).thenReturn(Map.of("contests", List.of(), "currentPage", 0, "totalItems", 0L));
+        when(contestService.adminList(0, 20, null)).thenReturn(Map.of("contests", List.of(), "currentPage", 0, "totalItems", 0L));
         mockMvc.perform(get("/api/admin/contests"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.totalItems").value(0));
@@ -106,10 +111,10 @@ class AdminContestControllerTest {
 
     @Test
     void listForwardsPageAndRequestedSize() throws Exception {
-        when(contestService.adminList(3, 999)).thenReturn(Map.of("contests", List.of(), "currentPage", 3, "totalItems", 0L));
+        when(contestService.adminList(3, 999, null)).thenReturn(Map.of("contests", List.of(), "currentPage", 3, "totalItems", 0L));
         mockMvc.perform(get("/api/admin/contests").param("page", "3").param("size", "999"))
             .andExpect(status().isOk());
-        verify(contestService).adminList(3, 999);
+        verify(contestService).adminList(3, 999, null);
     }
 
     @Test
@@ -117,7 +122,7 @@ class AdminContestControllerTest {
         mockMvc.perform(delete("/api/admin/contests/c1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.deleted").value(true));
-        verify(contestService).delete("c1");
+        verify(contestService).delete("c1", null);
     }
 
     private void stubAdmin(String id) {

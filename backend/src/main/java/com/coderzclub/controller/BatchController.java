@@ -10,6 +10,7 @@ import com.coderzclub.service.BatchAccessService;
 import com.coderzclub.service.BatchCoordinatorService;
 import com.coderzclub.service.BatchReportService;
 import com.coderzclub.service.BatchService;
+import com.coderzclub.service.OrganizationAccessService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -63,12 +65,18 @@ public class BatchController {
     }
 
     @PostMapping
-    public ResponseEntity<?> create(@RequestBody BatchWriteRequest body, Authentication authentication) {
-        batchAccessService.ensureAdmin(authentication);
+    public ResponseEntity<?> create(
+        @RequestBody BatchWriteRequest body,
+        Authentication authentication,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
+    ) {
+        String organizationId = batchAccessService.resolveOptionalOrganizationContext(authentication, organizationHeader);
+        batchAccessService.ensureCanManageBatchesInContext(authentication, organizationId);
         Batch batch = batchService.create(
             body == null ? null : body.getName(),
             body == null ? null : body.getDescription(),
-            requireCurrentUserId(authentication));
+            requireCurrentUserId(authentication),
+            organizationId);
         return ResponseEntity.ok(withViewer(batchService.detail(batch.getId()), authentication));
     }
 
@@ -78,10 +86,12 @@ public class BatchController {
         @RequestParam(defaultValue = "20") int size,
         @RequestParam(required = false) String search,
         @RequestParam(required = false) Boolean active,
-        Authentication authentication
+        Authentication authentication,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
     ) {
-        batchAccessService.ensureAdmin(authentication);
-        return ResponseEntity.ok(batchService.list(page, size, search, active));
+        String organizationId = batchAccessService.resolveOptionalOrganizationContext(authentication, organizationHeader);
+        batchAccessService.ensureCanManageBatchesInContext(authentication, organizationId);
+        return ResponseEntity.ok(batchService.list(page, size, search, active, organizationId));
     }
 
     @GetMapping("/users")
@@ -99,7 +109,13 @@ public class BatchController {
         if (batchId != null && !batchId.isBlank()) {
             batchAccessService.ensureCanReadBatch(authentication, batchId.trim());
         }
-        return ResponseEntity.ok(batchService.searchUsers(search, page, size, batchId));
+        return ResponseEntity.ok(batchService.searchUsers(
+            search,
+            page,
+            size,
+            batchId,
+            batchAccessService.searchableUserIds(authentication)
+        ));
     }
 
     @GetMapping("/{id}")
@@ -110,7 +126,7 @@ public class BatchController {
 
     @PatchMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable String id, @RequestBody BatchWriteRequest body, Authentication authentication) {
-        batchAccessService.ensureAdmin(authentication);
+        batchAccessService.ensureCanManageBatch(authentication, id);
         Boolean active = body == null ? null : body.getActive();
         return ResponseEntity.ok(withViewer(batchService.detail(
             batchService.update(
@@ -122,19 +138,19 @@ public class BatchController {
 
     @PostMapping("/{id}/archive")
     public ResponseEntity<?> archive(@PathVariable String id, Authentication authentication) {
-        batchAccessService.ensureAdmin(authentication);
+        batchAccessService.ensureCanManageBatch(authentication, id);
         return ResponseEntity.ok(withViewer(batchService.detail(batchService.deactivate(id).getId()), authentication));
     }
 
     @PostMapping("/{id}/reactivate")
     public ResponseEntity<?> reactivate(@PathVariable String id, Authentication authentication) {
-        batchAccessService.ensureAdmin(authentication);
+        batchAccessService.ensureCanManageBatch(authentication, id);
         return ResponseEntity.ok(withViewer(batchService.detail(batchService.update(id, null, null, true).getId()), authentication));
     }
 
     @GetMapping("/{id}/coordinators")
     public ResponseEntity<?> coordinators(@PathVariable String id, Authentication authentication) {
-        batchAccessService.ensureAdmin(authentication);
+        batchAccessService.ensureCanManageBatch(authentication, id);
         return ResponseEntity.ok(Map.of("coordinators", batchCoordinatorService.list(id)));
     }
 
@@ -142,7 +158,7 @@ public class BatchController {
     public ResponseEntity<?> grantCoordinator(
         @PathVariable String id, @RequestBody BatchCoordinatorRequest body, Authentication authentication
     ) {
-        batchAccessService.ensureAdmin(authentication);
+        batchAccessService.ensureCanManageBatch(authentication, id);
         return ResponseEntity.ok(batchCoordinatorService.grant(
             id,
             body == null ? null : body.getUserId(),
@@ -154,7 +170,7 @@ public class BatchController {
     public ResponseEntity<?> revokeCoordinator(
         @PathVariable String id, @PathVariable String userId, Authentication authentication
     ) {
-        batchAccessService.ensureAdmin(authentication);
+        batchAccessService.ensureCanManageBatch(authentication, id);
         batchCoordinatorService.revoke(id, userId);
         return ResponseEntity.ok(Map.of("removed", true));
     }

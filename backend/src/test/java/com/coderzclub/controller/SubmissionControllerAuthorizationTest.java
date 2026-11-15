@@ -51,6 +51,8 @@ class SubmissionControllerAuthorizationTest {
     private UserRepository userRepository;
     @Mock
     private ProblemRepository problemRepository;
+    @Mock
+    private com.coderzclub.service.SubmissionAccessService submissionAccessService;
 
     private MockMvc mockMvc;
 
@@ -60,6 +62,9 @@ class SubmissionControllerAuthorizationTest {
         ReflectionTestUtils.setField(controller, "submissionRepository", submissionRepository);
         ReflectionTestUtils.setField(controller, "userRepository", userRepository);
         ReflectionTestUtils.setField(controller, "problemRepository", problemRepository);
+        ReflectionTestUtils.setField(controller, "submissionAccessService", submissionAccessService);
+        lenient().when(submissionAccessService.canViewOwnSubmission(any(), any())).thenReturn(true);
+        lenient().when(submissionAccessService.canListHistoryForProblem(any(), anyString())).thenReturn(true);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         authenticate("alice");
         lenient().when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user("u-alice", "alice")));

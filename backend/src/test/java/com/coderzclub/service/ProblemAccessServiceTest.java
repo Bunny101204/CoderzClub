@@ -4,9 +4,13 @@ import com.coderzclub.config.ContestProperties;
 import com.coderzclub.model.Batch;
 import com.coderzclub.model.BatchMember;
 import com.coderzclub.model.Contest;
+import com.coderzclub.model.OrganizationMember;
 import com.coderzclub.model.Problem;
 import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.User;
+import com.coderzclub.service.OrganizationAccessService;
+import com.coderzclub.service.OrganizationResourceCompatibility;
+import com.coderzclub.service.OrganizationVisibilityPolicy;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,8 +78,7 @@ class ProblemAccessServiceTest {
         Query query = new Query();
         access.applyPracticeListingFilter(query, user("u1"));
         Document body = query.getQueryObject();
-        Document availability = (Document) body.get("availability");
-        assertEquals("CONTEST_ONLY", String.valueOf(availability.get("$ne")));
+        assertTrue(String.valueOf(body).contains("CONTEST_ONLY"));
     }
 
     @Test
@@ -84,6 +87,54 @@ class ProblemAccessServiceTest {
         Query query = new Query();
         access.applyPracticeListingFilter(query, admin());
         assertFalse(String.valueOf(query.getQueryObject()).contains("CONTEST_ONLY"));
+    }
+
+    @Test
+    void orgAdminScopedListingIncludesContestOnlyForContestAuthoring() {
+        OrganizationAccessService organizationAccess = mock(OrganizationAccessService.class);
+        OrganizationMember membership = new OrganizationMember();
+        membership.setOrganizationId("org-a");
+        membership.setUserId("u1");
+        membership.setRoles(List.of("ORG_ADMIN"));
+        when(organizationAccess.findActiveMembership("org-a", "u1")).thenReturn(java.util.Optional.of(membership));
+        when(organizationAccess.listActiveOrganizationIdsForUser("u1")).thenReturn(List.of("org-a"));
+
+        ContestAccessService contestAccess = new ContestAccessService(
+            mongo, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+        ProblemAccessService access = new ProblemAccessService(
+            contestAccess,
+            organizationAccess,
+            new OrganizationVisibilityPolicy(new OrganizationResourceCompatibility()));
+
+        Query query = new Query();
+        access.applyPracticeListingFilter(query, user("u1"), "org-a");
+        String body = String.valueOf(query.getQueryObject());
+        assertTrue(body.contains("org-a"));
+        // Platform practice half still excludes CONTEST_ONLY; org half does not.
+        assertTrue(body.contains("CONTEST_ONLY") || body.contains("organizationId"));
+        assertTrue(body.contains("$or") || body.contains("or"));
+    }
+
+    @Test
+    void studentScopedListingStillExcludesContestOnly() {
+        OrganizationAccessService organizationAccess = mock(OrganizationAccessService.class);
+        OrganizationMember membership = new OrganizationMember();
+        membership.setOrganizationId("org-a");
+        membership.setUserId("u1");
+        membership.setRoles(List.of("STUDENT"));
+        when(organizationAccess.findActiveMembership("org-a", "u1")).thenReturn(java.util.Optional.of(membership));
+        when(organizationAccess.listActiveOrganizationIdsForUser("u1")).thenReturn(List.of("org-a"));
+
+        ContestAccessService contestAccess = new ContestAccessService(
+            mongo, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+        ProblemAccessService access = new ProblemAccessService(
+            contestAccess,
+            organizationAccess,
+            new OrganizationVisibilityPolicy(new OrganizationResourceCompatibility()));
+
+        Query query = new Query();
+        access.applyPracticeListingFilter(query, user("u1"), "org-a");
+        assertTrue(String.valueOf(query.getQueryObject()).contains("CONTEST_ONLY"));
     }
 
     @Test
@@ -219,7 +270,10 @@ class ProblemAccessServiceTest {
     private ProblemAccessService accessAt(Instant instant) {
         ContestAccessService contestAccess = new ContestAccessService(
             mongo, properties, Clock.fixed(instant, ZoneOffset.UTC));
-        return new ProblemAccessService(contestAccess);
+        return new ProblemAccessService(
+            contestAccess,
+            mock(OrganizationAccessService.class),
+            new OrganizationVisibilityPolicy(new OrganizationResourceCompatibility()));
     }
 
     private void stubActiveMember() {

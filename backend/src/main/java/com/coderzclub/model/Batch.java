@@ -15,6 +15,11 @@ public class Batch {
     private Date createdAt = new Date();
     private Date updatedAt = new Date();
     private String createdBy;
+    /**
+     * Optional tenant owner. Null means a legacy platform-scoped batch that keeps
+     * working under existing ADMIN/coordinator rules until migrated explicitly.
+     */
+    private String organizationId;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -30,4 +35,6 @@ public class Batch {
     public void setUpdatedAt(Date updatedAt) { this.updatedAt = updatedAt; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+    public String getOrganizationId() { return organizationId; }
+    public void setOrganizationId(String organizationId) { this.organizationId = organizationId; }
 }

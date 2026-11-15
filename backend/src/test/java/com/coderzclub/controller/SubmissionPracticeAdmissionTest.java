@@ -109,7 +109,7 @@ class SubmissionPracticeAdmissionTest {
         ReflectionTestUtils.setField(jobs, "submissionValidator", submissionValidator);
         ReflectionTestUtils.setField(jobs, "queueAdmissionService", queueAdmissionService);
         ReflectionTestUtils.setField(jobs, "submissionLimitService", submissionLimitService);
-        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService, org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class), new com.coderzclub.service.OrganizationVisibilityPolicy(new com.coderzclub.service.OrganizationResourceCompatibility())));
         ReflectionTestUtils.setField(jobs, "validationService", validationService);
         ReflectionTestUtils.setField(jobs, "compatibilityService", compatibilityService);
         jobsMvc = MockMvcBuilders.standaloneSetup(jobs)
@@ -120,7 +120,7 @@ class SubmissionPracticeAdmissionTest {
         ReflectionTestUtils.setField(legacy, "userRepository", userRepository);
         ReflectionTestUtils.setField(legacy, "problemRepository", problemRepository);
         ReflectionTestUtils.setField(legacy, "validationService", validationService);
-        ReflectionTestUtils.setField(legacy, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ReflectionTestUtils.setField(legacy, "problemAccessService", new ProblemAccessService(contestAccessService, org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class), new com.coderzclub.service.OrganizationVisibilityPolicy(new com.coderzclub.service.OrganizationResourceCompatibility())));
         ReflectionTestUtils.setField(legacy, "submissionService", submissionService);
         legacyMvc = MockMvcBuilders.standaloneSetup(legacy)
             .setControllerAdvice(new ApiExceptionHandler())
@@ -253,7 +253,7 @@ class SubmissionPracticeAdmissionTest {
         ReflectionTestUtils.setField(jobs, "submissionValidator", submissionValidator);
         ReflectionTestUtils.setField(jobs, "queueAdmissionService", queueAdmissionService);
         ReflectionTestUtils.setField(jobs, "submissionLimitService", submissionLimitService);
-        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService, org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class), new com.coderzclub.service.OrganizationVisibilityPolicy(new com.coderzclub.service.OrganizationResourceCompatibility())));
         ReflectionTestUtils.setField(jobs, "validationService", validationService);
         ReflectionTestUtils.setField(jobs, "compatibilityService", compatibilityService);
         ReflectionTestUtils.setField(jobs, "idempotency", new com.coderzclub.service.IdempotencyOperations() {
@@ -309,7 +309,7 @@ class SubmissionPracticeAdmissionTest {
         ReflectionTestUtils.setField(jobs, "submissionValidator", submissionValidator);
         ReflectionTestUtils.setField(jobs, "queueAdmissionService", queueAdmissionService);
         ReflectionTestUtils.setField(jobs, "submissionLimitService", submissionLimitService);
-        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService));
+        ReflectionTestUtils.setField(jobs, "problemAccessService", new ProblemAccessService(contestAccessService, org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class), new com.coderzclub.service.OrganizationVisibilityPolicy(new com.coderzclub.service.OrganizationResourceCompatibility())));
         ReflectionTestUtils.setField(jobs, "validationService", validationService);
         ReflectionTestUtils.setField(jobs, "compatibilityService", compatibilityService);
         ReflectionTestUtils.setField(jobs, "idempotency", new com.coderzclub.service.IdempotencyOperations() {

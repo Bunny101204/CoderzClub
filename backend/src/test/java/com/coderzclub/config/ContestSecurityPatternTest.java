@@ -13,11 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ContestSecurityPatternTest {
     @Test
-    void adminContestApiIsAdminOnly() {
+    void adminContestApiAllowsAuthenticatedUserOrAdminWithInControllerTenantChecks() {
         RequestMapping mapping = AdminContestController.class.getAnnotation(RequestMapping.class);
         PreAuthorize pre = AdminContestController.class.getAnnotation(PreAuthorize.class);
         assertEquals("/api/admin/contests", mapping.value()[0]);
-        assertEquals("hasRole('ADMIN')", pre.value());
+        // Platform-only paths still require ROLE_ADMIN inside the controller when
+        // X-Organization-Id is absent; org admins use membership-validated headers.
+        assertEquals("hasAnyRole('USER','ADMIN')", pre.value());
     }
 
     @Test

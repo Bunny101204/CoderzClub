@@ -20,6 +20,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -102,6 +103,21 @@ class SubmissionServiceTest {
     }
 
     @Test
+    void orgPrivateAcceptedSubmissionDoesNotAwardGlobalPoints() {
+        problem.setOrganizationId("org-a");
+        problem.setPoints(9999);
+        when(userSolvedProblemRepository.insert(any(UserSolvedProblem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(mongoTemplate.updateFirst(any(), any(), any(Class.class))).thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        submissionService.applyAcceptedSubmission(user, problem, submission);
+
+        ArgumentCaptor<UserSolvedProblem> solvedProblemCaptor = ArgumentCaptor.forClass(UserSolvedProblem.class);
+        verify(userSolvedProblemRepository).insert(solvedProblemCaptor.capture());
+        assertEquals(0, solvedProblemCaptor.getValue().getPointsAwarded());
+        assertFalse(SubmissionService.countsTowardGlobalLeaderboard(problem));
+    }
+
+    @Test
     void repeatedAcceptedSubmissionDoesNotAwardPointsAgain() {
         when(userSolvedProblemRepository.insert(any(UserSolvedProblem.class)))
             .thenThrow(new DuplicateKeyException("duplicate key error"));
@@ -171,6 +187,24 @@ class SubmissionServiceTest {
         assertEquals(UserSolvedProblem.RewardStatus.APPLIED, pending.getRewardStatus());
         verify(mongoTemplate).updateFirst(any(), any(), any(Class.class));
         verify(userSolvedProblemRepository).save(pending);
+    }
+
+    @Test
+    void reconciliationClampsHistoricalOrgPrivatePositiveAwards() {
+        problem.setOrganizationId("org-a");
+        problem.setPoints(500);
+        UserSolvedProblem pending = solvedProblem(UserSolvedProblem.RewardStatus.PENDING);
+        pending.setPointsAwarded(500);
+        when(userSolvedProblemRepository.findByRewardStatusIn(any())).thenReturn(java.util.List.of(pending));
+        when(problemRepository.findById(problem.getId())).thenReturn(java.util.Optional.of(problem));
+        when(mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+            .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        submissionService.reconcilePendingRewards();
+
+        assertEquals(0, pending.getPointsAwarded());
+        assertEquals(UserSolvedProblem.RewardStatus.APPLIED, pending.getRewardStatus());
+        verify(userSolvedProblemRepository, times(2)).save(pending);
     }
 
     private UserSolvedProblem solvedProblem(UserSolvedProblem.RewardStatus status) {

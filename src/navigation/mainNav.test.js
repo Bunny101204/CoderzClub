@@ -19,6 +19,13 @@ const header = readFileSync(
 test("signed-in users get the main routes and admins also get Admin", () => {
   const user = navigationItems({ isAuthenticated: true, role: "USER" }).map((item) => item.label);
   assert.deepEqual(user, ["Problems", "Contests", "Bundles", "Editor", "Leaderboard", "My batches"]);
+  const withOrg = navigationItems({
+    isAuthenticated: true,
+    role: "USER",
+    hasOrganization: true,
+    canAdministerOrganization: true,
+  }).map((item) => item.to);
+  assert.ok(withOrg.includes("/institution"));
   const admin = navigationItems({ isAuthenticated: true, role: "ADMIN" }).map((item) => item.to);
   assert.ok(admin.includes("/admin"));
   assert.deepEqual(navigationItems({ isAuthenticated: false, role: "ADMIN" }), []);

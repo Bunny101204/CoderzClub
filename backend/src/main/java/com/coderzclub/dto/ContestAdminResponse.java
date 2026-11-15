@@ -28,6 +28,8 @@ public class ContestAdminResponse {
     private ContestScoringMode scoringMode = ContestScoringMode.POINTS_FIRST_ACCEPTED;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer eligibleMemberCount;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String organizationId;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -63,4 +65,6 @@ public class ContestAdminResponse {
     public void setEligibleMemberCount(Integer eligibleMemberCount) { this.eligibleMemberCount = eligibleMemberCount; }
     public ContestScoringMode getScoringMode() { return scoringMode; }
     public void setScoringMode(ContestScoringMode scoringMode) { this.scoringMode = scoringMode; }
+    public String getOrganizationId() { return organizationId; }
+    public void setOrganizationId(String organizationId) { this.organizationId = organizationId; }
 }

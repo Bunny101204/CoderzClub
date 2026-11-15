@@ -55,6 +55,40 @@ class UserServicePasswordResetTest {
         verify(users, never()).save(any());
     }
 
+    @Test
+    void resetClearsTokenSoReplayFails() {
+        User user = user("u1", "a@b.c", "ACTIVE");
+        user.setPasswordResetToken("tok-1");
+        user.setPasswordResetTokenExpiry(new java.util.Date(System.currentTimeMillis() + 60_000));
+        when(users.findByPasswordResetToken("tok-1")).thenReturn(Optional.of(user));
+        when(users.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        ReflectionTestUtils.setField(service, "passwordEncoder",
+            new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder());
+
+        User updated = service.resetPassword("tok-1", "Password1!");
+        assertTrue(updated.getPasswordResetToken() == null);
+        assertTrue(updated.getPasswordResetTokenExpiry() == null);
+
+        when(users.findByPasswordResetToken("tok-1")).thenReturn(Optional.empty());
+        org.junit.jupiter.api.Assertions.assertThrows(
+            RuntimeException.class,
+            () -> service.resetPassword("tok-1", "Password1!")
+        );
+    }
+
+    @Test
+    void expiredResetTokenIsRejected() {
+        User user = user("u1", "a@b.c", "ACTIVE");
+        user.setPasswordResetToken("tok-exp");
+        user.setPasswordResetTokenExpiry(new java.util.Date(System.currentTimeMillis() - 1_000));
+        when(users.findByPasswordResetToken("tok-exp")).thenReturn(Optional.of(user));
+        org.junit.jupiter.api.Assertions.assertThrows(
+            RuntimeException.class,
+            () -> service.resetPassword("tok-exp", "Password1!")
+        );
+        verify(users, never()).save(any());
+    }
+
     private static User user(String id, String email, String status) {
         User user = new User();
         user.setId(id);

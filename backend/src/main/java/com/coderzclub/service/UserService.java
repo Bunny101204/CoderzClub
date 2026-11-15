@@ -18,8 +18,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import com.mongodb.client.result.UpdateResult;
 import com.coderzclub.model.Submission;
 
@@ -43,11 +45,17 @@ public class UserService implements UserDetailsService {
     private long resetTokenExpirationMs;
 
     public User registerUser(String username, String email, String password) {
-        if (userRepository.findByUsername(username).isPresent()) {
+        String normalizedUsername = normalizeUsername(username);
+        String normalizedEmail = normalizeEmail(email);
+        if (normalizedUsername == null || normalizedEmail == null) {
+            throw new RuntimeException("Username and email are required");
+        }
+        // Exact + rare legacy case-insensitive collision check (unique indexes remain the race backstop).
+        if (findByUsername(normalizedUsername).isPresent()) {
             throw new RuntimeException("Username already exists");
         }
 
-        Optional<User> emailOwner = userRepository.findByEmail(email);
+        Optional<User> emailOwner = findByEmail(normalizedEmail);
         if (emailOwner.isPresent()) {
             User existing = emailOwner.get();
             if (existing.isEmailVerified()) {
@@ -56,7 +64,7 @@ public class UserService implements UserDetailsService {
             throw new RuntimeException("An account already exists with that email address. Please verify your email or use password reset.");
         }
 
-        User user = new User(null, username, email, passwordEncoder.encode(password), AccountRoles.publicRegistrationRole(), new Date());
+        User user = new User(null, normalizedUsername, normalizedEmail, passwordEncoder.encode(password), AccountRoles.publicRegistrationRole(), new Date());
         user.setEmailVerified(false);
         user.setAccountStatus("ACTIVE");
         user.setEmailVerificationToken(generateToken());
@@ -64,20 +72,84 @@ public class UserService implements UserDetailsService {
         return userRepository.save(user);
     }
 
+    /**
+     * Prefer exact indexed equality. Only on miss, fall back to a rare case-insensitive
+     * lookup for legacy mixed-case stored usernames (avoids regex on the hot path).
+     */
     public Optional<User> findByUsername(String username) {
-        return userRepository.findByUsername(username);
+        String normalized = normalizeUsername(username);
+        if (normalized == null) {
+            return Optional.empty();
+        }
+        Optional<User> exact = userRepository.findByUsername(normalized);
+        if (exact.isPresent()) {
+            return exact;
+        }
+        return findUsernameCaseInsensitiveLegacy(normalized);
     }
 
     public Optional<User> findByUsernameOrEmail(String identifier) {
-        Optional<User> userOpt = findByUsername(identifier);
+        String trimmed = identifier == null ? null : identifier.trim();
+        if (trimmed == null || trimmed.isEmpty()) {
+            return Optional.empty();
+        }
+        if (trimmed.indexOf('@') >= 0) {
+            return findByEmail(trimmed);
+        }
+        Optional<User> userOpt = findByUsername(trimmed);
         if (userOpt.isPresent()) {
             return userOpt;
         }
-        return findByEmail(identifier);
+        // Legacy clients may still send an email-shaped value without '@' checks above.
+        return findByEmail(trimmed);
     }
 
+    /**
+     * Emails are normalized to lowercase for new writes. Exact match first; rare
+     * case-insensitive fallback covers legacy mixed-case stored emails.
+     */
     public Optional<User> findByEmail(String email) {
-        return userRepository.findByEmail(email);
+        String normalized = normalizeEmail(email);
+        if (normalized == null) {
+            return Optional.empty();
+        }
+        Optional<User> exact = userRepository.findByEmail(normalized);
+        if (exact.isPresent()) {
+            return exact;
+        }
+        return findEmailCaseInsensitiveLegacy(normalized);
+    }
+
+    static String normalizeUsername(String username) {
+        if (username == null) {
+            return null;
+        }
+        String trimmed = username.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    static String normalizeEmail(String email) {
+        if (email == null) {
+            return null;
+        }
+        String trimmed = email.trim();
+        return trimmed.isEmpty() ? null : trimmed.toLowerCase(Locale.ROOT);
+    }
+
+    private Optional<User> findUsernameCaseInsensitiveLegacy(String username) {
+        if (mongoTemplate == null || username == null || username.isEmpty()) {
+            return Optional.empty();
+        }
+        Query query = new Query(Criteria.where("username").regex("^" + Pattern.quote(username) + "$", "i"));
+        return Optional.ofNullable(mongoTemplate.findOne(query, User.class));
+    }
+
+    private Optional<User> findEmailCaseInsensitiveLegacy(String email) {
+        if (mongoTemplate == null || email == null || email.isEmpty()) {
+            return Optional.empty();
+        }
+        Query query = new Query(Criteria.where("email").regex("^" + Pattern.quote(email) + "$", "i"));
+        return Optional.ofNullable(mongoTemplate.findOne(query, User.class));
     }
 
     public Optional<User> findByEmailVerificationToken(String token) {
@@ -141,7 +213,7 @@ public class UserService implements UserDetailsService {
                 throw new UsernameNotFoundException("User not found");
             }
         } else {
-            user = userRepository.findByUsername(username)
+            user = findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
         }
         if (!user.canAuthenticate()) {

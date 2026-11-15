@@ -43,13 +43,23 @@ public class BatchCoordinatorService {
     }
 
     public Map<String, Object> grant(String batchId, String userId, String institution, String addedBy) {
-        batchService.requireBatch(batchId);
+        Batch batch = batchService.requireBatch(batchId);
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("userId is required");
         }
         User user = mongoTemplate.findById(userId.trim(), User.class);
         if (user == null || user.isDeleted()) {
             throw new IllegalArgumentException("User not found");
+        }
+        if (batch.getOrganizationId() != null && !batch.getOrganizationId().isBlank()) {
+            boolean orgMember = mongoTemplate.exists(
+                Query.query(Criteria.where("organizationId").is(batch.getOrganizationId().trim())
+                    .and("userId").is(user.getId())
+                    .and("status").is(com.coderzclub.model.OrganizationMemberStatus.ACTIVE.name())),
+                com.coderzclub.model.OrganizationMember.class);
+            if (!orgMember) {
+                throw new IllegalArgumentException("User not found");
+            }
         }
         BatchCoordinator existing = mongoTemplate.findOne(
             Query.query(Criteria.where("batchId").is(batchId).and("userId").is(user.getId())),

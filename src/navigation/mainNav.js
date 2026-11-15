@@ -15,11 +15,22 @@ export function isAdminRole(role) {
   return role === "ADMIN" || role === "admin" || role === "Admin";
 }
 
-export function navigationItems({ isAuthenticated, role } = {}) {
+export function navigationItems({
+  isAuthenticated,
+  role,
+  hasOrganization = false,
+  canAdministerOrganization = false,
+} = {}) {
   if (!isAuthenticated) {
     return [];
   }
   const items = USER_ROUTES.map((item) => ({ ...item }));
+  if (hasOrganization) {
+    items.push({
+      to: "/institution",
+      label: canAdministerOrganization ? "Institution" : "My institution",
+    });
+  }
   if (isAdminRole(role)) {
     items.push({ to: "/admin", label: "Admin" });
   }

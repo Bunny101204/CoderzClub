@@ -6,6 +6,12 @@ import com.coderzclub.model.ProblemAvailability;
 import com.coderzclub.model.TestCase;
 import com.coderzclub.model.User;
 import com.coderzclub.repository.ProblemRepository;
+import com.coderzclub.service.ContestAccessService;
+import com.coderzclub.service.OrganizationAccessService;
+import com.coderzclub.service.OrganizationResourceCompatibility;
+import com.coderzclub.service.OrganizationVisibilityPolicy;
+import com.coderzclub.service.ProblemAccessService;
+import com.coderzclub.service.ProblemReadCache;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -73,7 +79,10 @@ class ProblemPublicDetailServiceTest {
         ProblemReadCache cache = new ProblemReadCache(
             redis, objectMapper, mongo, new OperationalMetrics(registry), 600, 600);
         service = new ProblemPublicDetailService(
-            mongo, repository, new ProblemAccessService(mock(ContestAccessService.class)), cache);
+            mongo, repository, new ProblemAccessService(
+                mock(ContestAccessService.class),
+                mock(OrganizationAccessService.class),
+                new OrganizationVisibilityPolicy(new OrganizationResourceCompatibility())), cache);
     }
 
     @Test
@@ -126,8 +135,8 @@ class ProblemPublicDetailServiceTest {
     void adminContestOnlyResponseIsNotTheStudentCache() {
         availability.set(ProblemAvailability.CONTEST_ONLY);
         Object body = service.read(admin(), "p1");
-        assertInstanceOf(Problem.class, body);
-        assertNull(((Problem) body).getHiddenTestCases());
+        assertInstanceOf(PublicProblemDetail.class, body);
+        assertEquals("Solve it", ((PublicProblemDetail) body).getStatement());
         verify(values, never()).set(anyString(), anyString(), anyLong(), any());
     }
 

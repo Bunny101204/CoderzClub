@@ -7,6 +7,7 @@ import com.coderzclub.repository.UserRepository;
 import com.coderzclub.repository.ProblemRepository;
 import com.coderzclub.model.User;
 import com.coderzclub.model.Problem;
+import com.coderzclub.service.SubmissionAccessService;
 import com.coderzclub.service.SubmissionLimitDecision;
 import com.coderzclub.service.SubmissionService;
 import com.coderzclub.service.SubmissionValidationService;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/submissions")
@@ -58,6 +60,15 @@ public class SubmissionController {
     @Autowired
     private ProblemAccessService problemAccessService;
 
+    @Autowired
+    private SubmissionAccessService submissionAccessService;
+
+    /**
+     * Legacy compatibility endpoint. Client-provided Judge0 verdicts, scores, and
+     * execution results are never authoritative. Rewards and ACCEPTED status are
+     * only applied through {@link SubmissionService#createSubmissionFromJob}.
+     * Legitimate practice callers should use {@code POST /api/submission-jobs}.
+     */
     @PostMapping
     public ResponseEntity<?> submitSolution(@RequestBody SubmissionRequest request) {
         try {
@@ -111,43 +122,89 @@ public class SubmissionController {
                     }
                 }
             }
-            
-            // Map Judge0 status to verdict
-            String verdict = mapJudge0StatusToVerdict(request.getStatusId());
-            
-            // Create submission with enhanced fields
+
+            Map<String, Object> executionDetails = new HashMap<>();
+            if (request.getExecutionDetails() != null) {
+                executionDetails.put("clientReported", Map.copyOf(request.getExecutionDetails()));
+            }
+            Map<String, Object> clientClaim = new HashMap<>();
+            if (request.getStatusId() != null) {
+                clientClaim.put("statusId", request.getStatusId());
+            }
+            if (request.getResult() != null) {
+                clientClaim.put("result", request.getResult());
+            }
+            if (request.getPassedTestCases() != null) {
+                clientClaim.put("passedTestCases", request.getPassedTestCases());
+            }
+            if (request.getTotalTestCases() != null) {
+                clientClaim.put("totalTestCases", request.getTotalTestCases());
+            }
+            if (!clientClaim.isEmpty()) {
+                executionDetails.put("clientVerdictClaim", clientClaim);
+            }
+            executionDetails.put("scoringPathway", "REQUIRES_SUBMISSION_JOB");
+            executionDetails.put("authoritative", Boolean.FALSE);
+
+            // Never persist client ACCEPTED / Judge0 status as the server verdict.
             Submission submission = Submission.builder()
                 .userId(user.getId())
                 .problemId(request.getProblemId())
                 .code(request.getCode())
                 .language(request.getLanguage())
-                .result(request.getResult() != null ? request.getResult() : verdict)
-                .output(request.getOutput())
-                .runtime(request.getRuntime())
-                .memory(request.getMemory())
-                .errorMessage(request.getErrorMessage())
-                .stderr(request.getStderr())
-                .verdict(verdict)
-                .passedTestCases(request.getPassedTestCases())
-                .totalTestCases(request.getTotalTestCases())
-                .executionDetails(request.getExecutionDetails())
+                .result("UNVERIFIED")
+                .output(null)
+                .runtime(null)
+                .memory(null)
+                .errorMessage(null)
+                .stderr(null)
+                .verdict("UNVERIFIED")
+                .passedTestCases(null)
+                .totalTestCases(null)
+                .executionDetails(executionDetails.isEmpty() ? null : executionDetails)
                 .build();
                 
             submission = submissionRepository.save(submission);
 
             // Note: the rate limit token has already been acquired above.
             // If save fails after acquisition, the attempt is counted and not compensated.
-            
-            // Update user stats if solution is correct
-            if ("ACCEPTED".equals(submission.getResult()) || "ACCEPTED".equals(verdict)) {
-                submissionService.applyAcceptedSubmission(user, problem, submission);
-            }
-            
-            // Update streak for any submission (accepted or not)
+            // Rewards are intentionally never applied from this legacy endpoint.
+
             userService.updateUserStreak(user.getId());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("submission", submission);
+            response.put("scoring", "REQUIRES_SUBMISSION_JOB");
+            response.put("message",
+                "Legacy submission recorded without a trusted verdict. Use POST /api/submission-jobs for judged scoring.");
+            return ResponseEntity.ok(response);
             
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
+        } catch (Exception e) {
+            return unavailable(e);
+        }
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getSubmissionById(@PathVariable String id) {
+        try {
+            Optional<User> current = currentUser();
+            if (current.isEmpty()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+            }
+            Optional<Submission> submissionOpt = submissionRepository.findById(id);
+            if (submissionOpt.isEmpty()) {
+                return ResponseEntity.status(404).body(Map.of("error", "Submission not found"));
+            }
+            Submission submission = submissionOpt.get();
+            if (!current.get().getId().equals(submission.getUserId())) {
+                return ResponseEntity.status(404).body(Map.of("error", "Submission not found"));
+            }
+            submissionAccessService.requireViewOwnSubmission(current.get(), submission);
             return ResponseEntity.ok(submission);
-            
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (IllegalArgumentException e) {
@@ -172,7 +229,9 @@ public class SubmissionController {
                 return ResponseEntity.status(403).body(Map.of("error", "Cannot read another user's submissions"));
             }
             Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
-            return ResponseEntity.ok(pagePayload(submissionRepository.findByUserId(userId, pageable)));
+            return ResponseEntity.ok(visiblePagePayload(
+                current.get(),
+                submissionRepository.findByUserId(userId, pageable)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
@@ -191,10 +250,13 @@ public class SubmissionController {
             if (current.isEmpty()) {
                 return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
             }
+            if (!submissionAccessService.canListHistoryForProblem(current.get(), problemId)) {
+                return ResponseEntity.ok(emptyPagePayload(page, clampSize(size)));
+            }
             Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
             Page<Submission> submissions = submissionRepository.findByUserIdAndProblemIdIn(
                 current.get().getId(), problemAliases(problemId), pageable);
-            return ResponseEntity.ok(pagePayload(submissions));
+            return ResponseEntity.ok(visiblePagePayload(current.get(), submissions));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
@@ -223,10 +285,14 @@ public class SubmissionController {
             if (userOpt.isEmpty()) {
                 return ResponseEntity.badRequest().body("User not found");
             }
+            User user = userOpt.get();
+            if (problemId != null && !submissionAccessService.canListHistoryForProblem(user, problemId)) {
+                return ResponseEntity.ok(emptyPagePayload(page, clampSize(size)));
+            }
             
             Pageable pageable = PageRequest.of(page, clampSize(size), Sort.by("createdAt").descending());
             Page<Submission> submissions;
-            String userId = userOpt.get().getId();
+            String userId = user.getId();
             
             // Apply filters
             if (problemId != null && result != null) {
@@ -242,7 +308,7 @@ public class SubmissionController {
                 submissions = submissionRepository.findByUserId(userId, pageable);
             }
             
-            return ResponseEntity.ok(pagePayload(submissions));
+            return ResponseEntity.ok(visiblePagePayload(user, submissions));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Submission request is invalid. Check your request and try again."));
         } catch (Exception e) {
@@ -324,43 +390,31 @@ public class SubmissionController {
         return ids;
     }
 
-    private Map<String, Object> pagePayload(Page<Submission> submissions) {
+    private Map<String, Object> visiblePagePayload(User viewer, Page<Submission> submissions) {
+        List<Submission> visible = submissions.getContent().stream()
+            .filter(submission -> submissionAccessService.canViewOwnSubmission(viewer, submission))
+            .collect(Collectors.toList());
+        long hidden = submissions.getNumberOfElements() - visible.size();
         Map<String, Object> response = new HashMap<>();
-        response.put("submissions", submissions.getContent());
+        response.put("submissions", visible);
         response.put("currentPage", submissions.getNumber());
         response.put("totalPages", submissions.getTotalPages());
-        response.put("totalItems", submissions.getTotalElements());
+        // totalItems is an upper bound when org-private rows are filtered out.
+        response.put("totalItems", Math.max(0, submissions.getTotalElements() - hidden));
         response.put("hasNext", submissions.hasNext());
         response.put("hasPrevious", submissions.hasPrevious());
         return response;
     }
 
-    /**
-     * Maps Judge0 status ID to human-readable verdict
-     * Judge0 status IDs: https://ce.judge0.com/#statuses-and-languages-status-get
-     */
-    private String mapJudge0StatusToVerdict(Integer statusId) {
-        if (statusId == null) {
-            return "UNKNOWN";
-        }
-        
-        switch (statusId) {
-            case 1: return "IN_QUEUE";
-            case 2: return "PROCESSING";
-            case 3: return "ACCEPTED";
-            case 4: return "WRONG_ANSWER";
-            case 5: return "TIME_LIMIT_EXCEEDED";
-            case 6: return "COMPILATION_ERROR";
-            case 7: return "RUNTIME_ERROR_SIGSEGV";  // Segmentation fault
-            case 8: return "RUNTIME_ERROR_SIGXFSZ";  // File size limit exceeded
-            case 9: return "RUNTIME_ERROR_SIGFPE";    // Floating point exception
-            case 10: return "RUNTIME_ERROR_SIGABRT"; // Abort signal
-            case 11: return "RUNTIME_ERROR_NZEC";    // Non-zero exit code
-            case 12: return "RUNTIME_ERROR_OTHER";    // Other runtime error
-            case 13: return "INTERNAL_ERROR";
-            case 14: return "EXEC_FORMAT_ERROR";
-            default: return "UNKNOWN";
-        }
+    private Map<String, Object> emptyPagePayload(int page, int size) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("submissions", List.of());
+        response.put("currentPage", page);
+        response.put("totalPages", 0);
+        response.put("totalItems", 0);
+        response.put("hasNext", false);
+        response.put("hasPrevious", page > 0);
+        return response;
     }
     
     

@@ -16,6 +16,7 @@ import ErrorBoundary from "./Components/ErrorBoundary";
 import SiteFooter from "./Components/SiteFooter";
 import { useAuth, AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import { OrganizationProvider, useOrganization } from "./context/OrganizationContext";
 import AccessDenied from "./Components/AccessDenied";
 import NotFoundPage from "./Components/NotFoundPage";
 import LegacyProblemRedirect from "./routing/LegacyProblemRedirect";
@@ -46,6 +47,7 @@ const ContestList = lazy(() => import("./Components/contests/ContestList"));
 const ContestDetail = lazy(() => import("./Components/contests/ContestDetail"));
 const ContestProblemPage = lazy(() => import("./Components/contests/ContestProblemPage"));
 const ContestForm = lazy(() => import("./Components/admin/contests/ContestForm"));
+const InstitutionDashboard = lazy(() => import("./Components/organization/InstitutionDashboard"));
 
 // Fallback component for Suspense
 function LoadingFallback() {
@@ -62,6 +64,32 @@ function AdminRoute({ user }) {
     return <AccessDenied />;
   }
   return <AdminDashboard />;
+}
+
+function InstitutionRoute({ children }) {
+  const { isAuthenticated } = useAuth();
+  const { organizations, loading } = useOrganization();
+  if (!isAuthenticated) {
+    return <Navigate to="/auth" replace />;
+  }
+  if (loading) {
+    return <LoadingFallback />;
+  }
+  if (!organizations.length) {
+    return <AccessDenied />;
+  }
+  return children;
+}
+
+function InstitutionAdminRoute({ children }) {
+  const { canAdministerActive, loading } = useOrganization();
+  if (loading) {
+    return <LoadingFallback />;
+  }
+  if (!canAdministerActive) {
+    return <AccessDenied />;
+  }
+  return children;
 }
 
 function AppContent() {
@@ -186,6 +214,34 @@ function AppContent() {
         <Route
           path="/admin"
           element={<Suspense fallback={<LoadingFallback />}><AdminRoute user={user} /></Suspense>}
+        />
+        <Route
+          path="/institution"
+          element={
+            <InstitutionRoute>
+              <Suspense fallback={<LoadingFallback />}><InstitutionDashboard /></Suspense>
+            </InstitutionRoute>
+          }
+        />
+        <Route
+          path="/institution/contests/new"
+          element={
+            <InstitutionRoute>
+              <InstitutionAdminRoute>
+                <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+              </InstitutionAdminRoute>
+            </InstitutionRoute>
+          }
+        />
+        <Route
+          path="/institution/contests/:id"
+          element={
+            <InstitutionRoute>
+              <InstitutionAdminRoute>
+                <Suspense fallback={<LoadingFallback />}><ContestForm /></Suspense>
+              </InstitutionAdminRoute>
+            </InstitutionRoute>
+          }
         />
         <Route
           path="/admin/contests/new"
@@ -337,11 +393,13 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <ThemeProvider>
-        <Router>
-          <AppContent />
-        </Router>
-        </ThemeProvider>
+        <OrganizationProvider>
+          <ThemeProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </ThemeProvider>
+        </OrganizationProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

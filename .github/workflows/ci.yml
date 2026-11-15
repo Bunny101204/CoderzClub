@@ -51,6 +51,11 @@ jobs:
       SPRING_REDIS_PORT: "6379"
       RABBITMQ_HOST: 127.0.0.1
       RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+      JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      SPRING_MAIL_ENABLED: "false"
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - name: Require isolated MongoDB and Redis
@@ -88,7 +93,12 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
-      - run: "node --test $(find src -name '*.test.js')"
+      - run: "node --test $(find src e2e -name '*.test.js')"
+      - name: Playwright e2e (independent browser tests only)
+        env:
+          # Live institution tests need a seeded local backend. Never enable them in CI.
+          INSTITUTION_E2E_ENABLED: "false"
+        run: npx playwright install --with-deps chromium && npx playwright test
       - run: npm run build
         env:
           # Harmless HTTPS origin so production-mode Vite can build in CI.

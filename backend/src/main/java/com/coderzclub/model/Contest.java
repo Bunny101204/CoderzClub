@@ -31,6 +31,11 @@ public class Contest {
     private String createdBy;
     private Instant createdAt;
     private Instant updatedAt;
+    /**
+     * Optional tenant owner. Null means a legacy/platform contest under existing
+     * audience rules. Do not invent an organization assignment automatically.
+     */
+    private String organizationId;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -56,4 +61,6 @@ public class Contest {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public String getOrganizationId() { return organizationId; }
+    public void setOrganizationId(String organizationId) { this.organizationId = organizationId; }
 }

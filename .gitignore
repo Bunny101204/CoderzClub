@@ -1,4 +1,11 @@
 .env
+.env.staging
+.m2-staging-validation/
+# Synthetic local demo / e2e credentials (never publish)
+e2e/.fixtures/*.env
+e2e/.fixtures/*-org.json
+e2e/.fixtures/_seed_mongo_*.js
+
 # Logs
 logs
 *.log

@@ -21,6 +21,7 @@ public class ProblemListResponse {
     private String executionMode;
     private List<TestCase> publicTestCases;
     private String availability;
+    private String organizationId;
 
     public ProblemListResponse() {}
 
@@ -46,6 +47,7 @@ public class ProblemListResponse {
                 })
                 .collect(Collectors.toList());
         this.availability = ProblemAvailability.of(problem).name();
+        this.organizationId = problem.getOrganizationId();
     }
 
     public String getId() { return id; }
@@ -74,4 +76,6 @@ public class ProblemListResponse {
     public void setPublicTestCases(List<TestCase> publicTestCases) { this.publicTestCases = publicTestCases; }
     public String getAvailability() { return availability; }
     public void setAvailability(String availability) { this.availability = availability; }
+    public String getOrganizationId() { return organizationId; }
+    public void setOrganizationId(String organizationId) { this.organizationId = organizationId; }
 }

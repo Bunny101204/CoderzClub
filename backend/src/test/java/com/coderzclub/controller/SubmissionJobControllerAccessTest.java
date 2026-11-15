@@ -52,7 +52,12 @@ class SubmissionJobControllerAccessTest {
         SubmissionJobController controller = new SubmissionJobController();
         ReflectionTestUtils.setField(controller, "jobService", jobService);
         ReflectionTestUtils.setField(controller, "userRepository", userRepository);
-        ReflectionTestUtils.setField(controller, "jobAccessService", new SubmissionJobAccessService(userRepository));
+        ReflectionTestUtils.setField(controller, "jobAccessService", new SubmissionJobAccessService(
+            userRepository,
+            org.mockito.Mockito.mock(com.coderzclub.repository.ProblemRepository.class),
+            org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class),
+            new com.coderzclub.service.OrganizationVisibilityPolicy(
+                new com.coderzclub.service.OrganizationResourceCompatibility())));
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

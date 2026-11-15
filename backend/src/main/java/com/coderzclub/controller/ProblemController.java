@@ -15,6 +15,8 @@ import com.coderzclub.service.ExecutionOutcome;
 import com.coderzclub.service.IncompatibleExecutionException;
 import com.coderzclub.service.ProblemExecutionConfigService;
 import com.coderzclub.service.ProblemContentService;
+import com.coderzclub.service.OrganizationAccessService;
+import com.coderzclub.service.OrganizationVisibilityPolicy;
 import com.coderzclub.service.ProblemAccessService;
 import com.coderzclub.service.ProblemIdentityResolver;
 import com.coderzclub.service.ProblemPublicDetailService;
@@ -29,11 +31,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 import java.util.Optional;
 import java.util.ArrayList;
@@ -84,6 +88,12 @@ public class ProblemController {
     @Autowired
     private ProblemIdentityResolver problemIdentityResolver;
 
+    @Autowired
+    private OrganizationAccessService organizationAccess;
+
+    @Autowired
+    private OrganizationVisibilityPolicy visibilityPolicy;
+
     @GetMapping
     public ResponseEntity<?> getAllProblems(
         @RequestParam(required = false) String difficulty,
@@ -93,7 +103,8 @@ public class ProblemController {
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size,
         @RequestParam(required = false) String cursor,
-        @RequestParam(required = false) Integer limit
+        @RequestParam(required = false) Integer limit,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
     ) {
         try {
             int requestedLimit = limit == null ? size : limit;
@@ -108,8 +119,12 @@ public class ProblemController {
             }
             boolean cursorMode = cursor != null && !cursor.trim().isEmpty();
             User viewer = currentUser().orElse(null);
+            String activeOrganizationId = resolveOptionalOrganizationContext(viewer, organizationHeader);
             boolean adminList = problemAccessService.canListRestrictedProblems(viewer);
-            if (problemReadCache != null && problemReadCache.listCacheable(
+            boolean orgScopedList = StringUtils.hasText(activeOrganizationId);
+            // Membership-sensitive lists must not reuse the anonymous platform cache.
+            boolean listCacheAllowed = viewer == null && !orgScopedList;
+            if (listCacheAllowed && problemReadCache != null && problemReadCache.listCacheable(
                     difficulty, category, tags, search, cursorMode, page, size)) {
                 Map<String, Object> cached = problemReadCache.readList(adminList, page, size, difficulty);
                 if (cached != null) {
@@ -118,31 +133,39 @@ public class ProblemController {
             }
 
             Query query = new Query();
-            problemAccessService.applyPracticeListingFilter(query, viewer);
+            List<Criteria> filters = new ArrayList<>();
+            Criteria practiceFilter = problemAccessService.practiceListingCriteria(viewer, activeOrganizationId);
+            if (practiceFilter != null) {
+                filters.add(practiceFilter);
+            }
             if (difficulty != null) {
-                query.addCriteria(Criteria.where("difficulty").is(difficulty));
+                filters.add(Criteria.where("difficulty").is(difficulty));
             }
             if (category != null) {
-                query.addCriteria(Criteria.where("category").is(category));
+                filters.add(Criteria.where("category").is(category));
             }
             if (tags != null && !tags.isEmpty()) {
-                query.addCriteria(Criteria.where("tags").in(tags));
+                filters.add(Criteria.where("tags").in(tags));
             }
             if (search != null) {
-                query.addCriteria(ProblemSearchCriteria.forTerm(search));
+                filters.add(ProblemSearchCriteria.forTerm(search));
             }
             long totalItems = 0;
             int totalPages = 0;
             if (cursorMode) {
                 CursorPosition position = decodeCursor(cursor);
-                query.addCriteria(new Criteria().orOperator(
+                filters.add(new Criteria().orOperator(
                     Criteria.where("numericId").gt(position.numericId()),
                     new Criteria().andOperator(
                         Criteria.where("numericId").is(position.numericId()),
                         Criteria.where("_id").gt(position.id())
                     )
                 ));
-            } else {
+            }
+            if (!filters.isEmpty()) {
+                query.addCriteria(new Criteria().andOperator(filters.toArray(Criteria[]::new)));
+            }
+            if (!cursorMode) {
                 totalItems = mongoTemplate.count(query, Problem.class);
                 totalPages = totalItems == 0 ? 0 : (int) Math.ceil((double) totalItems / size);
             }
@@ -179,12 +202,14 @@ public class ProblemController {
             response.put("hasNext", cursorMode ? nextCursor != null : page < totalPages - 1);
             response.put("hasPrevious", cursorMode ? cursorMode : page > 0);
             response.put("nextCursor", nextCursor);
-            if (problemReadCache != null && problemReadCache.listCacheable(
+            if (listCacheAllowed && problemReadCache != null && problemReadCache.listCacheable(
                     difficulty, category, tags, search, cursorMode, page, size)) {
                 problemReadCache.writeList(adminList, page, size, difficulty, response);
             }
 
             return ResponseEntity.ok(response);
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -223,7 +248,11 @@ public class ProblemController {
     }
 
     @GetMapping("/{id}/admin")
-    public ResponseEntity<?> getAdminProblem(@PathVariable String id) {
+    public ResponseEntity<?> getAdminProblem(
+        @PathVariable String id,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
+    ) {
+        User viewer = requireActor();
         Optional<Problem> problem = problemRepository.findById(id);
         if (problem.isEmpty()) {
             try {
@@ -234,6 +263,8 @@ public class ProblemController {
         if (problem.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
+        String activeOrganizationId = resolveOptionalOrganizationContext(viewer, organizationHeader);
+        problemAccessService.requireCanManageProblem(viewer, problem.get(), activeOrganizationId);
         return ResponseEntity.ok(new AdminProblemResponse(problem.get()));
     }
 
@@ -252,10 +283,17 @@ public class ProblemController {
     }
 
     @PostMapping
-    public ResponseEntity<?> addProblem(@Valid @RequestBody Problem problem) {
+    public ResponseEntity<?> addProblem(
+        @Valid @RequestBody Problem problem,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
+    ) {
+        User viewer = requireActor();
+        String activeOrganizationId = resolveOptionalOrganizationContext(viewer, organizationHeader);
+        problemAccessService.requireCanCreateProblem(viewer, activeOrganizationId);
         try {
-
-            if (problem.getNumericId() == null) {
+            // Never allow clients to overwrite an existing problem by supplying its id.
+            problem.setId(null);
+            if (!ProblemAccessService.isAdmin(viewer) || problem.getNumericId() == null) {
                 problem.setNumericId(numericIdAllocator.allocateNext());
             }
             if (problem.getNumericId() <= 0) {
@@ -265,13 +303,19 @@ public class ProblemController {
             if (problem.getAvailability() == null) {
                 problem.setAvailability(ProblemAvailability.PUBLIC);
             }
+            // Client-supplied organizationId is ignored; server context is authoritative.
+            problem.setOrganizationId(visibilityPolicy.normalize(activeOrganizationId));
+            if (viewer.getId() != null) {
+                problem.setCreatedBy(viewer.getId());
+            }
+            problem.setCreatedAt(new java.util.Date());
             submissionValidator.validateProblemTestCases(problem);
             validateExecutionConfig(problem);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
         try {
-            Problem saved = problemRepository.save(problem);
+            Problem saved = problemRepository.insert(problem);
             invalidateProblemReads(saved.getId());
             return ResponseEntity.ok(saved);
         } catch (DuplicateKeyException e) {
@@ -281,32 +325,46 @@ public class ProblemController {
     }
 
     @PatchMapping("/{id}/content")
-    public ResponseEntity<?> updateProblemContent(@PathVariable String id,
-                                                  @RequestBody ProblemContentUpdate update) {
+    public ResponseEntity<?> updateProblemContent(
+        @PathVariable String id,
+        @RequestBody ProblemContentUpdate update,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
+    ) {
+        User viewer = requireActor();
         Optional<Problem> existingOpt = problemRepository.findById(id);
         if (existingOpt.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         try {
             Problem existing = existingOpt.get();
+            String activeOrganizationId = resolveOptionalOrganizationContext(viewer, organizationHeader);
+            problemAccessService.requireCanManageProblem(viewer, existing, activeOrganizationId);
             problemContentService.apply(existing, update);
             Problem saved = problemRepository.save(existing);
             invalidateProblemReads(saved.getId());
             return ResponseEntity.ok(new AdminProblemResponse(saved));
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 
     @PatchMapping("/{id}/execution")
-    public ResponseEntity<?> updateExecutionConfig(@PathVariable String id,
-                                                   @RequestBody ProblemExecutionConfigUpdate update) {
+    public ResponseEntity<?> updateExecutionConfig(
+        @PathVariable String id,
+        @RequestBody ProblemExecutionConfigUpdate update,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
+    ) {
+        User viewer = requireActor();
         Optional<Problem> existingOpt = problemRepository.findById(id);
         if (existingOpt.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         try {
             Problem existing = existingOpt.get();
+            String activeOrganizationId = resolveOptionalOrganizationContext(viewer, organizationHeader);
+            problemAccessService.requireCanManageProblem(viewer, existing, activeOrganizationId);
             ExecutionMode requested = update == null || update.getExecutionMode() == null
                 ? existing.getExecutionMode()
                 : ExecutionMode.fromValue(update.getExecutionMode());
@@ -315,6 +373,8 @@ public class ProblemController {
             Problem saved = problemRepository.save(existing);
             invalidateProblemReads(saved.getId());
             return ResponseEntity.ok(saved);
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -368,6 +428,29 @@ public class ProblemController {
         return userRepository.findByUsername(auth.getName());
     }
 
+    /**
+     * Prefer the persisted user row. When security has authenticated a caller but the
+     * user document is absent (tests / edge cases), synthesize role from authorities
+     * so platform ADMIN checks still work without granting org privileges.
+     */
+    private User requireActor() {
+        Optional<User> found = currentUser();
+        if (found.isPresent()) {
+            return found.get();
+        }
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getName() == null
+            || "anonymousUser".equals(auth.getName())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+        User synthetic = new User();
+        synthetic.setId("auth:" + auth.getName());
+        synthetic.setUsername(auth.getName());
+        synthetic.setAccountStatus("ACTIVE");
+        synthetic.setRole(organizationAccess.isPlatformAdmin(auth) ? "ADMIN" : "USER");
+        return synthetic;
+    }
+
     private void validateExecutionConfig(Problem problem) {
         if (problem.getExecutionMode() == null) {
             problem.setExecutionMode(ExecutionMode.STANDARD_PER_CASE);
@@ -397,10 +480,31 @@ public class ProblemController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteProblem(@PathVariable String id) {
+    public ResponseEntity<?> deleteProblem(
+        @PathVariable String id,
+        @RequestHeader(value = OrganizationAccessService.ORGANIZATION_HEADER, required = false) String organizationHeader
+    ) {
+        User viewer = requireActor();
+        Optional<Problem> existingOpt = problemRepository.findById(id);
+        if (existingOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        String activeOrganizationId = resolveOptionalOrganizationContext(viewer, organizationHeader);
+        problemAccessService.requireCanManageProblem(viewer, existingOpt.get(), activeOrganizationId);
         problemRepository.deleteById(id);
         invalidateProblemReads(id);
         return ResponseEntity.ok().build();
+    }
+
+    private String resolveOptionalOrganizationContext(User viewer, String organizationHeader) {
+        if (!StringUtils.hasText(organizationHeader)) {
+            return null;
+        }
+        if (viewer == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return organizationAccess.requireAuthorizedOrganizationId(authentication, organizationHeader);
     }
 
     private void invalidateProblemReads(String problemId) {

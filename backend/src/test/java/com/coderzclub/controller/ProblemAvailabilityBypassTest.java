@@ -72,8 +72,16 @@ class ProblemAvailabilityBypassTest {
         ReflectionTestUtils.setField(controller, "userRepository", userRepository);
         ReflectionTestUtils.setField(controller, "mongoTemplate", mongoTemplate);
         ReflectionTestUtils.setField(controller, "problemRunService", problemRunService);
-        ProblemAccessService access = new ProblemAccessService(contestAccessService);
+        com.coderzclub.service.OrganizationVisibilityPolicy visibilityPolicy =
+            new com.coderzclub.service.OrganizationVisibilityPolicy(
+                new com.coderzclub.service.OrganizationResourceCompatibility());
+        com.coderzclub.service.OrganizationAccessService organizationAccess =
+            org.mockito.Mockito.mock(com.coderzclub.service.OrganizationAccessService.class);
+        ProblemAccessService access = new ProblemAccessService(
+            contestAccessService, organizationAccess, visibilityPolicy);
         ReflectionTestUtils.setField(controller, "problemAccessService", access);
+        ReflectionTestUtils.setField(controller, "organizationAccess", organizationAccess);
+        ReflectionTestUtils.setField(controller, "visibilityPolicy", visibilityPolicy);
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked")
         ValueOperations<String, String> values = mock(ValueOperations.class);

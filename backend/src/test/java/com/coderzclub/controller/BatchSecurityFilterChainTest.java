@@ -32,6 +32,7 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -81,15 +82,18 @@ class BatchSecurityFilterChainTest {
     }
 
     @Test
-    void coordinatorCannotOpenGlobalAdminRoutes() throws Exception {
-        mockMvc.perform(get("/api/admin/contests").with(user("coord").roles("USER")))
+    void coordinatorCannotOpenPlatformOnlyAdminRoutes() throws Exception {
+        // Contests now allow USER at the filter when X-Organization-Id is used; other
+        // /api/admin/** routes remain platform-admin only.
+        mockMvc.perform(get("/api/admin/users").with(user("coord").roles("USER")))
             .andExpect(status().isForbidden());
     }
 
     @Test
     void studentCannotListEveryBatch() throws Exception {
+        when(batchAccessService.resolveOptionalOrganizationContext(any(), any())).thenReturn(null);
         doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Admin access is required"))
-            .when(batchAccessService).ensureAdmin(any());
+            .when(batchAccessService).ensureCanManageBatchesInContext(any(), eq(null));
         mockMvc.perform(get("/api/admin/batches").with(user("student").roles("USER")))
             .andExpect(status().isForbidden());
         verify(batchService, never()).list(anyInt(), anyInt(), any(), any());
@@ -153,8 +157,9 @@ class BatchSecurityFilterChainTest {
 
     @Test
     void userCannotCreateABatchThroughTheOpenedBatchRoutes() throws Exception {
+        when(batchAccessService.resolveOptionalOrganizationContext(any(), any())).thenReturn(null);
         doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Admin access is required"))
-            .when(batchAccessService).ensureAdmin(any());
+            .when(batchAccessService).ensureCanManageBatchesInContext(any(), eq(null));
         mockMvc.perform(post("/api/admin/batches")
                 .with(user("coord").roles("USER"))
                 .contentType("application/json")

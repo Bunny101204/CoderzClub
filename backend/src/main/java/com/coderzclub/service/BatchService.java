@@ -41,6 +41,10 @@ public class BatchService {
     }
 
     public Batch create(String name, String description, String createdBy) {
+        return create(name, description, createdBy, null);
+    }
+
+    public Batch create(String name, String description, String createdBy, String organizationId) {
         String trimmed = requireName(name);
         Batch batch = new Batch();
         batch.setName(trimmed);
@@ -50,6 +54,7 @@ public class BatchService {
         batch.setCreatedAt(now);
         batch.setUpdatedAt(now);
         batch.setCreatedBy(createdBy);
+        batch.setOrganizationId(normalizeOrganizationId(organizationId));
         return mongoTemplate.save(batch);
     }
 
@@ -89,9 +94,20 @@ public class BatchService {
     }
 
     public Map<String, Object> list(int page, int size, String search, Boolean active) {
+        return list(page, size, search, active, null);
+    }
+
+    /**
+     * When {@code organizationId} is non-null, only that tenant's batches are returned.
+     * When null, legacy platform listing behavior is preserved (no tenant filter).
+     */
+    public Map<String, Object> list(int page, int size, String search, Boolean active, String organizationId) {
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
         Query query = new Query();
+        if (organizationId != null && !organizationId.isBlank()) {
+            query.addCriteria(Criteria.where("organizationId").is(organizationId.trim()));
+        }
         if (search != null && !search.trim().isEmpty()) {
             query.addCriteria(Criteria.where("name").regex("^" + Pattern.quote(search.trim()), "i"));
         }
@@ -133,10 +149,11 @@ public class BatchService {
     }
 
     public List<BatchMember> addMembers(String batchId, List<String> userIds) {
-        requireWritable(batchId);
+        Batch batch = requireWritable(batchId);
         if (userIds == null || userIds.isEmpty()) {
             throw new IllegalArgumentException("userIds is required");
         }
+        String organizationId = normalizeOrganizationId(batch.getOrganizationId());
         List<BatchMember> added = new ArrayList<>();
         for (String rawId : userIds) {
             if (rawId == null || rawId.isBlank()) {
@@ -144,10 +161,7 @@ public class BatchService {
             }
             String userId = rawId.trim();
             User user = mongoTemplate.findById(userId, User.class);
-            if (user == null) {
-                throw new IllegalArgumentException("User not found: " + userId);
-            }
-            if (user.isDeleted()) {
+            if (user == null || user.isDeleted() || !isEligibleBatchMember(organizationId, user.getId())) {
                 throw new IllegalArgumentException("User not found: " + userId);
             }
             BatchMember member = new BatchMember();
@@ -320,13 +334,14 @@ public class BatchService {
     }
 
     public Map<String, Object> importIdentifiers(String batchId, List<String> identifiers) {
-        requireWritable(batchId);
+        Batch batch = requireWritable(batchId);
         if (identifiers == null || identifiers.isEmpty()) {
             throw new IllegalArgumentException("usernames is required");
         }
         if (identifiers.size() > 100) {
             throw new IllegalArgumentException("Import at most 100 students at a time");
         }
+        String organizationId = normalizeOrganizationId(batch.getOrganizationId());
         List<Map<String, Object>> added = new ArrayList<>();
         List<Map<String, Object>> alreadyMembers = new ArrayList<>();
         List<String> notFound = new ArrayList<>();
@@ -340,7 +355,8 @@ public class BatchService {
                 continue;
             }
             User user = findImportUser(token);
-            if (user == null || user.isDeleted()) {
+            // Non-members of an org batch are indistinguishable from missing users.
+            if (user == null || user.isDeleted() || !isEligibleBatchMember(organizationId, user.getId())) {
                 notFound.add(token);
                 continue;
             }
@@ -362,12 +378,13 @@ public class BatchService {
     }
 
     public List<BatchAssignment> addAssignments(String batchId, List<String> problemIds) {
-        requireWritable(batchId);
+        Batch batch = requireWritable(batchId);
         if (problemIds == null || problemIds.isEmpty()) {
             throw new IllegalArgumentException("problemIds is required");
         }
         long current = mongoTemplate.count(Query.query(Criteria.where("batchId").is(batchId)), BatchAssignment.class);
         List<BatchAssignment> added = new ArrayList<>();
+        String batchOrganizationId = normalizeOrganizationId(batch.getOrganizationId());
         for (String rawId : problemIds) {
             if (rawId == null || rawId.isBlank()) {
                 continue;
@@ -375,6 +392,12 @@ public class BatchService {
             Problem problem = resolveProblem(rawId.trim());
             if (problem == null) {
                 throw new IllegalArgumentException("Problem not found: " + rawId);
+            }
+            String problemOrganizationId = normalizeOrganizationId(problem.getOrganizationId());
+            if (problemOrganizationId != null
+                && !java.util.Objects.equals(batchOrganizationId, problemOrganizationId)) {
+                throw new IllegalArgumentException(
+                    "Problem does not belong to this organization: " + problem.getId());
             }
             boolean exists = mongoTemplate.exists(
                 Query.query(Criteria.where("batchId").is(batchId).and("problemId").is(problem.getId())),
@@ -451,14 +474,33 @@ public class BatchService {
     }
 
     public Map<String, Object> searchUsers(String search, int page, int size) {
-        return searchUsers(search, page, size, null);
+        return searchUsers(search, page, size, null, null);
     }
 
     public Map<String, Object> searchUsers(String search, int page, int size, String batchId) {
+        return searchUsers(search, page, size, batchId, null);
+    }
+
+    /**
+     * @param restrictToUserIds {@code null} means unrestricted (platform admin). Empty means no matches.
+     */
+    public Map<String, Object> searchUsers(
+        String search,
+        int page,
+        int size,
+        String batchId,
+        Set<String> restrictToUserIds
+    ) {
         int safeSize = boundSize(size);
         int safePage = Math.max(0, page);
+        if (restrictToUserIds != null && restrictToUserIds.isEmpty()) {
+            return pageResponse("users", List.of(), safePage, safeSize, 0);
+        }
         List<Criteria> filters = new ArrayList<>();
         filters.add(notDeleted());
+        if (restrictToUserIds != null) {
+            filters.add(Criteria.where("_id").in(restrictToUserIds));
+        }
         if (search != null && !search.trim().isEmpty()) {
             String escaped = Pattern.quote(search.trim());
             filters.add(new Criteria().orOperator(
@@ -481,6 +523,17 @@ public class BatchService {
             users.add(row);
         }
         return pageResponse("users", users, safePage, safeSize, total);
+    }
+
+    private boolean isEligibleBatchMember(String organizationId, String userId) {
+        if (organizationId == null) {
+            return true;
+        }
+        return mongoTemplate.exists(
+            Query.query(Criteria.where("organizationId").is(organizationId)
+                .and("userId").is(userId)
+                .and("status").is(com.coderzclub.model.OrganizationMemberStatus.ACTIVE.name())),
+            com.coderzclub.model.OrganizationMember.class);
     }
 
     public static final int ENROLLED_PROBLEM_PREVIEW = 5;
@@ -853,7 +906,15 @@ public class BatchService {
         map.put("createdAt", batch.getCreatedAt());
         map.put("updatedAt", batch.getUpdatedAt());
         map.put("createdBy", batch.getCreatedBy());
+        map.put("organizationId", batch.getOrganizationId());
         return map;
+    }
+
+    private static String normalizeOrganizationId(String organizationId) {
+        if (organizationId == null || organizationId.isBlank()) {
+            return null;
+        }
+        return organizationId.trim();
     }
 
     private static Map<String, Object> safeUser(User user) {
