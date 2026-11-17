@@ -120,7 +120,7 @@ export const getTemplate = (languageId) => {
  * Otherwise use the problem starter only for the language it belongs to,
  * then the default template for the selected language.
  */
-export function chooseStarterCode(languageId, problemStarter, preferredLanguageId = 62) {
+export function chooseStarterCode(languageId, problemStarter, preferredLanguageId = 71) {
   const specific = typeof problemStarter === "string" ? problemStarter : "";
   if (Number(languageId) === Number(preferredLanguageId) && specific.trim()) {
     return specific;

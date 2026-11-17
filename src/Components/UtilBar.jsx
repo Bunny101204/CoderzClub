@@ -54,15 +54,8 @@ function UtilBar() {
           onChange={(e) => c.setLanguageId(Number(e.target.value))}
           className=" w-10% text-black p-2 border rounded bg-white"
         >
-          <option value={50}>C</option>
-          <option value={54}>C++</option>
-          <option value={62}>Java</option>
           <option value={71}>Python</option>
-          <option value={63}>JavaScript</option>
-          <option value={74}>TypeScript</option>
-          <option value={60}>Go</option>
-          <option value={68}>PHP</option>
-          <option value={72}>Ruby</option>
+          <option value={54}>C++</option>
         </select>
         <button className="bg-green-500 rounded-lg px-3 py-1" onClick={handleImportClick}> Import</button>
         <button 

@@ -14,10 +14,21 @@ class LanguageCapabilityCatalogTest {
     @Test
     void catalogContainsOnlyIntentionalEditorLanguages() {
         assertEquals(14, catalog.all().size());
-        assertTrue(catalog.isEnabled(62));
         assertTrue(catalog.isEnabled(71));
         assertTrue(catalog.isEnabled(54));
-        assertTrue(catalog.isEnabled(50));
+        assertFalse(catalog.isEnabled(62));
+        assertFalse(catalog.isEnabled(63));
+        assertFalse(catalog.isEnabled(50));
+    }
+
+    @Test
+    void releaseLanguagesAreLiveProviderVerified() {
+        assertTrue(catalog.get(71).liveProviderVerified());
+        assertTrue(catalog.get(54).liveProviderVerified());
+        assertFalse(catalog.get(62).liveProviderVerified());
+        assertFalse(catalog.get(63).liveProviderVerified());
+        assertTrue(catalog.anyLiveProviderVerified());
+        assertEquals(2, catalog.enabled().size());
     }
 
     @Test
@@ -35,21 +46,20 @@ class LanguageCapabilityCatalogTest {
     void batchStdinIsUnsupportedForEveryCatalogLanguage() {
         for (LanguageCapability capability : catalog.all()) {
             assertFalse(capability.batchStdinProgram());
-            assertFalse(capability.liveProviderVerified());
-            assertTrue(capability.enabled());
             assertTrue(capability.standardPerCase());
             assertFalse(catalog.supports(capability.id(), ExecutionMode.BATCH_STDIN_PROGRAM));
         }
     }
 
     @Test
-    void harnessSupportIsOnlyForJavaPythonCpp() {
-        assertTrue(catalog.supports(62, ExecutionMode.FUNCTION_HARNESS_BATCH));
+    void harnessSupportIsOnlyForEnabledJavaPythonCppWhenEnabled() {
+        assertFalse(catalog.supports(62, ExecutionMode.FUNCTION_HARNESS_BATCH));
         assertTrue(catalog.supports(71, ExecutionMode.FUNCTION_HARNESS_BATCH));
         assertTrue(catalog.supports(54, ExecutionMode.FUNCTION_HARNESS_BATCH));
         assertFalse(catalog.supports(50, ExecutionMode.FUNCTION_HARNESS_BATCH));
         assertFalse(catalog.supports(60, ExecutionMode.FUNCTION_HARNESS_BATCH));
-        assertTrue(catalog.supports(60, ExecutionMode.STANDARD_PER_CASE));
+        assertFalse(catalog.supports(60, ExecutionMode.STANDARD_PER_CASE));
+        assertTrue(catalog.supports(71, ExecutionMode.STANDARD_PER_CASE));
     }
 
     @Test

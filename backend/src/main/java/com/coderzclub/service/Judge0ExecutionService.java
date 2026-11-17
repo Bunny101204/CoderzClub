@@ -541,7 +541,9 @@ public class Judge0ExecutionService {
             throw new IllegalArgumentException("judge0.provider.memory-limit-unit must be KB");
         }
         payload.put("memory_limit", provider.getMemoryLimitKb());
-        if (stdin != null && !stdin.isBlank()) payload.put("stdin", stdin);
+        // Preserve empty and whitespace-only stdin — isBlank() would drop valid cases
+        // like a single space string for string/sliding-window problems.
+        if (stdin != null) payload.put("stdin", stdin);
         return payload;
     }
 
