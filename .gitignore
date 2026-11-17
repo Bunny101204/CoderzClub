@@ -5,6 +5,15 @@
 e2e/.fixtures/*.env
 e2e/.fixtures/*-org.json
 e2e/.fixtures/_seed_mongo_*.js
+e2e/.fixtures/production-live*.json
+
+# Private DSA problem-bank oracles, hidden cases, and import manifests.
+.local/problem-bank/
+
+# Production Playwright evidence can contain authenticated browser traces.
+artifacts/playwright-production/
+playwright-report-production/
+test-results-production/
 
 # Logs
 logs
@@ -33,3 +42,13 @@ dist-ssr
 
 # Maven target
 target/
+.m2-local/
+
+# Local Judge0 isolate scratch / cgroup experiment binaries (never commit)
+tmp-isolate*
+test-results/
+
+# Local ops scratch / pycache (credentials and one-off dumps live under ops/)
+ops/local-artifacts/
+ops/**/__pycache__/
+**/__pycache__/

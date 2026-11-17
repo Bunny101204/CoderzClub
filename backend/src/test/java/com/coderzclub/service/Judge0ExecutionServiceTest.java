@@ -62,6 +62,55 @@ class Judge0ExecutionServiceTest {
     }
 
     @Test
+    void whitespaceOnlyAndEmptyStdinArePreservedInPayload() {
+        SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
+        limits.setMaxExecutionTimeSeconds(10);
+        Judge0ProviderProperties provider = new Judge0ProviderProperties();
+
+        Map<String, Object> space = Judge0ExecutionService.buildPayload(
+            "code", 71, " ", 1, limits, provider);
+        Map<String, Object> spaces = Judge0ExecutionService.buildPayload(
+            "code", 71, "  ", 1, limits, provider);
+        Map<String, Object> empty = Judge0ExecutionService.buildPayload(
+            "code", 71, "", 1, limits, provider);
+        Map<String, Object> missing = Judge0ExecutionService.buildPayload(
+            "code", 71, null, 1, limits, provider);
+
+        assertEquals(" ", space.get("stdin"));
+        assertEquals("  ", spaces.get("stdin"));
+        assertEquals("", empty.get("stdin"));
+        assertFalse(missing.containsKey("stdin"));
+    }
+
+    @Test
+    void leadingTrailingAndInteriorWhitespaceStdinAreNeverDiscarded() {
+        SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
+        limits.setMaxExecutionTimeSeconds(10);
+        Judge0ProviderProperties provider = new Judge0ProviderProperties();
+
+        String leading = "  abca";
+        String trailing = "abca  ";
+        String tabs = "\tabc\t";
+        String mixed = " \nAa\n ";
+
+        assertEquals(leading, Judge0ExecutionService.buildPayload("c", 71, leading, 1, limits, provider).get("stdin"));
+        assertEquals(trailing, Judge0ExecutionService.buildPayload("c", 71, trailing, 1, limits, provider).get("stdin"));
+        assertEquals(tabs, Judge0ExecutionService.buildPayload("c", 71, tabs, 1, limits, provider).get("stdin"));
+        assertEquals(mixed, Judge0ExecutionService.buildPayload("c", 71, mixed, 1, limits, provider).get("stdin"));
+    }
+
+    @Test
+    void outputsMatchTrimsOuterWhitespaceButKeepsInteriorStructure() {
+        assertTrue(Judge0ExecutionService.outputsMatch("3\n", "3", true));
+        assertTrue(Judge0ExecutionService.outputsMatch("a 1\nA 1\n", "a 1\nA 1", true));
+        assertTrue(Judge0ExecutionService.outputsMatch("  2  ", "  2", true));
+        assertFalse(Judge0ExecutionService.outputsMatch("A 1\na 1", "a 1\nA 1", true));
+        assertTrue(Judge0ExecutionService.outputsMatch("No Output", "", false));
+        assertTrue(Judge0ExecutionService.outputsMatch("9223372036854775807", "9223372036854775807", true));
+        assertFalse(Judge0ExecutionService.outputsMatch("1 2 3", "1 2 4", true));
+    }
+
+    @Test
     void harnessPathKeepsSixtySecondCpuCap() {
         SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
         limits.setMaxExecutionTimeSeconds(15);

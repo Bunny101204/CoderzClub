@@ -67,7 +67,7 @@ const Judge0CodeEditor = ({
     const next = Number(value);
     const draftOwnsCode = !propSetEditorCode && Boolean(problemId) && Boolean(user?.id);
     if (!draftOwnsCode && !propSetEditorCode && Number(languageRef.current) !== next) {
-      const template = chooseStarterCode(next, initialCode, propLanguageId !== undefined ? propLanguageId : 62);
+      const template = chooseStarterCode(next, initialCode, propLanguageId !== undefined ? propLanguageId : 71);
       const switched = applyLanguageSwitch({
         previousLanguageId: languageRef.current,
         nextLanguageId: next,
@@ -89,7 +89,7 @@ const Judge0CodeEditor = ({
   };
 
   // Problem starter code belongs to the problem's preferred language. Other languages use their own template.
-  const preferredLanguageId = propLanguageId !== undefined ? propLanguageId : 62;
+  const preferredLanguageId = propLanguageId !== undefined ? propLanguageId : 71;
   const [internalSourceCode, setInternalSourceCode] = useState(() => {
     if (propSetEditorCode) return initialCode;
     const startingLanguage = propLanguageId !== undefined
@@ -1201,20 +1201,9 @@ const Judge0CodeEditor = ({
           onChange={(e) => setLanguageId(Number(e.target.value))}
           className="app-input px-3 py-1 rounded text-sm focus:outline-none"
         >
-          <option value={62}>Java</option>
+          {/* Release-gated: only languages enabled in LanguageCapabilityCatalog. */}
           <option value={71}>Python</option>
           <option value={54}>C++</option>
-          <option value={63}>JavaScript</option>
-          <option value={50}>C</option>
-          <option value={51}>C#</option>
-          <option value={74}>TypeScript</option>
-          <option value={60}>Go</option>
-          <option value={68}>PHP</option>
-          <option value={72}>Ruby</option>
-          <option value={73}>Rust</option>
-          <option value={78}>Kotlin</option>
-          <option value={81}>Scala</option>
-          <option value={83}>Swift</option>
         </select>
 
         {/* Timer */}

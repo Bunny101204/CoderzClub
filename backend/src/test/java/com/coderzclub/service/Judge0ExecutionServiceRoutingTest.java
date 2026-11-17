@@ -63,7 +63,7 @@ class Judge0ExecutionServiceRoutingTest {
             "time", "0.04",
             "memory", "2048"
         );
-        ExecutionOutcome outcome = service.executeTestCases("return input.trim();", 62,
+        ExecutionOutcome outcome = service.executeTestCases("return input_text.strip()", 71,
             List.of(caseOf("a", "a"), caseOf("b", "b")), List.of(),
             ExecutionMode.FUNCTION_HARNESS_BATCH, FunctionHarnessService.FORMAT_VERSION);
         assertEquals(1, service.calls.get());
@@ -73,10 +73,21 @@ class Judge0ExecutionServiceRoutingTest {
 
     @Test
     void harnessDoesNotSilentlyFallBack() {
-        assertThrows(IncompatibleExecutionException.class, () ->
-            service.executeTestCases("public class Main { static void main(String[] a) {} }", 62,
+        IncompatibleExecutionException ex = assertThrows(IncompatibleExecutionException.class, () ->
+            service.executeTestCases("if __name__ == '__main__':\n print(1)\n", 71,
                 List.of(caseOf("a", "a")), List.of(), ExecutionMode.FUNCTION_HARNESS_BATCH,
                 FunctionHarnessService.FORMAT_VERSION));
+        assertTrue(ex.getMessage().contains("FUNCTION_HARNESS_BATCH"));
+        assertEquals(0, service.calls.get());
+    }
+
+    @Test
+    void disabledJavaIsRejectedBeforeProviderCall() {
+        IncompatibleExecutionException ex = assertThrows(IncompatibleExecutionException.class, () ->
+            service.executeTestCases("return input.trim();", 62,
+                List.of(caseOf("a", "a")), List.of(), ExecutionMode.FUNCTION_HARNESS_BATCH,
+                FunctionHarnessService.FORMAT_VERSION));
+        assertTrue(ex.getMessage().contains("not enabled"));
         assertEquals(0, service.calls.get());
     }
 
@@ -86,7 +97,7 @@ class Judge0ExecutionServiceRoutingTest {
             "status", Map.of("id", 13, "description", "Internal Error"),
             "stdout", "CZ1:YQ==\n"
         );
-        ExecutionOutcome outcome = service.executeTestCases("return input.trim();", 62,
+        ExecutionOutcome outcome = service.executeTestCases("return input_text.strip()", 71,
             List.of(caseOf("a", "a")), List.of(),
             ExecutionMode.FUNCTION_HARNESS_BATCH, FunctionHarnessService.FORMAT_VERSION);
         assertEquals(1, service.calls.get());

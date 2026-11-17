@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-const draftKey = "coderzclub:draft:v1:student-1:practice:p1:62";
-const javaStarter = /public class Main/;
+const draftKey = "coderzclub:draft:v1:student-1:practice:p1:71";
+const pythonStarter = /# Your code goes here/;
 
 async function editor(page, { local = null, cloud = null, language = null, status = 503, limitsAfterFailure = null } = {}) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -36,34 +36,34 @@ async function editor(page, { local = null, cloud = null, language = null, statu
   return { source, attempts, submit: page.locator("button.bg-blue-500") };
 }
 
-test("new user receives the Java starter", async ({ page }) => {
+test("new user receives the Python starter", async ({ page }) => {
   const { source } = await editor(page);
-  await expect(source).toHaveValue(javaStarter);
+  await expect(source).toHaveValue(pythonStarter);
 });
 
-test("pristine placeholder initializes the Java starter", async ({ page }) => {
+test("pristine placeholder initializes the Python starter", async ({ page }) => {
   const { source } = await editor(page, { local: { version: 1, code: "", dirty: false, baseRevision: 0 } });
-  await expect(source).toHaveValue(javaStarter);
+  await expect(source).toHaveValue(pythonStarter);
 });
 
-test("unsupported stored language falls back to Java with a starter", async ({ page }) => {
+test("unsupported stored language falls back to Python with a starter", async ({ page }) => {
   const { source } = await editor(page, { language: "999" });
-  await expect(source).toHaveValue(javaStarter);
+  await expect(source).toHaveValue(pythonStarter);
 });
 
-test("unsupported language fallback preserves saved Java and unsupported-language drafts", async ({ page }) => {
-  const unsupportedKey = draftKey.replace(/:62$/, ":999");
+test("unsupported language fallback preserves saved Python and unsupported-language drafts", async ({ page }) => {
+  const unsupportedKey = draftKey.replace(/:71$/, ":999");
   await page.addInitScript(({ unsupportedKey }) => {
     localStorage.setItem(unsupportedKey, JSON.stringify({ version: 1, code: "saved unsupported code", dirty: true }));
   }, { unsupportedKey });
-  const code = "public class Main { /* saved Java */ }";
+  const code = "print('saved python')";
   const { source } = await editor(page, { language: "999", local: { version: 1, code, dirty: true } });
   await expect(source).toHaveValue(code);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).code, draftKey)).toBe(code);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).code, unsupportedKey)).toBe("saved unsupported code");
 });
 
-for (const code of ["", "public class Main { /* saved work */ }"]) {
+for (const code of ["", "print('saved work')"]) {
   test(`saved local draft is preserved: ${code ? "code" : "intentional blank"}`, async ({ page }) => {
     const { source } = await editor(page, { local: {
       version: 1, code, dirty: true, baseRevision: 0, localUpdatedAt: "2026-11-01T00:00:00Z",
@@ -79,7 +79,7 @@ test("saved empty cloud draft is preserved", async ({ page }) => {
 
 test("server failure hides database details and retry retains the operation key", async ({ page }) => {
   const { source, submit, attempts } = await editor(page);
-  await expect(source).toHaveValue(javaStarter);
+  await expect(source).toHaveValue(pythonStarter);
   await submit.click();
   await expect(page.getByText("The submission outcome is uncertain. Retry checks the same attempt and does not start a new one.")).toBeVisible();
   await expect(submit).toBeEnabled();

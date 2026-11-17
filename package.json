@@ -24,6 +24,11 @@
     "test:contest-boundary": "node --test src/contests/contestBoundary.test.js src/contests/contestTime.test.js",
     "test:nav": "node --test src/navigation/mainNav.test.js",
     "test:e2e": "playwright test",
+    "test:problem-bank:guards": "node --test scripts/problem-bank/lib/*.test.js",
+    "problem-bank:verify": "node scripts/problem-bank/seed.mjs --verify-only",
+    "problem-bank:seed": "node scripts/problem-bank/seed.mjs",
+    "problem-bank:validate-judge": "node scripts/problem-bank/validate-judge.mjs",
+    "problem-bank:start-staging": "node scripts/problem-bank/start-local-staging.mjs",
     "test:progress": "node --test src/progress/userProgress.test.js src/Components/bundleProgress.test.js",
     "preview": "vite preview",
     "render:uml": "node scripts/render-uml.cjs"

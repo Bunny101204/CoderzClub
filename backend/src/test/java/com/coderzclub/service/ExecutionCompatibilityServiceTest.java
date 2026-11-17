@@ -22,11 +22,20 @@ class ExecutionCompatibilityServiceTest {
     @Test
     void harnessIncompatibleCodeIsRejected() {
         IncompatibleExecutionException ex = assertThrows(IncompatibleExecutionException.class, () ->
-            service.validate(ExecutionMode.FUNCTION_HARNESS_BATCH, 62,
-                "public class Main { public static void main(String[] a) {} }",
+            service.validate(ExecutionMode.FUNCTION_HARNESS_BATCH, 71,
+                "if __name__ == '__main__':\n  print(1)\n",
                 List.of(new SubmissionJob.TestCase("a", "a", null)), List.of(),
                 FunctionHarnessService.FORMAT_VERSION));
         assertTrue(ex.getMessage().contains("FUNCTION_HARNESS_BATCH"));
+    }
+
+    @Test
+    void disabledLanguagesAreRejectedEvenIfCatalogued() {
+        IncompatibleExecutionException ex = assertThrows(IncompatibleExecutionException.class, () ->
+            service.validate(ExecutionMode.STANDARD_PER_CASE, 62,
+                "public class Main { public static void main(String[] a) {} }",
+                List.of(new SubmissionJob.TestCase("1", "1", null)), List.of(), "v1"));
+        assertTrue(ex.getMessage().contains("not enabled"));
     }
 
     @Test

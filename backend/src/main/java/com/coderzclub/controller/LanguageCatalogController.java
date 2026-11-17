@@ -19,8 +19,9 @@ public class LanguageCatalogController {
     @GetMapping
     public Map<String, Object> list() {
         return Map.of(
-            "liveProviderVerified", false,
-            "languages", catalog.all()
+            "liveProviderVerified", catalog.anyLiveProviderVerified(),
+            "languages", catalog.all(),
+            "enabledLanguages", catalog.enabled()
         );
     }
 }
