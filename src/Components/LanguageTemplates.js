@@ -164,26 +164,13 @@ export const FILE_EXTENSIONS = {
   83: "swift",
 };
 
-// Supported languages for dropdown
+/** Student-selectable languages aligned with LanguageCapabilityCatalog release gating. */
+export const RELEASE_ENABLED_LANGUAGE_IDS = [71, 54];
+
+// Supported languages for dropdown (release-enabled only)
 export const SUPPORTED_LANGUAGES = [
-  { id: 62, name: "Java" },
   { id: 71, name: "Python" },
   { id: 54, name: "C++" },
-  { id: 50, name: "C" },
-  { id: 51, name: "C#" },
-  { id: 63, name: "JavaScript" },
-  { id: 74, name: "TypeScript" },
-  { id: 60, name: "Go" },
-  { id: 68, name: "PHP" },
-  { id: 72, name: "Ruby" },
-  { id: 73, name: "Rust" },
-  { id: 78, name: "Kotlin" },
-  { id: 81, name: "Scala" },
-  { id: 83, name: "Swift" },
 ];
-
-
-
-
 
 

@@ -23,7 +23,7 @@ laptop isolate. Re-enable only after a production-class Judge0 probe passes.
 ## Fixes / tests shipped
 
 1. Judge0 stdin payload preserves `null` (omit), `""`, whitespace-only, leading/trailing, and multiline stdin.
-2. Character-frequency oracle public helper orders by **character code**, with Node regression tests.
+2. Character-frequency ordering contract (character-code ascending) covered by Node regression tests only — no public reusable oracle module.
 3. `LanguageCapabilityCatalog` enables only Python + C++; API rejects other language IDs.
 4. Editor language selectors limited to enabled languages (default Python).
 

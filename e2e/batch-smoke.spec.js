@@ -26,19 +26,20 @@ async function signIn(page, { username, role, id }) {
 test("editor language switch keeps each language draft", async ({ page }) => {
   await page.goto("/editor");
   const editor = page.locator("#codeArea");
-  await expect(editor).toHaveAttribute("data-language", "62");
-  await editor.fill("public class Main { /* student java */ }");
-  await page.locator("select").first().selectOption("71");
+  // Release-gated editor defaults to Python (71); C++ (54) is the other enabled language.
   await expect(editor).toHaveAttribute("data-language", "71");
-  await expect(editor).not.toHaveValue(/public class Main/);
-  await expect(editor).toHaveValue(/# Your code goes here/);
   await editor.fill("print('python draft')");
-  await page.locator("select").first().selectOption("62");
-  await expect(editor).toHaveValue(/student java/);
+  await page.locator("select").first().selectOption("54");
+  await expect(editor).toHaveAttribute("data-language", "54");
+  await expect(editor).not.toHaveValue(/python draft/);
+  await expect(editor).toHaveValue(/Your code goes here|int main|#include/);
+  await editor.fill("#include <bits/stdc++.h>\nint main(){ /* student cpp */ }");
   await page.locator("select").first().selectOption("71");
   await expect(editor).toHaveValue(/python draft/);
+  await page.locator("select").first().selectOption("54");
+  await expect(editor).toHaveValue(/student cpp/);
   await page.reload();
-  await expect(editor).toHaveAttribute("data-language", "71");
+  await expect(editor).toHaveAttribute("data-language", "54");
 });
 
 test("admin batch page manages students from the mocked API", async ({ page }) => {

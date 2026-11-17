@@ -58,8 +58,28 @@ class SubmissionValidationServiceTest {
     }
 
     @Test
-    void goLanguageIsAcceptedForSubmission() {
-        validationService.validateSubmissionRequest("p1", "package main\nfunc main() {}", 60);
+    void goLanguageIsRejectedUntilLiveVerified() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> validationService.validateSubmissionRequest("p1", "package main\nfunc main() {}", 60));
+        assertTrue(ex.getMessage().contains("unsupported"));
+    }
+
+    @Test
+    void pythonLanguageIsAcceptedForSubmission() {
+        validationService.validateSubmissionRequest("p1", "print(1)", 71);
+    }
+
+    @Test
+    void cppLanguageIsAcceptedForSubmission() {
+        validationService.validateSubmissionRequest("p1", "#include <bits/stdc++.h>\nint main(){}", 54);
+    }
+
+    @Test
+    void javaLanguageIsRejectedUntilLiveVerified() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> validationService.validateSubmissionRequest(
+                    "p1", "public class Main { public static void main(String[] a) {} }", 62));
+        assertTrue(ex.getMessage().contains("unsupported"));
     }
 
     @Test

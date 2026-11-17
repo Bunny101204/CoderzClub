@@ -166,11 +166,12 @@ class OrganizationProblemContestAccessTest {
                 .header("X-Organization-Id", orgAId))
             .andExpect(status().isOk());
 
+        // Use a release-enabled language so authorization/non-disclosure wins over language validation.
         mockMvc.perform(post("/api/contests/" + contestAId + "/problems/" + problemAId + "/submission-jobs")
                 .header("Authorization", outsiderToken)
                 .header("Idempotency-Key", "outsider-job-1")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"class Main { public static void main(String[] a){}}\",\"languageId\":62}"))
+                .content("{\"code\":\"print(1)\\n\",\"languageId\":71,\"language\":\"python\"}"))
             .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/contests/" + contestAId + "/leaderboard")
@@ -187,18 +188,18 @@ class OrganizationProblemContestAccessTest {
                 .header("Authorization", outsiderToken)
                 .header("Idempotency-Key", "outsider-practice-1")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"problemId\":\"" + problemAId + "\",\"code\":\"class Main { public static void main(String[] a){}}\",\"languageId\":62,\"language\":\"java\"}"))
+                .content("{\"problemId\":\"" + problemAId + "\",\"code\":\"print(1)\\n\",\"languageId\":71,\"language\":\"python\"}"))
             .andExpect(status().isNotFound());
         mockMvc.perform(post("/api/submissions")
                 .header("Authorization", outsiderToken)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"problemId\":\"" + problemAId + "\",\"code\":\"class Main{}\",\"language\":\"java\",\"languageId\":62,\"statusId\":3}"))
+                .content("{\"problemId\":\"" + problemAId + "\",\"code\":\"print(1)\\n\",\"language\":\"python\",\"languageId\":71,\"statusId\":3}"))
             .andExpect(status().isNotFound());
         mockMvc.perform(get("/api/problems/by-ids").param("ids", problemAId)
                 .header("Authorization", outsiderToken))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isEmpty());
-        mockMvc.perform(get("/api/problems/" + problemAId + "/drafts/62")
+        mockMvc.perform(get("/api/problems/" + problemAId + "/drafts/71")
                 .header("Authorization", outsiderToken))
             .andExpect(status().isNotFound());
 
