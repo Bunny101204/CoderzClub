@@ -10,6 +10,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -36,13 +37,22 @@ class Judge0ExecutionServiceTest {
         limits.setMaxExecutionTimeSeconds(10);
         Judge0ProviderProperties provider = new Judge0ProviderProperties();
         provider.setMemoryLimitKb(512);
+        provider.setMaxCpuTimeLimitSeconds(15);
+        provider.setServerMaxCpuTimeLimitSeconds(15);
+        provider.setWallTimeLimitSeconds(20);
+        provider.setServerMaxWallTimeLimitSeconds(20);
 
         Map<String, Object> payload = Judge0ExecutionService.buildPayload(
             "code", 62, "input", 3, limits, provider);
 
         assertEquals(512, payload.get("memory_limit"));
-        assertEquals(30, payload.get("cpu_time_limit"));
-        assertEquals(30, payload.get("compile_time_limit"));
+        // 10s * 3 cases = 30, but clamped to server-compatible maxCpu 15
+        assertEquals(15, payload.get("cpu_time_limit"));
+        assertEquals(20, payload.get("wall_time_limit"));
+        assertFalse(payload.containsKey("compile_time_limit"));
+        assertEquals(false, payload.get("enable_network"));
+        assertEquals(false, payload.get("enable_per_process_and_thread_time_limit"));
+        assertEquals(false, payload.get("enable_per_process_and_thread_memory_limit"));
     }
 
     @Test
@@ -111,13 +121,38 @@ class Judge0ExecutionServiceTest {
     }
 
     @Test
-    void harnessPathKeepsSixtySecondCpuCap() {
+    void harnessPathClampsToServerCompatibleCpuCap() {
         SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
         limits.setMaxExecutionTimeSeconds(15);
         Judge0ProviderProperties provider = new Judge0ProviderProperties();
         Map<String, Object> payload = Judge0ExecutionService.buildPayload(
             "code", 62, "input", 10, limits, provider);
-        assertEquals(60, payload.get("cpu_time_limit"));
+        assertEquals(15, payload.get("cpu_time_limit"));
+        assertEquals(20, payload.get("wall_time_limit"));
+        assertFalse(payload.containsKey("compile_time_limit"));
+    }
+
+    @Test
+    void standardPerCaseUsesPerCaseBudgetWithinServerMax() {
+        SubmissionLimitsConfig limits = new SubmissionLimitsConfig();
+        limits.setMaxExecutionTimeSeconds(15);
+        Judge0ProviderProperties provider = new Judge0ProviderProperties();
+        Map<String, Object> payload = Judge0ExecutionService.buildPayload(
+            "code", 71, "1\n", 1, limits, provider);
+        assertEquals(15, payload.get("cpu_time_limit"));
+        assertEquals(20, payload.get("wall_time_limit"));
+        assertEquals(262144, payload.get("memory_limit"));
+        assertEquals(false, payload.get("enable_network"));
+    }
+
+    @Test
+    void legacySixtySecondAppCapFailsValidationAgainstStockJudge0() {
+        Judge0ProviderProperties provider = new Judge0ProviderProperties();
+        provider.setMaxCpuTimeLimitSeconds(60);
+        provider.setServerMaxCpuTimeLimitSeconds(15);
+        assertThrows(IllegalStateException.class,
+            () -> com.coderzclub.config.ExecutionTimeoutPolicy.validate(
+                provider, new com.coderzclub.config.WorkerProperties()));
     }
 
     @Test

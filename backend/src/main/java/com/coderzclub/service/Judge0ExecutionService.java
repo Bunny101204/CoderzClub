@@ -534,13 +534,20 @@ public class Judge0ExecutionService {
         Map<String, Object> payload = new HashMap<>();
         payload.put("language_id", languageId);
         payload.put("source_code", code);
+        // Runtime only — Judge0 CE 1.13.1 does not accept compile_time_limit as a
+        // submission field; compile isolate always uses Config::MAX_* limits.
         payload.put("cpu_time_limit", ExecutionTimeoutPolicy.cpuTimeLimitSeconds(
-            limits.getMaxExecutionTimeSeconds(), testcaseCount, provider.getMaxCpuTimeLimitSeconds()));
-        payload.put("compile_time_limit", Math.min(120, Math.max(1, provider.getCompileTimeLimitSeconds())));
+            limits.getMaxExecutionTimeSeconds(), testcaseCount, provider));
+        payload.put("wall_time_limit", ExecutionTimeoutPolicy.effectiveWallTimeSeconds(provider));
         if (!"KB".equalsIgnoreCase(provider.getMemoryLimitUnit())) {
             throw new IllegalArgumentException("judge0.provider.memory-limit-unit must be KB");
         }
-        payload.put("memory_limit", provider.getMemoryLimitKb());
+        payload.put("memory_limit", ExecutionTimeoutPolicy.effectiveMemoryLimitKb(provider));
+        // Hard-disable sandbox escapes regardless of Judge0 ALLOW_* defaults
+        // (upstream defaults ALLOW_ENABLE_NETWORK / per-process ALLOW_* to true).
+        payload.put("enable_network", false);
+        payload.put("enable_per_process_and_thread_time_limit", false);
+        payload.put("enable_per_process_and_thread_memory_limit", false);
         // Preserve empty and whitespace-only stdin — isBlank() would drop valid cases
         // like a single space string for string/sliding-window problems.
         if (stdin != null) payload.put("stdin", stdin);
