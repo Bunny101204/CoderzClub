@@ -22,15 +22,19 @@ public class ExecutionTimeoutValidator {
     @PostConstruct
     void validate() {
         ExecutionTimeoutPolicy.validate(providerProperties, workerProperties);
-        long envelope = ExecutionTimeoutPolicy.executionEnvelopeSeconds(
-            providerProperties.getCompileTimeLimitSeconds(),
-            providerProperties.getMaxCpuTimeLimitSeconds(),
-            providerProperties.getQueueSlackSeconds());
+        long envelope = ExecutionTimeoutPolicy.executionEnvelopeSeconds(providerProperties);
         logger.info(
-            "execution_timeout_envelope compileSeconds={} maxCpuSeconds={} slackSeconds={} envelopeSeconds={} "
-                + "httpTimeoutSeconds={} connectTimeoutSeconds={} leaseSeconds={} heartbeatSeconds={} wait={}",
-            providerProperties.getCompileTimeLimitSeconds(),
-            providerProperties.getMaxCpuTimeLimitSeconds(),
+            "execution_timeout_envelope compileWallSeconds={} runCpuSeconds={} runWallSeconds={} "
+                + "serverMaxCpuSeconds={} serverMaxWallSeconds={} memoryKb={} serverMaxMemoryKb={} "
+                + "slackSeconds={} envelopeSeconds={} httpTimeoutSeconds={} connectTimeoutSeconds={} "
+                + "leaseSeconds={} heartbeatSeconds={} wait={} note=compile_uses_judge0_MAX_limits_not_api_field",
+            providerProperties.getServerMaxWallTimeLimitSeconds(),
+            ExecutionTimeoutPolicy.effectiveMaxCpuSeconds(providerProperties),
+            ExecutionTimeoutPolicy.effectiveWallTimeSeconds(providerProperties),
+            providerProperties.getServerMaxCpuTimeLimitSeconds(),
+            providerProperties.getServerMaxWallTimeLimitSeconds(),
+            ExecutionTimeoutPolicy.effectiveMemoryLimitKb(providerProperties),
+            providerProperties.getServerMaxMemoryLimitKb(),
             providerProperties.getQueueSlackSeconds(),
             envelope,
             providerProperties.getTimeoutSeconds(),
