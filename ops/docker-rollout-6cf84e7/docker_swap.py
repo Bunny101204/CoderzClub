@@ -43,9 +43,10 @@ ROLES = {
             ("8080/tcp", "10.20.0.4", "8080"),
             ("8081/tcp", "10.20.0.4", "8081"),
         ),
-        "readyUrl": "http://127.0.0.1:8081/actuator/health/readiness",
-        "healthUrl": "http://127.0.0.1:8081/actuator/health",
-        "appUrl": "http://127.0.0.1:8080/api/problems/test",
+        # Management/readiness on private management port; functional check on app port.
+        "readyUrl": "http://10.20.0.4:8081/actuator/health/readiness",
+        "healthUrl": "http://10.20.0.4:8081/actuator/health",
+        "appUrl": "http://10.20.0.4:8080/api/problems/test",
         "stopSeconds": 30,
         "requireConcurrency": None,
     },
@@ -59,13 +60,16 @@ ROLES = {
             ("8082/tcp", "10.20.0.7", "8082"),
             ("8083/tcp", "10.20.0.7", "8083"),
         ),
-        "readyUrl": "http://127.0.0.1:8083/actuator/health/readiness",
-        "healthUrl": "http://127.0.0.1:8083/actuator/health",
+        "readyUrl": "http://10.20.0.7:8083/actuator/health/readiness",
+        "healthUrl": "http://10.20.0.7:8083/actuator/health",
         "appUrl": None,
         "stopSeconds": 150,
         "requireConcurrency": "6",
     },
 }
+
+# Stopped live containers are refused unless ALLOW_STOPPED_SOURCE=yes (authorized maintenance).
+STOPPED_SOURCE_STATUSES = frozenset({"exited", "created"})
 
 SAFE_VALUE_KEYS = (
     "APP_CORS_ALLOWED_ORIGINS",
@@ -439,7 +443,12 @@ def _binding_present(record, container_port, host_ip, host_port):
     return False
 
 
-def preflight(record, existing_names, loaded_new_image_id, release, role):
+def allow_stopped_source(environ) -> bool:
+    """True only when operator explicitly authorizes a stopped-source maintenance swap."""
+    return (environ or {}).get("ALLOW_STOPPED_SOURCE", "no") == "yes"
+
+
+def preflight(record, existing_names, loaded_new_image_id, release, role, allow_stopped=False):
     cfg = role_config(role)
     record = record or {}
     release = release or {}
@@ -456,8 +465,18 @@ def preflight(record, existing_names, loaded_new_image_id, release, role):
     expected_current = release.get("currentImageId") or ""
     if not expected_current or record.get("imageId") != expected_current:
         errors.append("live image is not the expected digest; refusing to guess a rollback target")
-    if record.get("status") != "running":
-        errors.append(f"live {role} container is not running")
+    status = record.get("status") or ""
+    if status == "running":
+        pass
+    elif allow_stopped and status in STOPPED_SOURCE_STATUSES:
+        # Authorized maintenance: still require digest/bindings/restart/runtime checks below.
+        pass
+    elif status in STOPPED_SOURCE_STATUSES:
+        errors.append(
+            f"live {role} container is stopped; set ALLOW_STOPPED_SOURCE=yes for authorized maintenance"
+        )
+    else:
+        errors.append(f"live {role} container is not running (status={status!r})")
     if record.get("restart") != "unless-stopped":
         errors.append("restart policy is not unless-stopped")
     if record.get("network") not in {"bridge", "host"} and not str(record.get("network") or "").startswith("container:"):
@@ -535,32 +554,63 @@ def remove_env(path):
 
 
 class SwapState:
-    def __init__(self, parked_id, parked_name):
+    def __init__(self, parked_id, parked_name, source_was_running=True, source_image_id=""):
         self.parked_id = parked_id
         self.parked_name = parked_name
+        self.source_was_running = bool(source_was_running)
+        self.source_image_id = source_image_id or ""
         self.renamed = False
         self.created = False
 
 
 def restore(docker, state, live_name):
+    """Restore the parked original container under live_name.
+
+    Preserves the pre-swap running/stopped state:
+    - source_was_running True  → start if needed, require running after rename
+    - source_was_running False → rename only; never start (maintenance isolation)
+    """
     try:
         if state.created and docker.exists(live_name):
             current_id = docker.container_id(live_name)
             if current_id and current_id != state.parked_id:
-                docker.stop(live_name)
+                if docker.running(live_name):
+                    docker.stop(live_name)
                 docker.remove(live_name)
         if state.renamed and docker.exists(state.parked_name):
-            if not docker.running(state.parked_name):
+            if state.source_was_running and not docker.running(state.parked_name):
                 docker.start(state.parked_name)
             if not docker.exists(live_name):
                 docker.rename(state.parked_name, live_name)
-        return (
-            docker.exists(live_name)
-            and docker.running(live_name)
-            and docker.container_id(live_name) == state.parked_id
-        )
+        if not docker.exists(live_name):
+            return False
+        if docker.container_id(live_name) != state.parked_id:
+            return False
+        if state.source_image_id and docker.image_id(live_name) != state.source_image_id:
+            return False
+        if state.source_was_running:
+            return docker.running(live_name)
+        # Maintenance: original was stopped; must remain stopped after restore.
+        return not docker.running(live_name)
     except Exception:
         return False
+
+
+def _restore_outcome(docker, state, live_name, probe):
+    """Return (restored, restored_state, restored_healthy).
+
+    restored_state is one of: running | stopped | uncertain | none
+    """
+    if not state.renamed and not state.created:
+        return False, "none", False
+    restored = restore(docker, state, live_name)
+    if not restored:
+        return False, "uncertain", False
+    if state.source_was_running:
+        healthy = _wait_ready(probe, timeout=180)
+        return True, "running", bool(healthy)
+    # Intentionally stopped source: do not probe readiness (would imply traffic).
+    return True, "stopped", False
 
 
 def _http_get(url):
@@ -673,27 +723,49 @@ def _container_names():
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
 
 
-def execute_swap(record, existing_names, docker, probe, env_text, directory, loaded_new_image_id, release, role):
+def execute_swap(
+    record,
+    existing_names,
+    docker,
+    probe,
+    env_text,
+    directory,
+    loaded_new_image_id,
+    release,
+    role,
+    allow_stopped=False,
+):
     cfg = role_config(role)
     live = cfg["liveName"]
-    errors = preflight(record, existing_names, loaded_new_image_id, release, role)
+    errors = preflight(
+        record, existing_names, loaded_new_image_id, release, role, allow_stopped=allow_stopped
+    )
     env_filename = release.get("envFilename") or ""
     argv = create_argv(record, release.get("newImageId") or "", os.path.join(directory, env_filename), live)
     errors.extend(preservation_gaps(record, argv))
+    source_was_running = bool(record.get("running"))
     result = {
         "ok": False,
         "healthy": False,
         "restored": False,
         "restoredHealthy": False,
+        "restoredState": "none",
+        "sourceWasRunning": source_was_running,
         "mutated": False,
         "envRemoved": True,
+        "parkedPreserved": False,
         "errors": errors,
         "argv": argv,
         "envSha256": record.get("envSha256"),
     }
     if errors:
         return result
-    state = SwapState(record.get("id"), release.get("parkedName") or "")
+    state = SwapState(
+        record.get("id"),
+        release.get("parkedName") or "",
+        source_was_running=source_was_running,
+        source_image_id=record.get("imageId") or "",
+    )
     env_path = None
     secrets = [env_text]
     parked_name = release.get("parkedName") or ""
@@ -702,7 +774,9 @@ def execute_swap(record, existing_names, docker, probe, env_text, directory, loa
         docker.rename(live, parked_name)
         state.renamed = True
         result["mutated"] = True
-        docker.stop(parked_name)
+        # Source may already be stopped (authorized maintenance); only stop if still running.
+        if docker.running(parked_name):
+            docker.stop(parked_name)
         if docker.running(parked_name):
             raise RuntimeError("previous container is still running")
         docker.create(argv)
@@ -712,17 +786,28 @@ def execute_swap(record, existing_names, docker, probe, env_text, directory, loa
         docker.start(live)
         if not _wait_ready(probe, timeout=180):
             raise RuntimeError("readiness/health timeout")
+        # Old container remains parked under parked_name for rollback (never removed here).
+        result["parkedPreserved"] = docker.exists(parked_name) and not docker.running(parked_name)
+        if not result["parkedPreserved"]:
+            raise RuntimeError("parked previous container was not preserved for rollback")
         result["healthy"] = True
         result["ok"] = True
         return result
     except Exception as exc:
-        result["restored"] = restore(docker, state, live)
+        restored, restored_state, restored_healthy = _restore_outcome(docker, state, live, probe)
+        result["restored"] = restored
+        result["restoredState"] = restored_state
+        result["restoredHealthy"] = restored_healthy
         result["ok"] = False
         result["errors"] = [redact(str(exc), secrets)]
-        if result["restored"]:
-            result["restoredHealthy"] = _wait_ready(probe, timeout=180)
-            if not result["restoredHealthy"]:
-                result["errors"].append("previous container restored but readiness failed")
+        if restored and restored_state == "running" and not restored_healthy:
+            result["errors"].append("previous container restored but readiness failed")
+        elif restored and restored_state == "stopped":
+            result["errors"].append(
+                "previous container restored and left stopped (maintenance isolation)"
+            )
+        elif not restored:
+            result["errors"].append("automatic rollback failed or left container state uncertain")
         return result
     finally:
         if env_path:
@@ -760,7 +845,7 @@ def rollback(docker, new_image_id, parked_name, expected_old_image_id, live_name
     }
 
 
-def dry_run_summary(record, names, release, loaded_image_id, role):
+def dry_run_summary(record, names, release, loaded_image_id, role, allow_stopped=False):
     summary = dict(record)
     # Strip nothing extra; safe_record already redacts secret values.
     summary["containerNames"] = list(names or [])
@@ -771,12 +856,15 @@ def dry_run_summary(record, names, release, loaded_image_id, role):
     summary["image"] = release.get("image") or ""
     summary["expectedCurrentImageId"] = release.get("currentImageId") or ""
     summary["expectedNewImageId"] = release.get("newImageId") or ""
+    summary["allowStoppedSource"] = bool(allow_stopped)
     live = role_config(role)["liveName"]
     summary["preservationGaps"] = preservation_gaps(
         record,
         create_argv(record, release.get("newImageId") or "", "/tmp/" + (release.get("envFilename") or "unset"), live),
     )
-    summary["preflightErrors"] = preflight(record, names, loaded_image_id, release, role)
+    summary["preflightErrors"] = preflight(
+        record, names, loaded_image_id, release, role, allow_stopped=allow_stopped
+    )
     summary["mutation"] = "none"
     return summary
 
@@ -838,6 +926,7 @@ def main(environ=None, hostname=None):
     if parsed["errors"]:
         print(parsed["errors"][0], file=sys.stderr)
         return 2
+    allow_stopped = allow_stopped_source(environ)
     completed = subprocess.run(["docker", "inspect", live], check=False, text=True, capture_output=True)
     if completed.returncode != 0:
         print("docker inspect failed", file=sys.stderr)
@@ -849,7 +938,7 @@ def main(environ=None, hostname=None):
     names = _container_names()
     loaded = _loaded_image_id(parsed["image"]) if parsed["image"] else None
     if mode == "dry-run":
-        summary = dry_run_summary(record, names, parsed, loaded, role)
+        summary = dry_run_summary(record, names, parsed, loaded, role, allow_stopped=allow_stopped)
         print(json.dumps(summary, indent=2, sort_keys=True))
         print("mutation=none")
         return 2 if summary["preflightErrors"] or summary["preservationGaps"] else 0
@@ -868,6 +957,7 @@ def main(environ=None, hostname=None):
             loaded,
             parsed,
             role,
+            allow_stopped=allow_stopped,
         )
     finally:
         remove_env(os.path.join(directory, parsed["envFilename"]))
@@ -879,7 +969,9 @@ def main(environ=None, hostname=None):
     print("ok=" + ("yes" if result.get("ok") else "no"))
     print("healthy=" + ("yes" if result.get("healthy") else "no"))
     print("restored=" + ("yes" if result.get("restored") else "no"))
+    print("restoredState=" + str(result.get("restoredState") or "none"))
     print("restoredHealthy=" + ("yes" if result.get("restoredHealthy") else "no"))
+    print("sourceWasRunning=" + ("yes" if result.get("sourceWasRunning") else "no"))
     print("envRemoved=" + ("yes" if result.get("envRemoved") else "no"))
     print("envSha256=" + str(result.get("envSha256") or ""))
     if result.get("errors"):

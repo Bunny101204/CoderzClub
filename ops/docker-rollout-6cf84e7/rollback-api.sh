@@ -14,6 +14,6 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 test "$(hostname)" = "$EXPECTED_HOSTNAME"
 python3 "$SCRIPT_DIR/docker_swap.py"
 curl --fail --silent --show-error --retry 40 --retry-connrefused --retry-delay 3 --max-time 10 \
-  http://127.0.0.1:8081/actuator/health/readiness
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8081/actuator/health
+  http://10.20.0.4:8081/actuator/health/readiness
+curl --fail --silent --show-error --max-time 10 http://10.20.0.4:8081/actuator/health
 echo "API_ROLLBACK_HEALTH_OK"
