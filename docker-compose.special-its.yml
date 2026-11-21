@@ -1,0 +1,103 @@
+# Isolated MongoDB fixtures for special backend ITs only.
+# Does NOT bind or modify the developer Mongo on 127.0.0.1:27017.
+# Named volumes are project-scoped; never reuse prod/dev volumes.
+#
+#   docker compose -p coderzclub-special-its -f docker-compose.special-its.yml up -d --wait
+#   docker compose -p coderzclub-special-its -f docker-compose.special-its.yml down -v
+#
+# Ports: 27018 (replica set rs0), 27019 (auth / privilege)
+
+name: coderzclub-special-its
+
+services:
+  mongo-rs:
+    image: mongo:7.0
+    container_name: coderzclub-special-mongo-rs
+    ports:
+      - "127.0.0.1:27018:27018"
+    volumes:
+      - coderzclub_special_rs_data:/data/db
+    command:
+      - mongod
+      - --replSet
+      - rs0
+      - --port
+      - "27018"
+      - --bind_ip_all
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27018", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  mongo-rs-init:
+    image: mongo:7.0
+    container_name: coderzclub-special-mongo-rs-init
+    network_mode: service:mongo-rs
+    depends_on:
+      mongo-rs:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - bash
+      - -lc
+      - |
+        set -e
+        mongosh --port 27018 --quiet --eval '
+          try {
+            const s = rs.status();
+            if (s && s.ok && s.myState === 1) { quit(0); }
+          } catch (e) {}
+          rs.initiate({
+            _id: "rs0",
+            members: [{ _id: 0, host: "127.0.0.1:27018" }]
+          });
+        '
+        for i in $$(seq 1 40); do
+          state=$$(mongosh --port 27018 --quiet --eval 'try { rs.status().myState } catch (e) { 0 }' || echo 0)
+          if [ "$$state" = "1" ]; then
+            echo "replica set PRIMARY ready on 127.0.0.1:27018"
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "replica set failed to become PRIMARY" >&2
+        exit 1
+
+  mongo-auth:
+    image: mongo:7.0
+    container_name: coderzclub-special-mongo-auth
+    ports:
+      - "127.0.0.1:27019:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: localroot
+      MONGO_INITDB_ROOT_PASSWORD: localroot-only
+    volumes:
+      - coderzclub_special_auth_data:/data/db
+      - ./ops/special-its/mongo-auth-init.js:/docker-entrypoint-initdb.d/01-users.js:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "-u",
+          "localroot",
+          "-p",
+          "localroot-only",
+          "--authenticationDatabase",
+          "admin",
+          "--quiet",
+          "--eval",
+          "db.adminCommand('ping').ok"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  coderzclub_special_rs_data:
+    name: coderzclub_special_rs_data
+  coderzclub_special_auth_data:
+    name: coderzclub_special_auth_data

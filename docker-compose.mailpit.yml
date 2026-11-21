@@ -1,0 +1,21 @@
+# Local SMTP capture for auth email development and Mailpit IT.
+# Does not touch production or Atlas.
+#
+#   docker compose -p coderzclub-mailpit -f docker-compose.mailpit.yml up -d
+#   UI:  http://127.0.0.1:8025
+#   SMTP: 127.0.0.1:1025 (no auth)
+#
+# Cleanup when finished:
+#   docker compose -p coderzclub-mailpit -f docker-compose.mailpit.yml down -v
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: coderzclub-mailpit
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    restart: unless-stopped

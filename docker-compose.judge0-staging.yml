@@ -1,0 +1,79 @@
+name: coderzclub-staging-judge0
+
+# Secure staging only. No cgroup-disabling patch is permitted here.
+services:
+  judge-db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: ${JUDGE0_DB_PASSWORD:?missing JUDGE0_DB_PASSWORD}
+    volumes: [judge0-staging-pg:/var/lib/postgresql/data]
+    networks: [judge0]
+
+  judge-redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    networks: [judge0]
+
+  judge-server:
+    image: judge0/judge0:1.13.1
+    command: ["./scripts/server"]
+    depends_on: [judge-db, judge-redis]
+    environment:
+      REDIS_HOST: judge-redis
+      POSTGRES_HOST: judge-db
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: ${JUDGE0_DB_PASSWORD:?missing JUDGE0_DB_PASSWORD}
+      SECRET_KEY_BASE: ${JUDGE0_SECRET_KEY_BASE:?missing JUDGE0_SECRET_KEY_BASE}
+      ENABLE_WAIT_RESULT: "true"
+      ENABLE_NETWORK: "false"
+      ALLOW_ENABLE_NETWORK: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      # Keep stock isolate --cg path; do not raise without matching worker caps.
+      MAX_CPU_TIME_LIMIT: "15"
+      MAX_WALL_TIME_LIMIT: "20"
+      MAX_MEMORY_LIMIT: "512000"
+      RAILS_ENV: production
+      RAILS_MAX_THREADS: "2"
+      RAILS_SERVER_PROCESSES: "1"
+      COUNT: "1"
+    ports: ["2358:2358"]
+    privileged: true
+    networks: [judge0]
+
+  judge-worker:
+    image: judge0/judge0:1.13.1
+    command: ["./scripts/workers"]
+    depends_on: [judge-db, judge-redis, judge-server]
+    environment:
+      REDIS_HOST: judge-redis
+      POSTGRES_HOST: judge-db
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: ${JUDGE0_DB_PASSWORD:?missing JUDGE0_DB_PASSWORD}
+      SECRET_KEY_BASE: ${JUDGE0_SECRET_KEY_BASE:?missing JUDGE0_SECRET_KEY_BASE}
+      ENABLE_WAIT_RESULT: "true"
+      ENABLE_NETWORK: "false"
+      ALLOW_ENABLE_NETWORK: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      MAX_CPU_TIME_LIMIT: "15"
+      MAX_WALL_TIME_LIMIT: "20"
+      MAX_MEMORY_LIMIT: "512000"
+      RAILS_ENV: production
+      COUNT: "1"
+    privileged: true
+    networks: [judge0]
+
+volumes:
+  judge0-staging-pg:
+
+networks:
+  judge0:

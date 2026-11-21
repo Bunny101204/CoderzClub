@@ -1,0 +1,51 @@
+name: coderzclub-staging-infra
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?missing MONGO_ROOT_PASSWORD}
+    volumes:
+      - coderzclub-staging-mongo:/data/db
+    ports:
+      - "27017:27017"
+
+  mongo-init:
+    image: mongo:7
+    depends_on: [mongo]
+    environment:
+      MONGO_REPLICA_HOST: ${MONGO_REPLICA_HOST:?missing MONGO_REPLICA_HOST}
+    restart: "no"
+    entrypoint: ["bash", "-lc"]
+    command: >-
+      until mongosh --host mongo:27017 --quiet --eval 'db.adminCommand({ping:1}).ok' | grep 1; do sleep 2; done;
+      mongosh --host mongo:27017 --quiet --eval
+      'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:process.env.MONGO_REPLICA_HOST+":27017"}]}) }'
+
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?missing REDIS_PASSWORD}"]
+    volumes:
+      - coderzclub-staging-redis:/data
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?missing RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?missing RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:?missing RABBITMQ_VHOST}
+    command: ["sh", "-c", "rabbitmq-plugins enable --offline rabbitmq_prometheus && rabbitmq-server"]
+    volumes:
+      - coderzclub-staging-rabbitmq:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  coderzclub-staging-mongo:
+  coderzclub-staging-redis:
+  coderzclub-staging-rabbitmq:
