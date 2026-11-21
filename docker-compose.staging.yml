@@ -1,0 +1,123 @@
+name: coderzclub-staging
+
+# Staging application stack only. Judge0 is intentionally external: it must run
+# on a separately controlled Linux host with secure isolate cgroup enforcement.
+services:
+  api:
+    build: ./backend
+    environment:
+      SPRING_PROFILES_ACTIVE: api
+      MONGODB_URI: ${MONGODB_URI:?set staging MONGODB_URI}
+      SPRING_DATA_MONGODB_URI: ${MONGODB_URI:?set staging MONGODB_URI}
+      SPRING_DATA_MONGODB_DATABASE: ${SPRING_DATA_MONGODB_DATABASE:?set coderzclub_staging database}
+      JWT_SECRET: ${JWT_SECRET:?set staging JWT_SECRET}
+      APP_REQUIRE_SECURE_SECRETS: "true"
+      JUDGE0_API_URL: ${JUDGE0_API_URL:?set private staging Judge0 URL}
+      JUDGE0_AUTH_MODE: ${JUDGE0_AUTH_MODE:?set staging Judge0 auth mode}
+      JUDGE0_API_KEY: ${JUDGE0_API_KEY:-}
+      JUDGE0_WAIT: "true"
+      JUDGE0_TIMEOUT_SECONDS: "120"
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: "6379"
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD:?set staging Redis password}
+      SPRING_REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?set staging RabbitMQ username}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set staging RabbitMQ password}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:?set staging RabbitMQ vhost}
+      APP_BACKEND_URL: ${APP_BACKEND_URL:?set staging backend URL}
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:?set staging frontend URL}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:?set staging CORS origin}
+      SPRING_MAIL_ENABLED: ${SPRING_MAIL_ENABLED:-false}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      APP_EMAIL_FROM: ${APP_EMAIL_FROM:-}
+      MANAGEMENT_HEALTH_MAIL_ENABLED: ${MANAGEMENT_HEALTH_MAIL_ENABLED:-false}
+      SUBMISSION_LIMIT_REDIS_FAIL_OPEN: "false"
+      SUBMISSION_QUEUE_NAME: ${SUBMISSION_QUEUE_NAME:?set staging submission queue}
+      SUBMISSION_QUEUE_EXCHANGE: ${SUBMISSION_QUEUE_EXCHANGE:?set staging submission exchange}
+      SUBMISSION_QUEUE_RETRY_NAME: ${SUBMISSION_QUEUE_RETRY_NAME:?set staging submission retry queue}
+      SUBMISSION_QUEUE_DLQ_NAME: ${SUBMISSION_QUEUE_DLQ_NAME:?set staging submission DLQ}
+      CONTEST_RUN_QUEUE_NAME: ${CONTEST_RUN_QUEUE_NAME:?set staging contest-run queue}
+      CONTEST_RUN_QUEUE_EXCHANGE: ${CONTEST_RUN_QUEUE_EXCHANGE:?set staging contest-run exchange}
+      CONTEST_GLOBAL_ENABLED: "false"
+      APP_CUSTOM_DOMAINS_PUBLIC_RESOLUTION_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${STAGING_API_PORT:-8080}:8080"
+      - "127.0.0.1:${STAGING_API_MANAGEMENT_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    environment:
+      SPRING_PROFILES_ACTIVE: worker
+      MONGODB_URI: ${MONGODB_URI:?set staging MONGODB_URI}
+      SPRING_DATA_MONGODB_URI: ${MONGODB_URI:?set staging MONGODB_URI}
+      SPRING_DATA_MONGODB_DATABASE: ${SPRING_DATA_MONGODB_DATABASE:?set coderzclub_staging database}
+      JWT_SECRET: ${JWT_SECRET:?set staging JWT_SECRET}
+      APP_REQUIRE_SECURE_SECRETS: "true"
+      JUDGE0_API_URL: ${JUDGE0_API_URL:?set private staging Judge0 URL}
+      JUDGE0_AUTH_MODE: ${JUDGE0_AUTH_MODE:?set staging Judge0 auth mode}
+      JUDGE0_API_KEY: ${JUDGE0_API_KEY:-}
+      JUDGE0_WAIT: "true"
+      JUDGE0_TIMEOUT_SECONDS: "120"
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: "6379"
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD:?set staging Redis password}
+      SPRING_REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?set staging RabbitMQ username}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set staging RabbitMQ password}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:?set staging RabbitMQ vhost}
+      WORKER_ENABLED: "true"
+      WORKER_MAX_GLOBAL_JUDGE0_CONCURRENCY: ${WORKER_MAX_GLOBAL_JUDGE0_CONCURRENCY:-2}
+      SUBMISSION_LIMIT_REDIS_FAIL_OPEN: "false"
+      SUBMISSION_QUEUE_NAME: ${SUBMISSION_QUEUE_NAME:?set staging submission queue}
+      SUBMISSION_QUEUE_EXCHANGE: ${SUBMISSION_QUEUE_EXCHANGE:?set staging submission exchange}
+      SUBMISSION_QUEUE_RETRY_NAME: ${SUBMISSION_QUEUE_RETRY_NAME:?set staging submission retry queue}
+      SUBMISSION_QUEUE_DLQ_NAME: ${SUBMISSION_QUEUE_DLQ_NAME:?set staging submission DLQ}
+      CONTEST_RUN_QUEUE_NAME: ${CONTEST_RUN_QUEUE_NAME:?set staging contest-run queue}
+      CONTEST_RUN_QUEUE_EXCHANGE: ${CONTEST_RUN_QUEUE_EXCHANGE:?set staging contest-run exchange}
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set staging Redis password}"]
+    volumes:
+      - coderzclub-staging-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set staging Redis password}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?set staging RabbitMQ username}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set staging RabbitMQ password}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:?set staging RabbitMQ vhost}
+    volumes:
+      - coderzclub-staging-rabbitmq-data:/var/lib/rabbitmq
+    command: ["sh", "-c", "rabbitmq-plugins enable --offline rabbitmq_prometheus && rabbitmq-server"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  coderzclub-staging-redis-data:
+  coderzclub-staging-rabbitmq-data:

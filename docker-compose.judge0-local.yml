@@ -1,0 +1,89 @@
+# LOCAL DEMO ONLY — not for production, staging GCP, or Cloudflare paths.
+#   docker compose -p coderzclub-judge0 -f docker-compose.judge0-local.yml up -d
+#
+# Stock judge0/judge0:1.13.1 requires cgroup v1 for isolate --cg.
+# On Docker Desktop cgroup v2, do NOT disable --cg in any image you plan to
+# promote. See docs/production-readiness/JUDGE0_SANDBOX.md for durable options.
+# Optional insecure local patch (explicit opt-in only):
+#   docker exec -e CODERZCLUB_ALLOW_INSECURE_LOCAL_JUDGE0=1 -u root <server|worker> bash /tmp/patch-judge0-no-cgroup.sh
+services:
+  judge-db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: local-judge-only
+    volumes:
+      - judge0_pg:/var/lib/postgresql/data
+    networks: [judge0]
+    restart: unless-stopped
+
+  judge-redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    networks: [judge0]
+    restart: unless-stopped
+
+  judge-server:
+    image: judge0/judge0:1.13.1
+    command: ["./scripts/server"]
+    depends_on: [judge-db, judge-redis]
+    environment:
+      REDIS_HOST: judge-redis
+      POSTGRES_HOST: judge-db
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: local-judge-only
+      SECRET_KEY_BASE: local-demo-judge-secret-key-base-0123456789-0123456789
+      ENABLE_WAIT_RESULT: "true"
+      ENABLE_NETWORK: "false"
+      ALLOW_ENABLE_NETWORK: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      MAX_CPU_TIME_LIMIT: "15"
+      MAX_WALL_TIME_LIMIT: "20"
+      MAX_MEMORY_LIMIT: "512000"
+      RAILS_ENV: production
+      RAILS_MAX_THREADS: "2"
+      RAILS_SERVER_PROCESSES: "1"
+      COUNT: "1"
+    ports:
+      - "127.0.0.1:2358:2358"
+    privileged: true
+    networks: [judge0]
+    restart: unless-stopped
+
+  judge-worker:
+    image: judge0/judge0:1.13.1
+    command: ["./scripts/workers"]
+    depends_on: [judge-db, judge-redis, judge-server]
+    environment:
+      REDIS_HOST: judge-redis
+      POSTGRES_HOST: judge-db
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: local-judge-only
+      SECRET_KEY_BASE: local-demo-judge-secret-key-base-0123456789-0123456789
+      ENABLE_WAIT_RESULT: "true"
+      ENABLE_NETWORK: "false"
+      ALLOW_ENABLE_NETWORK: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "false"
+      ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      ALLOW_ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "false"
+      MAX_CPU_TIME_LIMIT: "15"
+      MAX_WALL_TIME_LIMIT: "20"
+      MAX_MEMORY_LIMIT: "512000"
+      RAILS_ENV: production
+      COUNT: "1"
+    privileged: true
+    networks: [judge0]
+    restart: unless-stopped
+
+networks:
+  judge0:
+
+volumes:
+  judge0_pg:

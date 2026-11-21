@@ -1,0 +1,37 @@
+# Isolated performance stack — never share volumes with developer or production DBs.
+#
+#   docker compose -p coderzclub-perf -f docker-compose.perf.yml up -d --wait
+# Cleanup:
+#   docker compose -p coderzclub-perf -f docker-compose.perf.yml down -v
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: coderzclub-perf-mongo
+    ports:
+      - "127.0.0.1:27027:27017"
+    volumes:
+      - coderzclub_perf_mongo_data:/data/db
+  redis:
+    image: redis:7.2
+    container_name: coderzclub-perf-redis
+    ports:
+      - "127.0.0.1:6389:6379"
+  rabbit:
+    image: rabbitmq:3.13-management
+    container_name: coderzclub-perf-rabbit
+    ports:
+      - "127.0.0.1:5682:5672"
+      - "127.0.0.1:15682:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: coderzclub-perf-mailpit
+    ports:
+      - "127.0.0.1:1125:1025"
+      - "127.0.0.1:8125:8025"
+
+volumes:
+  coderzclub_perf_mongo_data:
