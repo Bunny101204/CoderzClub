@@ -14,8 +14,8 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 test "$(hostname)" = "$EXPECTED_HOSTNAME"
 python3 "$SCRIPT_DIR/docker_swap.py"
 curl --fail --silent --show-error --retry 40 --retry-connrefused --retry-delay 3 --max-time 10 \
-  http://127.0.0.1:8083/actuator/health/readiness
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8083/actuator/health
+  http://10.20.0.7:8083/actuator/health/readiness
+curl --fail --silent --show-error --max-time 10 http://10.20.0.7:8083/actuator/health
 conc=$(docker inspect coderzclub-worker --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^WORKER_MAX_GLOBAL_JUDGE0_CONCURRENCY=//p' | head -n1)
 test "$conc" = "6"
 echo "WORKER_ROLLBACK_HEALTH_OK concurrency=$conc"
