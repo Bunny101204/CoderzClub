@@ -8,6 +8,7 @@ import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.function.Function;
@@ -19,6 +20,26 @@ public class JwtUtil {
 
     @Value("${jwt.expiration}")
     private long jwtExpirationMs;
+
+    /**
+     * Cached HMAC key. Recreating {@code Keys.hmacShaKeyFor(...)} on every request
+     * caused monitor contention under browse load (see local capacity investigation).
+     */
+    private volatile SecretKey signingKey;
+
+    private SecretKey signingKey() {
+        SecretKey local = signingKey;
+        if (local == null) {
+            synchronized (this) {
+                local = signingKey;
+                if (local == null) {
+                    local = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+                    signingKey = local;
+                }
+            }
+        }
+        return local;
+    }
 
     public String generateToken(String username, String role) {
         return generateToken(null, username, role);
@@ -34,7 +55,7 @@ public class JwtUtil {
             builder.claim("uid", userId);
         }
         return builder
-                .signWith(Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8)), SignatureAlgorithm.HS512)
+                .signWith(signingKey(), SignatureAlgorithm.HS512)
                 .compact();
     }
 
@@ -67,21 +88,21 @@ public class JwtUtil {
     private Claims extractAllClaims(String token) {
         String normalizedToken = token == null ? null : token.trim();
         return Jwts.parserBuilder()
-                .setSigningKey(Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8)))
+                .setSigningKey(signingKey())
                 .build()
                 .parseClaimsJws(normalizedToken)
                 .getBody();
     }
 
     public boolean isTokenValid(String token, String username) {
-        JwtIdentity identity = extractIdentity(token);
-        return identity.username() != null
-            && identity.username().equals(username)
-            && !isTokenExpired(token);
-    }
-
-    private boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
+        // Single parse: previous path re-parsed claims up to three times per request.
+        Claims claims = extractAllClaims(token);
+        String subject = claims.getSubject();
+        Date expiration = claims.getExpiration();
+        return subject != null
+            && subject.equals(username)
+            && expiration != null
+            && expiration.after(new Date());
     }
 
     private static String uidFrom(Claims claims) {
