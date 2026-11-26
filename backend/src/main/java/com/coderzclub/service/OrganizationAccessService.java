@@ -59,9 +59,13 @@ public class OrganizationAccessService {
         if (authentication == null || authentication.getName() == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
         }
-        return userRepository.findByUsername(authentication.getName())
+        // Prefer the User already loaded by JwtFilter for this request (avoids a second
+        // Mongo round-trip on every org-scoped browse call under concurrent load).
+        return com.coderzclub.config.AuthenticatedUser.current(userRepository)
             .filter(user -> !user.isDeleted())
             .filter(User::canAuthenticate)
+            .filter(user -> user.getUsername() != null
+                && user.getUsername().equalsIgnoreCase(authentication.getName()))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated"));
     }
 
